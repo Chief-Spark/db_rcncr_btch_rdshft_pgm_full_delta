@@ -1,0 +1,10 @@
+  
+#Experian aditional rules
+.scannerwork/
+target/
+*.classpath
+*.project
+.settings/
+*.bak
+*.orig
+*.7z

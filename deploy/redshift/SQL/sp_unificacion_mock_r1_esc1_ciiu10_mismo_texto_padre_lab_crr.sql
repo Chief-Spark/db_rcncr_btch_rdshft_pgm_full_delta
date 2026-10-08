@@ -1,0 +1,121 @@
+-- R1 Esc1 — CIIU 10, mismo texto distinto tipo
+-- MODO MOCK — lee v_mock_*/bdm_stage; NO usa edf_views ni v_xpm_*
+-- Escenario: Padre LAB/CRR + más entidades reportan
+-- Fuente: bdm_stage → bdm_tempo.v_mock_* | Salida: bdm_datos.unificacion_direccion_mock | MODO MOCK
+-- Prerequisito: sp_unificacion_mock_r1_preparar_insumo
+-- Generado: tools/gen_unificacion_mock_sps.py (espejo mock)
+
+CREATE OR REPLACE PROCEDURE bdm_datos.sp_unificacion_mock_r1_esc1_ciiu10_mismo_texto_padre_lab_crr(
+    p_modo VARCHAR,   -- FULL | DELTA (modo efectivo de la corrida)
+    p_lote INTEGER    -- Lote_Corrida externo (reemplaza el 1 hardcodeado)
+)
+NONATOMIC
+LANGUAGE plpgsql
+AS $$
+BEGIN
+
+  DROP TABLE IF EXISTS bdm_tempo.stg_mock_regla1_scored;
+  DROP TABLE IF EXISTS bdm_tempo.stg_mock_regla1_max;
+  DROP TABLE IF EXISTS bdm_tempo.stg_mock_regla1_ganador;
+  DROP TABLE IF EXISTS bdm_tempo.stg_mock_regla1_pares;
+
+  CREATE TABLE bdm_tempo.stg_mock_regla1_scored
+  DISTSTYLE KEY DISTKEY(id_buro_persona)
+  SORTKEY(id_buro_persona, texto_ubicacion)
+  AS
+  SELECT *,
+    'ESC1' AS escenario,
+    CASE WHEN tipo_direccion IN ('LAB','CRR') THEN 100000 ELSE 0 END + numero_entidades_reportan AS score,
+    ROW_NUMBER() OVER (
+      PARTITION BY id_buro_persona, texto_ubicacion, cod_dw_ciudad
+      ORDER BY CASE WHEN tipo_direccion IN ('LAB','CRR') THEN 100000 ELSE 0 END + numero_entidades_reportan DESC, cod_dw_persona_ubic DESC
+    ) AS orden
+  FROM bdm_tempo.stg_mock_regla1_insumo
+  WHERE cod_act_econo_ciiu_fte = '10';
+
+  CREATE TABLE bdm_tempo.stg_mock_regla1_max
+  DISTSTYLE KEY DISTKEY(id_buro_persona)
+  AS
+  SELECT id_buro_persona, texto_ubicacion, cod_dw_ciudad, escenario, MAX(score) AS max_score
+  FROM bdm_tempo.stg_mock_regla1_scored
+  GROUP BY 1, 2, 3, 4;
+
+  CREATE TABLE bdm_tempo.stg_mock_regla1_ganador
+  DISTSTYLE KEY DISTKEY(id_buro_persona)
+  AS
+  SELECT m.id_buro_persona, m.texto_ubicacion, m.cod_dw_ciudad, m.escenario
+  FROM bdm_tempo.stg_mock_regla1_max m
+  JOIN bdm_tempo.stg_mock_regla1_scored s
+    ON s.id_buro_persona = m.id_buro_persona
+   AND s.texto_ubicacion = m.texto_ubicacion
+   AND s.cod_dw_ciudad = m.cod_dw_ciudad
+   AND s.escenario = m.escenario
+   AND s.score = m.max_score
+  GROUP BY 1, 2, 3, 4
+  HAVING COUNT(*) = 1;
+
+  CREATE TABLE bdm_tempo.stg_mock_regla1_pares
+  DISTSTYLE KEY DISTKEY(cod_dw_persona_ubic)
+  AS
+  SELECT hijo.cod_dw_persona_ubic, padre.cod_dw_persona_ubic AS cod_dw_direccion_unificada
+  FROM bdm_tempo.stg_mock_regla1_scored padre
+  JOIN bdm_tempo.stg_mock_regla1_ganador g
+    ON g.id_buro_persona = padre.id_buro_persona
+   AND g.texto_ubicacion = padre.texto_ubicacion
+   AND g.cod_dw_ciudad = padre.cod_dw_ciudad
+   AND g.escenario = padre.escenario
+  JOIN bdm_tempo.stg_mock_regla1_scored hijo
+    ON padre.id_buro_persona = hijo.id_buro_persona
+   AND padre.texto_ubicacion = hijo.texto_ubicacion
+   AND padre.cod_dw_ciudad = hijo.cod_dw_ciudad
+   AND padre.escenario = hijo.escenario
+   AND hijo.orden > 1
+   AND padre.cod_dw_tipo_ubicacion_dir <> hijo.cod_dw_tipo_ubicacion_dir
+  WHERE padre.orden = 1;
+
+  -- Persistencia condicional al modo (Tarea 6.1, Req 5.1..5.6).
+  -- 1) Materializar el resultado de la regla (SELECT DISTINCT, Req 5.5).
+  DROP TABLE IF EXISTS bdm_tempo.sp_unificacion_mock_r1_esc1_ciiu10_mismo_texto_padre_lab_crr_persist;
+  CREATE TABLE bdm_tempo.sp_unificacion_mock_r1_esc1_ciiu10_mismo_texto_padre_lab_crr_persist
+  DISTSTYLE KEY DISTKEY(cod_dw_persona_ubic)
+  AS
+  SELECT DISTINCT
+    cod_dw_persona_ubic AS cod_dw_persona_ubic,
+    cod_dw_direccion_unificada AS cod_dw_direccion_unificada,
+    1 AS unifica_atributos,
+    CURRENT_DATE AS fecha_unificacion,
+    p_lote /* Lote_Corrida externo */ AS lote,
+    1 AS severidad,
+    CURRENT_USER AS usuario_bd
+  FROM bdm_tempo.stg_mock_regla1_pares;
+
+  IF p_modo = 'FULL' THEN
+    -- FULL: append (el TRUNCATE lo hizo el orquestador una vez).
+    INSERT INTO bdm_datos.unificacion_direccion_mock
+      (cod_dw_persona_ubic, cod_dw_direccion_unificada, unifica_atributos, fecha_unificacion, lote, severidad, usuario_bd)
+    SELECT DISTINCT cod_dw_persona_ubic, cod_dw_direccion_unificada, unifica_atributos, fecha_unificacion, lote, severidad, usuario_bd
+    FROM bdm_tempo.sp_unificacion_mock_r1_esc1_ciiu10_mismo_texto_padre_lab_crr_persist;
+  ELSE
+    -- DELTA UPSERT (DELETE+INSERT): cluster Redshift no acepta alias en MERGE.
+    -- Misma Clave_Unificacion; sin truncar tabla completa (Req 5.1, 5.2, 5.6).
+    DELETE FROM bdm_datos.unificacion_direccion_mock
+    USING bdm_tempo.sp_unificacion_mock_r1_esc1_ciiu10_mismo_texto_padre_lab_crr_persist s
+    WHERE bdm_datos.unificacion_direccion_mock.cod_dw_persona_ubic = s.cod_dw_persona_ubic
+      AND bdm_datos.unificacion_direccion_mock.cod_dw_direccion_unificada = s.cod_dw_direccion_unificada;
+
+    INSERT INTO bdm_datos.unificacion_direccion_mock
+      (cod_dw_persona_ubic, cod_dw_direccion_unificada, unifica_atributos, fecha_unificacion, lote, severidad, usuario_bd)
+    SELECT DISTINCT cod_dw_persona_ubic, cod_dw_direccion_unificada, unifica_atributos, fecha_unificacion, lote, severidad, usuario_bd
+    FROM bdm_tempo.sp_unificacion_mock_r1_esc1_ciiu10_mismo_texto_padre_lab_crr_persist;
+  END IF;
+
+  DROP TABLE IF EXISTS bdm_tempo.sp_unificacion_mock_r1_esc1_ciiu10_mismo_texto_padre_lab_crr_persist;
+
+  DROP TABLE IF EXISTS bdm_tempo.stg_mock_regla1_scored;
+  DROP TABLE IF EXISTS bdm_tempo.stg_mock_regla1_max;
+  DROP TABLE IF EXISTS bdm_tempo.stg_mock_regla1_ganador;
+  DROP TABLE IF EXISTS bdm_tempo.stg_mock_regla1_pares;
+
+END;
+$$;
+-- SLCOPRBA-1355: re-DPLY DEV post DROP SCHEMA strct #256

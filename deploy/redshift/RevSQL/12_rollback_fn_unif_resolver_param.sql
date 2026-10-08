@@ -1,0 +1,34 @@
+-- ============================================================
+-- 12_rollback_fn_unif_resolver_param.sql
+-- Rollback: elimina la funcion bdm_datos.unif_resolver_param
+-- (repo pgm / db_rcncr_btch_rdshft_pgm)
+-- Contrapartida de 12_fn_unif_resolver_param.sql (Task 3.1).
+-- Codificacion: UTF-8 sin BOM.
+-- Spec: unificacion-full-delta (Task 3.1)
+-- Requirements: 12.1, 12.4
+-- ------------------------------------------------------------
+-- SINTAXIS DE ROLLBACK DE FUNCIONES EN REDSHIFT (leccion #10):
+--   Redshift NO soporta `DROP FUNCTION IF EXISTS` (da: syntax error at or
+--   near "EXISTS"). El patron comprobado en la bitacora para revertir
+--   FUNCIONES es `DROP SCHEMA ... CASCADE`, que arrastra la funcion y sus
+--   objetos dependientes.
+--
+-- LIMITACION / DECISION DE ESTE ROLLBACK:
+--   El schema `bdm_datos` es COMPARTIDO por todo el Reconocer_Batch (tablas
+--   permanentes, procedimientos, otras funciones). Aplicar aqui
+--   `DROP SCHEMA bdm_datos CASCADE` destruiria esos objetos ajenos a esta
+--   funcion, con un blast radius inaceptable. Por eso este rollback NO
+--   ejecuta el DROP SCHEMA (mismo criterio que 01_rollback_schemas_roles.sql,
+--   que tampoco elimina el schema compartido).
+--
+--   Para revertir SOLO esta funcion sin `IF EXISTS` (no soportado) se usa
+--   `DROP FUNCTION` con la FIRMA EXACTA del CREATE. Si la funcion no existe,
+--   el statement fallara con "function ... does not exist"; ese fallo es
+--   esperado/seguro en un rollback de una funcion no desplegada y no deja
+--   objetos residuales.
+--
+--   La firma exacta debe coincidir con el CREATE OR REPLACE FUNCTION:
+--   bdm_datos.unif_resolver_param(VARCHAR, VARCHAR).
+-- ============================================================
+
+DROP FUNCTION bdm_datos.unif_resolver_param(VARCHAR, VARCHAR);

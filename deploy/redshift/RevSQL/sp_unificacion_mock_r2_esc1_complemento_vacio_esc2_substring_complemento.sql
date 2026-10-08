@@ -1,0 +1,2 @@
+-- Rollback de sp_unificacion_mock_r2_esc1_complemento_vacio_esc2_substring_complemento (Redshift no soporta IF EXISTS en DROP PROCEDURE)
+DROP PROCEDURE bdm_datos.sp_unificacion_mock_r2_esc1_complemento_vacio_esc2_substring_complemento(VARCHAR,INTEGER);

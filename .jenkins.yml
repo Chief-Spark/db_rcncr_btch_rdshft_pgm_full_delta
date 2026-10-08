@@ -1,0 +1,9 @@
+# DATABASE-REDSHIFT - Unificacion+Ordenamiento PGM (FULL/DELTA)
+version: 1.0.0
+global:
+  application: dba_rncr_batch
+  type: program
+  tech: database
+  language: redshift
+  jdk: 8
+  order: 2
