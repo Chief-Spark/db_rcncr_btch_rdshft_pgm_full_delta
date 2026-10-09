@@ -1,3 +1,4 @@
+sp_unificacion_mock_gate_arq.sql
 sp_unif_gate_convergencia_evaluar.sql
 sp_unif_gate_convergencia_snapshot.sql
 19_rollback_sp_ordenamiento_ciclo.sql

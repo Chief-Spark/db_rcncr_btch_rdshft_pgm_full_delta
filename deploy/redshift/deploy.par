@@ -64,3 +64,4 @@ sp_ordenamiento_ejecucion_mock.sql
 19_sp_ordenamiento_ciclo.sql
 sp_unif_gate_convergencia_snapshot.sql
 sp_unif_gate_convergencia_evaluar.sql
+sp_unificacion_mock_gate_arq.sql
