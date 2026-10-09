@@ -83,23 +83,54 @@ DROP TABLE IF EXISTS bdm_tempo.stg_regla3_pares;
   FROM bdm_tempo.stg_regla3_pares;
 
   IF p_modo = 'FULL' THEN
-    -- FULL: append (el TRUNCATE lo hizo el orquestador una vez).
+    -- FULL: el TRUNCATE lo hizo el orquestador una vez al inicio de la corrida.
+    -- Se usa INSERT FOR MISSING (el mismo NOT EXISTS del Modo_Delta) y NO un
+    -- INSERT plano: dentro de una misma corrida FULL dos escenarios distintos
+    -- pueden producir la MISMA Clave_Unificacion, y el INSERT plano dejaba la
+    -- pareja DUPLICADA -- justo lo que vigila el gate unicidad_clave_unificacion.
+    -- El legado Teradata aplica el upsert de forma uniforme, sin distinguir
+    -- carga inicial: gana el primer escenario que produce la pareja.
+    -- No se hace el UPDATE previo que si lleva el Modo_Delta: tras el TRUNCATE
+    -- la unica fila preexistente posible proviene de un escenario anterior de
+    -- ESTA misma corrida, por lo que sellar lote_actualizacion con el mismo
+    -- lote no aportaria informacion.
     INSERT INTO bdm_datos.unificacion_direccion
       (cod_dw_persona_ubic, cod_dw_direccion_unificada, unifica_atributos, fecha_unificacion, lote, severidad, usuario_bd)
-    SELECT DISTINCT cod_dw_persona_ubic, cod_dw_direccion_unificada, unifica_atributos, fecha_unificacion, lote, severidad, usuario_bd
-    FROM bdm_tempo.sp_unificacion_r3_esc1_geo_misma_via_puerta_cercana_persist;
+    SELECT DISTINCT s.cod_dw_persona_ubic, s.cod_dw_direccion_unificada, s.unifica_atributos,
+           s.fecha_unificacion, s.lote, s.severidad, s.usuario_bd
+    FROM bdm_tempo.sp_unificacion_r3_esc1_geo_misma_via_puerta_cercana_persist s
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM bdm_datos.unificacion_direccion u
+      WHERE u.cod_dw_persona_ubic = s.cod_dw_persona_ubic
+        AND u.cod_dw_direccion_unificada = s.cod_dw_direccion_unificada);
   ELSE
-    -- DELTA UPSERT (DELETE+INSERT): cluster Redshift no acepta alias en MERGE.
-    -- Misma Clave_Unificacion; sin truncar tabla completa (Req 5.1, 5.2, 5.6).
-    DELETE FROM bdm_datos.unificacion_direccion
-    USING bdm_tempo.sp_unificacion_r3_esc1_geo_misma_via_puerta_cercana_persist s
-    WHERE bdm_datos.unificacion_direccion.cod_dw_persona_ubic = s.cod_dw_persona_ubic
-      AND bdm_datos.unificacion_direccion.cod_dw_direccion_unificada = s.cod_dw_direccion_unificada;
+    -- DELTA UPSERT fiel al legado Teradata (SLCOPRBA-1355).
+    -- Patron 'INSERT FOR MISSING UPDATE ROWS' de
+    -- P0020_UNIFICACION_DIRECCION_130.TPT (STEP Load_UNIFICACION_DIRECCION):
+    -- UPDATE de las filas que ya existen con la misma Clave_Unificacion e
+    -- INSERT de las que faltan. El UPDATE no reescribe 'lote' (identifica la
+    -- corrida que CREO la unificacion) ni 'unifica_atributos'; solo sella
+    -- lote_actualizacion / fecha_modificacion / usuario_bd.
+    -- NOTA Redshift: en UPDATE ... FROM la tabla destino NO admite alias.
+    UPDATE bdm_datos.unificacion_direccion
+       SET lote_actualizacion = p_lote,
+           fecha_modificacion = CURRENT_DATE,
+           usuario_bd         = CURRENT_USER
+      FROM bdm_tempo.sp_unificacion_r3_esc1_geo_misma_via_puerta_cercana_persist s
+     WHERE bdm_datos.unificacion_direccion.cod_dw_persona_ubic = s.cod_dw_persona_ubic
+       AND bdm_datos.unificacion_direccion.cod_dw_direccion_unificada = s.cod_dw_direccion_unificada;
 
     INSERT INTO bdm_datos.unificacion_direccion
       (cod_dw_persona_ubic, cod_dw_direccion_unificada, unifica_atributos, fecha_unificacion, lote, severidad, usuario_bd)
-    SELECT DISTINCT cod_dw_persona_ubic, cod_dw_direccion_unificada, unifica_atributos, fecha_unificacion, lote, severidad, usuario_bd
-    FROM bdm_tempo.sp_unificacion_r3_esc1_geo_misma_via_puerta_cercana_persist;
+    SELECT DISTINCT s.cod_dw_persona_ubic, s.cod_dw_direccion_unificada, s.unifica_atributos,
+           s.fecha_unificacion, s.lote, s.severidad, s.usuario_bd
+    FROM bdm_tempo.sp_unificacion_r3_esc1_geo_misma_via_puerta_cercana_persist s
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM bdm_datos.unificacion_direccion u
+      WHERE u.cod_dw_persona_ubic = s.cod_dw_persona_ubic
+        AND u.cod_dw_direccion_unificada = s.cod_dw_direccion_unificada);
   END IF;
 
   DROP TABLE IF EXISTS bdm_tempo.sp_unificacion_r3_esc1_geo_misma_via_puerta_cercana_persist;

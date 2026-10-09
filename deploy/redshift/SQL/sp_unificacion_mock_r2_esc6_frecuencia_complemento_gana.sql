@@ -66,11 +66,27 @@ BEGIN
   FROM bdm_tempo.stg_mock_regla2_e06_pares;
 
   IF p_modo = 'FULL' THEN
-    -- FULL: append (el TRUNCATE lo hizo el orquestador una vez).
+    -- FULL: el TRUNCATE lo hizo el orquestador una vez al inicio de la corrida.
+    -- Se usa INSERT FOR MISSING (el mismo NOT EXISTS del Modo_Delta) y NO un
+    -- INSERT plano: dentro de una misma corrida FULL dos escenarios distintos
+    -- pueden producir la MISMA Clave_Unificacion, y el INSERT plano dejaba la
+    -- pareja DUPLICADA -- justo lo que vigila el gate unicidad_clave_unificacion.
+    -- El legado Teradata aplica el upsert de forma uniforme, sin distinguir
+    -- carga inicial: gana el primer escenario que produce la pareja.
+    -- No se hace el UPDATE previo que si lleva el Modo_Delta: tras el TRUNCATE
+    -- la unica fila preexistente posible proviene de un escenario anterior de
+    -- ESTA misma corrida, por lo que sellar lote_actualizacion con el mismo
+    -- lote no aportaria informacion.
     INSERT INTO bdm_datos.unificacion_direccion_mock
       (cod_dw_persona_ubic, cod_dw_direccion_unificada, unifica_atributos, fecha_unificacion, lote, severidad, usuario_bd)
-    SELECT DISTINCT cod_dw_persona_ubic, cod_dw_direccion_unificada, unifica_atributos, fecha_unificacion, lote, severidad, usuario_bd
-    FROM bdm_tempo.sp_unificacion_mock_r2_esc6_frecuencia_complemento_gana_persist;
+    SELECT DISTINCT s.cod_dw_persona_ubic, s.cod_dw_direccion_unificada, s.unifica_atributos,
+           s.fecha_unificacion, s.lote, s.severidad, s.usuario_bd
+    FROM bdm_tempo.sp_unificacion_mock_r2_esc6_frecuencia_complemento_gana_persist s
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM bdm_datos.unificacion_direccion_mock u
+      WHERE u.cod_dw_persona_ubic = s.cod_dw_persona_ubic
+        AND u.cod_dw_direccion_unificada = s.cod_dw_direccion_unificada);
   ELSE
     -- DELTA UPSERT fiel al legado Teradata (SLCOPRBA-1355).
     -- Patron 'INSERT FOR MISSING UPDATE ROWS' de
