@@ -34,6 +34,9 @@ BEGIN
   END IF;
 
   CALL bdm_datos.sp_unificacion_r2_preparar_insumo(p_modo, p_watermark);
+  -- El diccionario se reconstruye DESPUES del insumo y ANTES de esc4: esc4 y
+  -- esc6 consumen su frecuencia y el motor consume nomen/valor.
+  CALL bdm_datos.sp_unificacion_r2_construir_diccionario_complementos(p_modo, p_lote);
   CALL bdm_datos.sp_unificacion_r2_esc1_complemento_vacio_esc2_substring_complemento(p_modo, p_lote);
   CALL bdm_datos.sp_unificacion_r2_esc3_sin_nit_misma_nomenclatura(p_modo, p_lote);
   CALL bdm_datos.sp_unificacion_r2_esc4_diccionario_frecuencia_complemento(p_modo, p_lote);
