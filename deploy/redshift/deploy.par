@@ -30,6 +30,7 @@ sp_unificacion_mock_regla2.sql
 sp_unificacion_mock_r3_esc1_geo_misma_via_puerta_cercana.sql
 sp_unificacion_mock_regla3.sql
 sp_geo_exportar_insumo.sql
+sp_geo_exportar_insumo_mock.sql
 sp_geo_cargar_georreferenciacion.sql
 sp_geo_cargar_distancias.sql
 sp_geo_reenganchar_r3.sql
@@ -39,8 +40,11 @@ sp_geo_ciclo_lote_wrapper.sql
 sp_geo_reenganchar_r3_wrapper.sql
 12_fn_unif_resolver_param.sql
 14_traza_procedures.sql
+14b_traza_mock_procedures.sql
 15_sp_unif_control_abrir_cerrar.sql
+15b_sp_unif_control_mock_abrir_cerrar.sql
 16_sp_unificacion_ciclo.sql
+16b_sp_unificacion_mock_ciclo.sql
 sp_ordenamiento_preparar_insumos_edf.sql
 sp_ordenamiento_scoring_dir_edf.sql
 sp_ordenamiento_scoring_tel_edf.sql

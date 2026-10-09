@@ -12,8 +12,11 @@ sp_ordenamiento_scoring_cel_edf.sql
 sp_ordenamiento_scoring_tel_edf.sql
 sp_ordenamiento_scoring_dir_edf.sql
 sp_ordenamiento_preparar_insumos_edf.sql
+16b_rollback_sp_unificacion_mock_ciclo.sql
 16_rollback_sp_unificacion_ciclo.sql
+15b_rollback_sp_unif_control_mock_abrir_cerrar.sql
 15_rollback_sp_unif_control_abrir_cerrar.sql
+14b_rollback_traza_mock_procedures.sql
 14_rollback_traza_procedures.sql
 12_rollback_fn_unif_resolver_param.sql
 sp_geo_reenganchar_r3_wrapper.sql
@@ -23,6 +26,7 @@ sp_geo_ciclo_lote.sql
 sp_geo_reenganchar_r3.sql
 sp_geo_cargar_distancias.sql
 sp_geo_cargar_georreferenciacion.sql
+sp_geo_exportar_insumo_mock.sql
 sp_geo_exportar_insumo.sql
 sp_unificacion_mock_regla3.sql
 sp_unificacion_mock_r3_esc1_geo_misma_via_puerta_cercana.sql
