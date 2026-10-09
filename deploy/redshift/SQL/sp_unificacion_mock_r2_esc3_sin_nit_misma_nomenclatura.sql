@@ -25,7 +25,7 @@ BEGIN
   JOIN bdm_tempo.v_mock_relacion_persona_ubicacion rpu
     ON a.cod_dw_persona_ubic = rpu.cod_dw_persona_ubic
   WHERE a.ind_unificacion = 'N'
-    AND COALESCE(rpu.cod_tipo_ident_fte, '') <> '3';
+    AND COALESCE(TRIM(rpu.cod_tipo_ident_fte), '') <> '3';
 
   CREATE TABLE bdm_tempo.stg_mock_regla2_e03_a
   DISTSTYLE KEY DISTKEY(id_buro_persona)

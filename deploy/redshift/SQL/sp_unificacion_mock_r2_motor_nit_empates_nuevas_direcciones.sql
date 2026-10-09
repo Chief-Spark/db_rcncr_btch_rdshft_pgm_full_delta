@@ -120,7 +120,7 @@ BEGIN
   JOIN bdm_stage.nomenclatura nmc
     ON UPPER(COALESCE(e.complemento, '')) LIKE TRIM(nmc.nomenclatura) || '%'
   WHERE e.ind_unificacion = 'N'
-    AND COALESCE(i.cod_tipo_ident_fte, '') = '3';
+    AND COALESCE(TRIM(i.cod_tipo_ident_fte), '') = '3';
 
   -- Solo los que tienen con quien emparejarse, y el orden que define al padre.
   CREATE TABLE bdm_tempo.stg_mock_motor_nit_grupo

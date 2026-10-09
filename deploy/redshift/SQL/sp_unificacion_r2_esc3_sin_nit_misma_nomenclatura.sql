@@ -20,7 +20,11 @@ BEGIN
   JOIN bdm_tempo.v_xpm_relacion_persona_ubicacion rpu
     ON a.cod_dw_persona_ubic = rpu.cod_dw_persona_ubic
   WHERE a.ind_unificacion = 'N'
-    AND COALESCE(rpu.cod_tipo_ident_fte, 0) <> 3;
+    -- SLCOPRBA-1355: comparacion TEXTUAL. cod_tipo_ident_fte es VARCHAR(20)
+    -- en el legado y en el mock; la via real lo exponia como INTEGER y el
+    -- CAST abortaba con "Value out of range for 4 bytes" (job #293). TRIM
+    -- porque el codigo llega del datashare sin normalizar.
+    AND COALESCE(TRIM(rpu.cod_tipo_ident_fte), '') <> '3';
 
   CREATE TABLE bdm_tempo.stg_regla2_e03_a
   DISTSTYLE KEY DISTKEY(id_buro_persona)

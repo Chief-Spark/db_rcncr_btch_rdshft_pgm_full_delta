@@ -119,7 +119,11 @@ BEGIN
   JOIN bdm_datos.nomenclatura nmc
     ON UPPER(COALESCE(e.complemento, '')) LIKE TRIM(nmc.nomenclatura) || '%'
   WHERE e.ind_unificacion = 'N'
-    AND COALESCE(i.cod_tipo_ident_fte, 0) = 3;
+    -- SLCOPRBA-1355: comparacion TEXTUAL. cod_tipo_ident_fte es VARCHAR(20)
+    -- en el legado y en el mock; la via real lo exponia como INTEGER y el
+    -- CAST abortaba con "Value out of range for 4 bytes" (job #293). TRIM
+    -- porque el codigo llega del datashare sin normalizar.
+    AND COALESCE(TRIM(i.cod_tipo_ident_fte), '') = '3';
 
   -- Solo los que tienen con quien emparejarse, y el orden que define al padre.
   CREATE TABLE bdm_tempo.stg_motor_nit_grupo
