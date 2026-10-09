@@ -46,6 +46,7 @@ sp_geo_reenganchar_r3_wrapper.sql
 16_sp_unificacion_ciclo.sql
 16b_sp_unificacion_mock_ciclo.sql
 sp_ordenamiento_preparar_insumos_edf.sql
+sp_ordenamiento_preparar_insumos_mock.sql
 sp_ordenamiento_scoring_dir_edf.sql
 sp_ordenamiento_scoring_tel_edf.sql
 sp_ordenamiento_scoring_cel_edf.sql

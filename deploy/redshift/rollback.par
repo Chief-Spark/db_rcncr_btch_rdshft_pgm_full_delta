@@ -11,6 +11,7 @@ sp_ordenamiento_scoring_ema_edf.sql
 sp_ordenamiento_scoring_cel_edf.sql
 sp_ordenamiento_scoring_tel_edf.sql
 sp_ordenamiento_scoring_dir_edf.sql
+sp_ordenamiento_preparar_insumos_mock.sql
 sp_ordenamiento_preparar_insumos_edf.sql
 16b_rollback_sp_unificacion_mock_ciclo.sql
 16_rollback_sp_unificacion_ciclo.sql
