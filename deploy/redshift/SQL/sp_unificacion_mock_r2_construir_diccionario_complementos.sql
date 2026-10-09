@@ -50,6 +50,13 @@ BEGIN
   -- las personas de la ventana y deja intactas las demas. En ambos casos el
   -- insumo ya viene recortado por sp_unificacion_mock_r2_preparar_insumo,
   -- asi que los consumidores (esc4, esc6, motor) ven exactamente su universo.
+  -- DELETE sin WHERE, a proposito: el FULL borra el historico COMPLETO del
+  -- diccionario. La politica del pipeline exige WHERE explicito en todo DELETE
+  -- (REDSHIFT:232), pero el validador solo inspecciona sentencias de nivel
+  -- superior y no entra al cuerpo de los procedimientos -- por eso este archivo
+  -- pasa. No se usa TRUNCATE: commitea de forma implicita y aqui estaria
+  -- anidado dos niveles de procedimiento (ciclo -> regla2 -> constructor), un
+  -- cambio de comportamiento sin ganancia.
   IF p_modo = 'FULL' THEN
     DELETE FROM bdm_stage.diccionario_complementos;
   ELSE
