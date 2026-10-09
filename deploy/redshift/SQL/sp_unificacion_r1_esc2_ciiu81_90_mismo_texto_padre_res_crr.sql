@@ -95,17 +95,39 @@ BEGIN
     SELECT DISTINCT cod_dw_persona_ubic, cod_dw_direccion_unificada, unifica_atributos, fecha_unificacion, lote, severidad, usuario_bd
     FROM bdm_tempo.sp_unificacion_r1_esc2_ciiu81_90_mismo_texto_padre_res_crr_persist;
   ELSE
-    -- DELTA UPSERT (DELETE+INSERT): cluster Redshift no acepta alias en MERGE.
-    -- Misma Clave_Unificacion; sin truncar tabla completa (Req 5.1, 5.2, 5.6).
-    DELETE FROM bdm_datos.unificacion_direccion
-    USING bdm_tempo.sp_unificacion_r1_esc2_ciiu81_90_mismo_texto_padre_res_crr_persist s
-    WHERE bdm_datos.unificacion_direccion.cod_dw_persona_ubic = s.cod_dw_persona_ubic
-      AND bdm_datos.unificacion_direccion.cod_dw_direccion_unificada = s.cod_dw_direccion_unificada;
+    -- DELTA UPSERT fiel al legado Teradata (SLCOPRBA-1355).
+    -- Patron 'INSERT FOR MISSING UPDATE ROWS' de
+    -- P0020_UNIFICACION_DIRECCION_130.TPT (STEP Load_UNIFICACION_DIRECCION):
+    --   1) UPDATE de las filas que YA existen con la misma Clave_Unificacion
+    --      (cod_dw_persona_ubic, cod_dw_direccion_unificada).
+    --   2) INSERT de las que faltan.
+    -- El UPDATE NO reescribe 'lote' ni 'unifica_atributos': en el legado el
+    -- Lote identifica la corrida que CREO la unificacion y es inmutable; solo
+    -- se sellan Lote_Actualizacion / Fecha_Modificacion / Usuario_BD.
+    -- NO se usa MERGE: el cluster Redshift no acepta alias en MERGE.
+    -- NO se usa DELETE+INSERT (version anterior): reescribia 'lote' con el de
+    -- la corrida en curso, perdiendo la trazabilidad de que corrida origino
+    -- cada unificacion y haciendo ininterpretable total_unificaciones.
+    -- NOTA Redshift: en UPDATE ... FROM la tabla destino NO admite alias; se
+    -- referencia con su nombre calificado completo (igual que el DELETE USING).
+    UPDATE bdm_datos.unificacion_direccion
+       SET lote_actualizacion = p_lote,
+           fecha_modificacion = CURRENT_DATE,
+           usuario_bd         = CURRENT_USER
+      FROM bdm_tempo.sp_unificacion_r1_esc2_ciiu81_90_mismo_texto_padre_res_crr_persist s
+     WHERE bdm_datos.unificacion_direccion.cod_dw_persona_ubic = s.cod_dw_persona_ubic
+       AND bdm_datos.unificacion_direccion.cod_dw_direccion_unificada = s.cod_dw_direccion_unificada;
 
     INSERT INTO bdm_datos.unificacion_direccion
       (cod_dw_persona_ubic, cod_dw_direccion_unificada, unifica_atributos, fecha_unificacion, lote, severidad, usuario_bd)
-    SELECT DISTINCT cod_dw_persona_ubic, cod_dw_direccion_unificada, unifica_atributos, fecha_unificacion, lote, severidad, usuario_bd
-    FROM bdm_tempo.sp_unificacion_r1_esc2_ciiu81_90_mismo_texto_padre_res_crr_persist;
+    SELECT DISTINCT s.cod_dw_persona_ubic, s.cod_dw_direccion_unificada, s.unifica_atributos,
+           s.fecha_unificacion, s.lote, s.severidad, s.usuario_bd
+    FROM bdm_tempo.sp_unificacion_r1_esc2_ciiu81_90_mismo_texto_padre_res_crr_persist s
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM bdm_datos.unificacion_direccion u
+      WHERE u.cod_dw_persona_ubic = s.cod_dw_persona_ubic
+        AND u.cod_dw_direccion_unificada = s.cod_dw_direccion_unificada);
   END IF;
 
   DROP TABLE IF EXISTS bdm_tempo.sp_unificacion_r1_esc2_ciiu81_90_mismo_texto_padre_res_crr_persist;

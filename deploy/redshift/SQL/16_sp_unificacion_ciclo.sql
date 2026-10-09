@@ -307,13 +307,20 @@ BEGIN
     -- Fuente: bdm_tempo.v_xpm_relacion_persona_ubicacion (vista EDF / datashare),
     -- alineada a R1/R2/R3 y a sp_ordenamiento_ciclo. No usar la tabla base
     -- bdm_datos.relacion_persona_ubicacion (no existe en el consumidor DEV).
+    -- SLCOPRBA-1355: el universo delta pasa a definirse POR PERSONA, igual que
+    -- el insumo de R1/R2 (ver sp_unificacion_r*_preparar_insumo). Se reutiliza
+    -- el driver bdm_tempo.stg_unif_delta_personas que materializo el ultimo
+    -- preparar_insumo (el de R2), de modo que el universo del Exportador_GEO y
+    -- el de las reglas sean exactamente el mismo (Req 3.1-3.3). Antes se
+    -- acotaba por FILA y el GEO veia un universo distinto al de las reglas.
     DROP TABLE IF EXISTS bdm_tempo.stg_unif_delta_ubic;
     CREATE TABLE bdm_tempo.stg_unif_delta_ubic AS
     SELECT DISTINCT rpu.cod_dw_ubic
     FROM   bdm_tempo.v_xpm_relacion_persona_ubicacion rpu
     WHERE  v_modo_efectivo = 'FULL'
-       OR  rpu.fecha_relacion_persona_ubicaci >= v_wm_anterior
-       OR  rpu.fecha_relacion_persona_ubicaci IS NULL;
+       OR  EXISTS ( SELECT 1
+                      FROM bdm_tempo.stg_unif_delta_personas d
+                     WHERE d.id_buro_persona = rpu.id_buro_persona );
 
     -- ---- Etapa GEO: geo ------------------------------------------------------
     -- Exportador_GEO alineado al modo (Task 8.1): en DELTA intersecta candidatos
@@ -387,13 +394,20 @@ BEGIN
     --                           lote en la Tabla_Destino (cod_dw_persona_ubic,
     --                           cod_dw_direccion_unificada), acotadas por v_lote.
     -- ========================================================
+    -- SLCOPRBA-1355: las Metricas_Corrida se calculan sobre el MISMO universo
+    -- que consumieron las reglas (por persona + filtro de estado del legado),
+    -- no sobre la ventana por fila. Si no, relaciones_entrada describiria un
+    -- universo que el insumo nunca proceso y la metrica seria enganosa.
     SELECT COUNT(*),
            COUNT(DISTINCT rpu.id_buro_persona)
       INTO v_rel_entrada, v_pers_distintas
       FROM bdm_tempo.v_xpm_relacion_persona_ubicacion rpu
-     WHERE v_modo_efectivo = 'FULL'
-        OR rpu.fecha_relacion_persona_ubicaci >= v_wm_anterior
-        OR rpu.fecha_relacion_persona_ubicaci IS NULL;
+     WHERE rpu.ind_unificacion IS NULL
+       AND COALESCE(rpu.bloqueado, 0) = 0
+       AND ( v_modo_efectivo = 'FULL'
+             OR EXISTS ( SELECT 1
+                           FROM bdm_tempo.stg_unif_delta_personas d
+                          WHERE d.id_buro_persona = rpu.id_buro_persona ) );
 
     SELECT COUNT(DISTINCT (ud.cod_dw_persona_ubic || '-' || ud.cod_dw_direccion_unificada))
       INTO v_total_unif
