@@ -51,8 +51,16 @@ BEGIN
       ON u.cod_dw_persona_ubic = rpu.cod_dw_persona_ubic
     WHERE COALESCE(p_modo, 'FULL') = 'DELTA'
       AND (
+            -- SLCOPRBA-1355: desde el UPSERT fiel al legado, 'lote' es INMUTABLE
+            -- (identifica la corrida que CREO la unificacion) y 'fecha_unificacion'
+            -- tampoco se reescribe al re-unificar. El re-toque de una pareja
+            -- existente se registra en lote_actualizacion / fecha_modificacion.
+            -- Sin estos dos predicados, una persona re-tocada por el Modo_Delta
+            -- quedaria FUERA del alcance del Ordenamiento y no se re-puntuaria.
             u.lote = p_lote
+         OR u.lote_actualizacion = p_lote
          OR (p_watermark IS NOT NULL AND u.fecha_unificacion >= p_watermark)
+         OR (p_watermark IS NOT NULL AND u.fecha_modificacion >= p_watermark)
           )
   ) x;
 
