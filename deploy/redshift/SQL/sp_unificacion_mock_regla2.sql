@@ -42,11 +42,26 @@ BEGIN
   -- esc6 consumen su frecuencia y el motor consume nomen/valor.
   CALL bdm_datos.sp_unificacion_mock_r2_construir_diccionario_complementos(p_modo, p_lote);
   CALL bdm_datos.sp_unificacion_mock_r2_esc1_complemento_vacio_esc2_substring_complemento(p_modo, p_lote);
+  -- Orden del legado: cada etapa marca sus filas en stg_mock_regla2_e2 para que
+  -- las POSTERIORES no las vuelvan a procesar.
+  --   esc1/esc2 -> esc3 'L3' -> motor NIT 'X4' -> esc4 'B5'
+  --             -> motor NIVEL 'A6' -> esc5 'C7' -> esc6
+  -- Los dos sitios que crean direcciones (PRO_UnificacionR2.sql:1602 y :3423)
+  -- van INTERCALADOS, no al final: por eso el motor son dos llamadas.
   CALL bdm_datos.sp_unificacion_mock_r2_esc3_sin_nit_misma_nomenclatura(p_modo, p_lote);
+  CALL bdm_datos.sp_unificacion_mock_r2_motor_nit_empates_nuevas_direcciones(p_modo, p_lote);
   CALL bdm_datos.sp_unificacion_mock_r2_esc4_diccionario_frecuencia_complemento(p_modo, p_lote);
+  -- SITIO 2 ('A6', etapa 5.1 del legado) NO IMPLEMENTADO. Su poblacion base
+  -- si esta leida (Tmp_Unificacion_E051, PRO_UnificacionR2.sql:2280: grupo sin
+  -- unificar con complemento distinto, SIN filtro de NIT ni de nomenclatura),
+  -- pero NO la regla con que elige al padre: eso vive en el pivote dinamico de
+  -- E051_A / E051_D (lineas 2331-2900), que genera SQL dinamico sobre hasta 15
+  -- posiciones de componente. Implementarlo por analogia con esc5 seria una
+  -- suposicion, y ademas starveria a esc5 (misma poblacion, el sitio 2 corre
+  -- antes), cambiando el resultado de los arquetipos ya certificados. Queda
+  -- pendiente hasta decodificar ese pivote.
   CALL bdm_datos.sp_unificacion_mock_r2_esc5_nomenclatura_menor_nivel_pierde(p_modo, p_lote);
   CALL bdm_datos.sp_unificacion_mock_r2_esc6_frecuencia_complemento_gana(p_modo, p_lote);
-  CALL bdm_datos.sp_unificacion_mock_r2_motor_nit_empates_nuevas_direcciones(p_modo, p_lote);
 
   DROP TABLE IF EXISTS bdm_tempo.stg_mock_regla2_insumo;
   DROP TABLE IF EXISTS bdm_tempo.stg_mock_regla2_esc1_pares;
