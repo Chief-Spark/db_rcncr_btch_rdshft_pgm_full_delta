@@ -1,3 +1,5 @@
+sp_unif_gate_convergencia_evaluar.sql
+sp_unif_gate_convergencia_snapshot.sql
 19_rollback_sp_ordenamiento_ciclo.sql
 18_rollback_sp_ord_traza.sql
 17_rollback_sp_ord_control_abrir_cerrar.sql

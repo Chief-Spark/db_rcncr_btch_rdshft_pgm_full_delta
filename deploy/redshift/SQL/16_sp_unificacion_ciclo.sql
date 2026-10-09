@@ -207,6 +207,14 @@ BEGIN
     -- ========================================================
     IF v_modo_efectivo = 'FULL' THEN
         TRUNCATE TABLE bdm_datos.unificacion_direccion;
+        -- SLCOPRBA-1355 (M5): las direcciones generadas por el motor tambien
+        -- son historico, y el FULL las borra AQUI, no en el motor. Antes el
+        -- borrado vivia dentro del propio motor, que corre al final: el
+        -- preparar_insumo del FULL alcanzaba a ver las direcciones generadas
+        -- por la corrida anterior, con lo que un FULL de reproceso NO era un
+        -- reproceso limpio.
+        TRUNCATE TABLE bdm_datos.rpu_generada;
+        TRUNCATE TABLE bdm_datos.direccion_fisica_generada;
     END IF;
 
     -- ========================================================

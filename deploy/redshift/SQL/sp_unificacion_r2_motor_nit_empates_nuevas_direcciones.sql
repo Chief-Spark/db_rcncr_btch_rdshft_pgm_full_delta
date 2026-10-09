@@ -220,12 +220,11 @@ BEGIN
   -- El legado la hace con el TPT P0020_UNIFICACION_DIRECCION_130.TPT:
   --   UPDATE ... SET Lote_Actualizacion ... INSERT FOR MISSING UPDATE ROWS
   -- y su tercer destino inserta en DIRECCION_FISICA con Generada_Enriquecida=1.
-  -- FULL borra el historico de direcciones generadas; DELTA acumula.
+  -- El borrado del historico en FULL NO vive aqui: lo hace el orquestador
+  -- (paso 6) ANTES de preparar el insumo. Si se borrara aqui, al final de
+  -- la corrida, el insumo del propio FULL habria visto ya las direcciones
+  -- generadas por la corrida anterior.
   -- ----------------------------------------------------------------------
-  IF p_modo = 'FULL' THEN
-    DELETE FROM bdm_datos.rpu_generada;
-    DELETE FROM bdm_datos.direccion_fisica_generada;
-  END IF;
 
   UPDATE bdm_datos.direccion_fisica_generada
      SET complemento        = s.complemento_motor,

@@ -144,6 +144,10 @@ BEGIN
     -- duplica.
     IF v_modo_efectivo = 'FULL' THEN
         TRUNCATE TABLE bdm_datos.unificacion_direccion_mock;
+        -- SLCOPRBA-1355 (M5): ver la nota del ciclo real. El FULL borra las
+        -- direcciones generadas AQUI, antes de preparar el insumo.
+        TRUNCATE TABLE bdm_datos.rpu_generada_mock;
+        TRUNCATE TABLE bdm_datos.direccion_fisica_generada_mock;
         -- Reseteo del ciclo GEO mock (ver nota 2 de la cabecera).
         TRUNCATE TABLE bdm_datos.geo_atributos_mock;
         TRUNCATE TABLE bdm_datos.geo_lote_control_mock;

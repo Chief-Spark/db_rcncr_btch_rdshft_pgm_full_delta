@@ -5,7 +5,7 @@
 -- Fuente: bdm_stage → bdm_tempo.v_* | Salida: bdm_datos.direccion_fisica_generada_mock + bdm_datos.rpu_generada_mock
 -- Prerequisito: sp_unificacion_mock_r2_esc5_nomenclatura_menor_nivel_pierde
 --               sp_unificacion_mock_r2_construir_diccionario_complementos
--- MODO MOCK — lee v_*/bdm_stage; NO usa edf_views ni v_xpm_*
+-- MODO MOCK — lee v_mock_*/bdm_stage; NO usa edf_views ni v_xpm_*
 --
 -- PARIDAD CON TERADATA (PRO_UnificacionR2.sql)
 --
@@ -213,7 +213,7 @@ BEGIN
     ON hij.ubic_padre = pad.cod_dw_persona_ubic
   JOIN bdm_tempo.stg_mock_regla2_insumo i
     ON i.cod_dw_persona_ubic = pad.cod_dw_persona_ubic
-  JOIN bdm_tempo.v_direccion_fisica dfp
+  JOIN bdm_tempo.v_mock_direccion_fisica dfp
     ON dfp.cod_dw_direccion_fisica = pad.cod_dw_direccion_fisica;
 
   -- ----------------------------------------------------------------------
@@ -221,12 +221,11 @@ BEGIN
   -- El legado la hace con el TPT P0020_UNIFICACION_DIRECCION_130.TPT:
   --   UPDATE ... SET Lote_Actualizacion ... INSERT FOR MISSING UPDATE ROWS
   -- y su tercer destino inserta en DIRECCION_FISICA con Generada_Enriquecida=1.
-  -- FULL borra el historico de direcciones generadas; DELTA acumula.
+  -- El borrado del historico en FULL NO vive aqui: lo hace el orquestador
+  -- (paso 6) ANTES de preparar el insumo. Si se borrara aqui, al final de
+  -- la corrida, el insumo del propio FULL habria visto ya las direcciones
+  -- generadas por la corrida anterior.
   -- ----------------------------------------------------------------------
-  IF p_modo = 'FULL' THEN
-    DELETE FROM bdm_datos.rpu_generada_mock;
-    DELETE FROM bdm_datos.direccion_fisica_generada_mock;
-  END IF;
 
   UPDATE bdm_datos.direccion_fisica_generada_mock
      SET complemento        = s.complemento_motor,

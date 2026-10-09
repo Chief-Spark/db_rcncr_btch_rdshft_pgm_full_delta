@@ -62,3 +62,5 @@ sp_ordenamiento_ejecucion_mock.sql
 17_sp_ord_control_abrir_cerrar.sql
 18_sp_ord_traza.sql
 19_sp_ordenamiento_ciclo.sql
+sp_unif_gate_convergencia_snapshot.sql
+sp_unif_gate_convergencia_evaluar.sql
