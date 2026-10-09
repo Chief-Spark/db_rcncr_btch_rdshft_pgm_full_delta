@@ -64,6 +64,8 @@ BEGIN
   DROP TABLE IF EXISTS bdm_tempo.stg_regla2_e06_pares;
   DROP TABLE IF EXISTS bdm_tempo.stg_motor_keys;
   DROP TABLE IF EXISTS bdm_tempo.stg_motor_ranked;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_componentes;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_fusion;
   DROP TABLE IF EXISTS bdm_tempo.stg_motor_insumo;
 
 EXCEPTION WHEN OTHERS THEN
