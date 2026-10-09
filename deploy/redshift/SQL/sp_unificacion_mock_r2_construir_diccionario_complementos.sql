@@ -76,24 +76,47 @@ BEGIN
     CAST(COUNT(*) AS INTEGER)            AS frecuencia
   FROM (
     SELECT
-      i.id_buro_persona,
-      i.cod_dw_ubic,
-      n.nomenclatura AS token,
-      -- El valor numerico que sigue al token dentro del complemento. Se extrae
-      -- con REGEXP_SUBSTR + REGEXP_REPLACE (y no con el parametro 'e' de
-      -- subexpresion) para no depender de variantes del motor de regex.
+      x.id_buro_persona,
+      x.cod_dw_ubic,
+      x.token,
       -- El guardia de longitud evita desbordar BIGINT con cadenas largas.
-      CASE
-        WHEN LEN(REGEXP_REPLACE(
-                   REGEXP_SUBSTR(UPPER(i.complemento), n.nomenclatura || ' *[0-9]+'),
-                   '[^0-9]', '')) BETWEEN 1 AND 18
-        THEN CAST(REGEXP_REPLACE(
-                    REGEXP_SUBSTR(UPPER(i.complemento), n.nomenclatura || ' *[0-9]+'),
-                    '[^0-9]', '') AS BIGINT)
+      -- Un token sin numero deja digitos = '' (o NULL segun la variante del
+      -- motor); en ambos casos el BETWEEN no se cumple y valor_num queda NULL,
+      -- que es lo que el consumidor espera: COALESCE(TO_NUMBER(valor), 0).
+      CASE WHEN LEN(x.digitos) BETWEEN 1 AND 18
+           THEN CAST(x.digitos AS BIGINT)
       END AS valor_num
-    FROM bdm_tempo.stg_mock_regla2_insumo i
-    JOIN bdm_stage.nomenclatura n
-      ON UPPER(COALESCE(i.complemento, '')) LIKE '%' || n.nomenclatura || '%'
+    FROM (
+      SELECT
+        i.id_buro_persona,
+        i.cod_dw_ubic,
+        n.nomenclatura AS token,
+        -- El valor numerico que sigue al token dentro del complemento.
+        --
+        -- No se puede construir el patron con el token (n.nomenclatura ||
+        -- ' *[0-9]+'): Redshift exige que el patron de REGEXP_* sea un literal
+        -- UTF-8 y rechaza en ejecucion cualquier expresion derivada de columna
+        -- con "The pattern must be a valid UTF-8 literal character expression".
+        --
+        -- Se resuelve con funciones de cadena: se corta el complemento justo
+        -- despues del token, se descartan los espacios intermedios y se toma
+        -- la corrida de digitos inicial con un patron que si es literal.
+        -- Equivale a ' *[0-9]+' aplicado desde el final del token.
+        --
+        -- Diferencia conocida frente al regex: si un token aparece varias
+        -- veces y la primera no lleva numero ('AP CS 4 AP 301'), aqui el token
+        -- queda sin valor, mientras el regex habria saltado a la ocurrencia
+        -- siguiente. Se toma el numero adosado a la primera ocurrencia, que es
+        -- la lectura que el consumidor hace del diccionario.
+        REGEXP_SUBSTR(
+          LTRIM(SUBSTRING(UPPER(i.complemento),
+                          STRPOS(UPPER(i.complemento), n.nomenclatura)
+                          + LEN(n.nomenclatura))),
+          '^[0-9]+') AS digitos
+      FROM bdm_tempo.stg_mock_regla2_insumo i
+      JOIN bdm_stage.nomenclatura n
+        ON UPPER(COALESCE(i.complemento, '')) LIKE '%' || n.nomenclatura || '%'
+    ) x
   ) t
   GROUP BY 1, 2, 3, 4;
 
