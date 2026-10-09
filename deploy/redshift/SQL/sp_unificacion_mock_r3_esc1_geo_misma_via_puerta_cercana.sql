@@ -59,9 +59,23 @@ DROP TABLE IF EXISTS bdm_tempo.stg_mock_regla3_pares;
    AND a.cod_dw_persona_ubic <> b.cod_dw_persona_ubic
    AND SPLIT_PART(a.texto_ubicacion,' ',1) = SPLIT_PART(b.texto_ubicacion,' ',1)
    AND SPLIT_PART(a.texto_ubicacion,' ',2) = SPLIT_PART(b.texto_ubicacion,' ',2)
+   -- SLCOPRBA-1355: el token puede NO ser numerico y el CAST directo aborta el
+   -- lote con "Invalid digit, Value '#', Pos 0, Type: Integer".
+   -- texto_ubicacion usa la notacion colombiana 'CL <via> # <puerta> - 20', de
+   -- modo que el token 3 es el '#' y la puerta esta en el 4. Este OR es una
+   -- heuristica para dos formatos de direccion (con y sin '#'): participa el
+   -- token que sea numerico. Devolviendo NULL en el que no lo es, la rama
+   -- queda en desconocido y no compara -- que es el comportamiento buscado --
+   -- en vez de tumbar la corrida. El patron es un literal: Redshift no acepta
+   -- patrones derivados de columna.
+   -- El defecto estaba latente desde siempre: ninguna ubicacion mock tenia
+   -- coordenadas (seed_mock_matriz.sql las siembra NULL) y el WHERE de abajo
+   -- exige latitud en ambos lados, asi que el parser nunca corrio. El ARQ 56
+   -- de la fase 5, control negativo del Exportador_GEO, es la primera
+   -- ubicacion con latitud y lo destapo.
    AND (
-     ABS(CAST(SPLIT_PART(a.texto_ubicacion,' ',3) AS INTEGER) - CAST(SPLIT_PART(b.texto_ubicacion,' ',3) AS INTEGER)) BETWEEN 1 AND 2
-     OR ABS(CAST(SPLIT_PART(a.texto_ubicacion,' ',4) AS INTEGER) - CAST(SPLIT_PART(b.texto_ubicacion,' ',4) AS INTEGER)) BETWEEN 1 AND 2
+     ABS(CAST(NULLIF(REGEXP_SUBSTR(SPLIT_PART(a.texto_ubicacion,' ',3), '^[0-9]+$'), '') AS INTEGER) - CAST(NULLIF(REGEXP_SUBSTR(SPLIT_PART(b.texto_ubicacion,' ',3), '^[0-9]+$'), '') AS INTEGER)) BETWEEN 1 AND 2
+     OR ABS(CAST(NULLIF(REGEXP_SUBSTR(SPLIT_PART(a.texto_ubicacion,' ',4), '^[0-9]+$'), '') AS INTEGER) - CAST(NULLIF(REGEXP_SUBSTR(SPLIT_PART(b.texto_ubicacion,' ',4), '^[0-9]+$'), '') AS INTEGER)) BETWEEN 1 AND 2
    )
    AND a.numero_entidades_reportan > b.numero_entidades_reportan
   WHERE a.latitud IS NOT NULL
