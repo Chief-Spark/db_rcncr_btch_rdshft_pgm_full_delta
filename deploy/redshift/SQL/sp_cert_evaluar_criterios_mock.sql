@@ -238,16 +238,40 @@ BEGIN
            FROM bdm_tempo.v_mock_ciiu_persona
           WHERE cod_act_econo_ciiu_fte IN ('81','82','90') ) b;
 
-  -- R1-08. El empate se descarta con HAVING COUNT(*) = 1 sobre el max_score.
-  -- No hay arquetipo que lo AISLE: en esc1 y esc2 el tipo rompe el empate
-  -- (+100000 al score) y en esc3 las entidades siempre difieren, de modo que
-  -- la condicion del requerimiento nunca se alcanza con el dato actual.
+  -- R1-08. SI HAY DATO, y la version anterior lo declaraba SIN_DATO sin mirar.
+  -- La numeracion de arquetipos reserva el escenario 4 de la Regla 1 justamente
+  -- para el EMPATE: ARQ 16 a 20 siembran CIIU 10 con padre LAB y hija CRR --
+  -- los DOS tipos preferidos -- y 5 entidades reportantes en ambos lados. El
+  -- score queda identico (100000 + 5), el HAVING COUNT(*) = 1 sobre el
+  -- max_score descarta el grupo y no se unifica nada. La matriz esperada del
+  -- gate por arquetipo ya lo afirma con filas_persona = 0 para esos cinco.
+  --
+  -- Aqui se afirma el enunciado del requerimiento de forma directa: ninguna
+  -- direccion de un arquetipo de empate puede haber recibido padre. El ARQ se
+  -- recupera de la clave de la semilla igual que en el gate por arquetipo:
+  --     ARQ = (cod_dw_persona_ubic / 10 - 9000000) / 10000
+  -- y se exige que los arquetipos existan, para que un universo vacio no se
+  -- lea como criterio cumplido.
   INSERT INTO bdm_datos.cert_resultado
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
-  SELECT p_lote, p_fase, 'R1-08', 'SIN_DATO',
-         'mecanismo presente (HAVING COUNT(*) = 1 sobre max_score) pero ningun '
-         || 'arquetipo aisla el empate: falta un caso con mismo tipo y mismas entidades.',
-         GETDATE(), CURRENT_USER;
+  SELECT p_lote, p_fase, 'R1-08',
+         CASE WHEN SUM(sembradas) = 0  THEN 'SIN_DATO'
+              WHEN SUM(unificadas) = 0 THEN 'PASSED'
+              ELSE 'FAILED' END,
+         'direcciones en arquetipos de empate (ARQ 16..20)='
+           || CAST(COALESCE(SUM(sembradas), 0) AS VARCHAR)
+           || ', de ellas unificadas=' || CAST(COALESCE(SUM(unificadas), 0) AS VARCHAR)
+           || ' (debe ser 0: mismo tipo preferido y mismas entidades, el empate no decide).',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT COUNT(*) AS sembradas, 0 AS unificadas
+           FROM bdm_tempo.v_mock_relacion_persona_ubicacion
+          WHERE cod_dw_persona_ubic BETWEEN 90100000 AND 95609999
+            AND (cod_dw_persona_ubic / 10 - 9000000) / 10000 BETWEEN 16 AND 20
+         UNION ALL
+         SELECT 0, COUNT(*)
+           FROM bdm_tempo.stg_cert_pares
+          WHERE hija BETWEEN 90100000 AND 95609999
+            AND (hija / 10 - 9000000) / 10000 BETWEEN 16 AND 20 ) r18;
 
   -- ==================================================================
   -- REGLA 2

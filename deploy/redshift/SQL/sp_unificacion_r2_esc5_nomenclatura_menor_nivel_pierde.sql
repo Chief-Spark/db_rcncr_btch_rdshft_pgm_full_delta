@@ -36,24 +36,61 @@ BEGIN
   LEFT JOIN bdm_datos.nomenclatura nmc1
     ON a.complemento LIKE TRIM(nmc1.nomenclatura) || ' %';
 
+  -- SLCOPRBA-1355: UN SOLO PADRE POR HIJA.
+  --
+  -- Este CREATE terminaba en el predicado de nivel y nada mas, de modo que una
+  -- direccion recibia un par por CADA candidato de nivel menor. esc5 era el
+  -- UNICO escenario de la Regla 2 sin reduccion: esc1 y esc2 reducen con
+  -- ROW_NUMBER ... rn = 1, esc3 con el MAX(ORDEN) del legado, esc4 con su
+  -- ganador y esc6 se corrigio en su momento por el mismo motivo.
+  --
+  -- COMO SE MANIFIESTA: con tres direcciones en niveles 1, 2 y 3 dentro del
+  -- mismo grupo (persona, texto_ubicacion, tipo, municipio) la version anterior
+  -- emitia
+  --     nivel2 -> nivel1      nivel3 -> nivel1      nivel3 -> nivel2
+  -- de modo que nivel3 quedaba con DOS padres (viola R2-11) y nivel2 quedaba
+  -- padre e hija a la vez (viola R2-10). El UPSERT no lo impide: la
+  -- Clave_Unificacion es el PAR, asi que las dos filas entran.
+  --
+  -- POR QUE NO LO VEIA LA BATERIA: el arquetipo de esc5 tiene DOS direcciones
+  -- ('BR 5' contra 'AP 301'), y con dos miembros no hay cadena de niveles que
+  -- lo destape. CA-U05 vigila exactamente esto y pasaba por falta de dato, no
+  -- por correccion. Es el unico defecto de la lista que CORROMPE datos en vez
+  -- de dejar de producirlos: con datos reales basta una persona con tres
+  -- nomenclaturas de niveles distintos en la misma puerta.
+  --
+  -- NO SE TOCA EL CRITERIO, solo la reduccion. Entre varios padres posibles
+  -- gana el de nivel MAS BAJO -- que es la direccion del criterio actual, el
+  -- que el censo describe como "gana la nomenclatura de menor nivel" -- y el
+  -- desempate por cod_dw_persona_ubic es DETERMINISTA a proposito: sin el, el
+  -- padre elegido podria variar entre corridas y romperia los checksums de
+  -- convergencia CA-C02..CA-C04.
   CREATE TABLE bdm_tempo.stg_regla2_e05_pares
   DISTSTYLE KEY DISTKEY(cod_dw_persona_ubic)
   AS
-  SELECT DISTINCT
-    b.cod_dw_persona_ubic,
-    a.cod_dw_persona_ubic AS id_padre
-  FROM bdm_tempo.stg_regla2_e05_a a
-  JOIN bdm_tempo.stg_regla2_e05_a b
-    ON a.id_buro_persona = b.id_buro_persona
-   AND a.texto_ubicacion = b.texto_ubicacion
-   AND a.cod_dw_tipo_ubicacion_dir = b.cod_dw_tipo_ubicacion_dir
-   AND a.cod_dw_municipio = b.cod_dw_municipio
-   AND a.cod_dw_persona_ubic <> b.cod_dw_persona_ubic
-   AND a.complemento <> b.complemento
-   AND COALESCE(a.nivel_pri,99) < COALESCE(b.nivel_pri,99)
-  WHERE a.nomenclatura_pri IS NOT NULL
-    AND b.nomenclatura_pri IS NOT NULL
-    AND a.nomenclatura_pri <> b.nomenclatura_pri;
+  SELECT cod_dw_persona_ubic, id_padre
+  FROM (
+    SELECT
+      b.cod_dw_persona_ubic,
+      a.cod_dw_persona_ubic AS id_padre,
+      ROW_NUMBER() OVER (
+        PARTITION BY b.cod_dw_persona_ubic
+        ORDER BY COALESCE(a.nivel_pri, 99), a.cod_dw_persona_ubic
+      ) AS rn
+    FROM bdm_tempo.stg_regla2_e05_a a
+    JOIN bdm_tempo.stg_regla2_e05_a b
+      ON a.id_buro_persona = b.id_buro_persona
+     AND a.texto_ubicacion = b.texto_ubicacion
+     AND a.cod_dw_tipo_ubicacion_dir = b.cod_dw_tipo_ubicacion_dir
+     AND a.cod_dw_municipio = b.cod_dw_municipio
+     AND a.cod_dw_persona_ubic <> b.cod_dw_persona_ubic
+     AND a.complemento <> b.complemento
+     AND COALESCE(a.nivel_pri,99) < COALESCE(b.nivel_pri,99)
+    WHERE a.nomenclatura_pri IS NOT NULL
+      AND b.nomenclatura_pri IS NOT NULL
+      AND a.nomenclatura_pri <> b.nomenclatura_pri
+  ) r
+  WHERE rn = 1;
 
   -- Persistencia condicional al modo (Tarea 6.1, Req 5.1..5.6).
   -- 1) Materializar el resultado de la regla (SELECT DISTINCT, Req 5.5).
