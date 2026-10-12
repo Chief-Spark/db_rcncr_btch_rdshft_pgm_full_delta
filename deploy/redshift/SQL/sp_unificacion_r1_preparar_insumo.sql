@@ -51,7 +51,39 @@ BEGIN
   FROM bdm_tempo.v_xpm_relacion_persona_ubicacion rpu
   JOIN bdm_tempo.v_xpm_ubicacion_estandarizada ubi ON rpu.cod_dw_ubic = ubi.cod_dw_ubic
   LEFT JOIN bdm_tempo.v_xpm_direccion_fisica df ON rpu.cod_dw_direccion_fisica = df.cod_dw_direccion_fisica
-  JOIN bdm_tempo.v_xpm_reporte_relacion_persona_ubica rep ON rpu.cod_dw_persona_ubic = rep.cod_dw_persona_ubic
+  -- SLCOPRBA-1355: LEFT JOIN, no INNER.
+  --
+  -- Era un INNER JOIN, de modo que una direccion SIN NINGUNA entidad que la
+  -- reporte quedaba FUERA del insumo y no podia unificarse nunca -- ni en FULL
+  -- ni en DELTA, ni en esta corrida ni en las siguientes. No daba error: daba
+  -- cero, en silencio.
+  --
+  -- El propio COALESCE(COUNT(DISTINCT ...), 0) de arriba lo delataba: con un
+  -- INNER JOIN el conteo nunca puede ser 0, asi que ese COALESCE era codigo
+  -- muerto. La agregacion estaba escrita para un LEFT JOIN y el join no.
+  --
+  -- EL LEGADO TRATA EL CONTEO COMO NULLABLE, y por tanto admite la direccion
+  -- sin reporte. En PRO_UnificacionR2.sql TODO uso aritmetico de
+  -- Numero_entidades_que_Reportan va envuelto en COALESCE(...,0) -- lineas 531
+  -- y 712, que son justo la formula del ID que ordena ORDEN y desempata al
+  -- padre del motor -- y las direcciones que el propio proceso crea se
+  -- insertan con CAST(NULL AS INTEGER) en esa columna (lineas 1679, 1701,
+  -- 1725, 3507, 3529). Si V_Insumo_Unificacion_Regla2 hiciera INNER JOIN
+  -- contra el reporte, la columna no podria ser nula y esos COALESCE no
+  -- existirian.
+  --
+  -- COMO SE ENCONTRO: el paso de mutacion de la bateria mock agrega una
+  -- direccion nueva sin sembrarle reporte -- a proposito, porque el escenario 1
+  -- no mira entidades. El INNER JOIN la descartaba y el DELTA2 daba 0 filas en
+  -- vez de 200 (CA-U08/U09/U10 en los jobs #302 a #307). La persona SI entraba
+  -- al driver, que lee la vista sin este join: por eso personas_distintas subia
+  -- 100 y relaciones_entrada 300, y total_unificaciones seguia en 0.
+  --
+  -- CONSECUENCIA EN DATOS REALES, que es lo que importa de verdad: toda
+  -- direccion sin entidad reportante estaba excluida de las Reglas 1 y 2. Entre
+  -- ellas, las que el MOTOR crea: rpu_generada nace sin fila de reporte, de modo
+  -- que la direccion fusionada no volvia a entrar al insumo nunca.
+  LEFT JOIN bdm_tempo.v_xpm_reporte_relacion_persona_ubica rep ON rpu.cod_dw_persona_ubic = rep.cod_dw_persona_ubic
   LEFT JOIN bdm_tempo.v_xpm_ciiu_persona ciiu ON rpu.id_buro_persona = ciiu.id_buro_persona
   LEFT JOIN bdm_datos.tipo_ubicacion_dir tud ON rpu.cod_dw_tipo_ubicacion_dir = tud.cod_dw_tipo_ubicacion_dir
   WHERE 1 = 1
