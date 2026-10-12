@@ -16,7 +16,7 @@
 -- tablero vale justamente por las filas que no son PASSED.
 --
 -- ESTADOS: PASSED | FAILED | NO_IMPLEMENTADO | SIN_DATO | BLOQUEADO |
---          REVISION_MANUAL  (definidos en strct/13_ddl_cert_criterios.sql)
+--          REVISION_MANUAL | NO_APLICA  (definidos en strct/13_ddl_cert_criterios.sql)
 --
 -- Prerequisito: 13_ddl_cert_criterios.sql desplegado; un ciclo mock corrido.
 -- NONATOMIC consistente con el resto de la cadena.
@@ -251,16 +251,37 @@ BEGIN
   -- ==================================================================
   -- REGLA 2
   -- ==================================================================
-  -- Los escenarios 1 a 4 se afirman con el censo, que ya cuenta direcciones y
-  -- personas por sello. Un sello con 0 direcciones es FAILED: el arquetipo
-  -- existe, luego el escenario tenia que disparar.
+  -- Los escenarios 1 a 4 se afirman con el censo, que cuenta direcciones y
+  -- personas por sello.
+  --
+  -- LA FASE IMPORTA, y la primera version no lo tenia en cuenta. Un DELTA sobre
+  -- datos SIN MUTAR no produce unificaciones nuevas: el censo reporta 0 en todos
+  -- los sellos y ese 0 es el comportamiento CORRECTO -- es justo lo que CA-U07
+  -- del gate por arquetipo afirma como PASSED ("filas nuevas del lote
+  -- 1356602=0, esperado 0"). Juzgarlo FAILED convertia el acierto en defecto: en
+  -- el job #318 la columna de evolucion por fase mostraba R2-01..R2-05 en rojo
+  -- en DELTA1 y DELTA2 teniendolos bien.
+  --
+  --   cualquier fase con > 0  -> PASSED. Es el caso del DELTA2, donde la
+  --                              mutacion aporta 200 direcciones al sello H1.
+  --   DELTA con 0             -> NO_APLICA. No hay nada nuevo que resolver; el
+  --                              criterio se certifica en la fase FULL.
+  --   FULL / FULL2 con 0      -> FAILED. El arquetipo existe, el escenario
+  --                              tenia que disparar.
   INSERT INTO bdm_datos.cert_resultado
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
   SELECT p_lote, p_fase, m.criterio,
-         CASE WHEN COALESCE(c.direcciones, 0) > 0 THEN 'PASSED' ELSE 'FAILED' END,
+         CASE WHEN COALESCE(c.direcciones, 0) > 0  THEN 'PASSED'
+              WHEN p_fase NOT IN ('FULL', 'FULL2') THEN 'NO_APLICA'
+              ELSE 'FAILED' END,
          'sello ' || m.n_id || ': direcciones='
            || CAST(COALESCE(c.direcciones, 0) AS VARCHAR)
-           || ', personas=' || CAST(COALESCE(c.personas, 0) AS VARCHAR),
+           || ', personas=' || CAST(COALESCE(c.personas, 0) AS VARCHAR)
+           || CASE WHEN COALESCE(c.direcciones, 0) = 0
+                    AND p_fase NOT IN ('FULL', 'FULL2')
+                   THEN '. Cero es correcto en un DELTA sobre datos sin mutar; '
+                        || 'este criterio se certifica en la fase FULL.'
+                   ELSE '' END,
          GETDATE(), CURRENT_USER
   FROM ( SELECT 'R2-01' AS criterio, 'H1' AS n_id UNION ALL
          SELECT 'R2-02', 'K2' UNION ALL
@@ -637,22 +658,43 @@ BEGIN
   -- veredicto, y la ausencia de lote se reporta como SIN_DATO con su razon.
   INSERT INTO bdm_datos.cert_resultado
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  -- EL ESTADO DEL LOTE NO ES EL CRITERIO. La guia de QA lo dice explicitamente:
+  -- "el UNLOAD (exportar) y el COPY (cargar) tocan S3. En QA sin permisos S3
+  -- esos pasos de I/O pueden fallar; es esperado y no bloqueante. Los criterios
+  -- de abajo validan el comportamiento de DATOS y de ESTADO, que no depende del
+  -- archivo S3."
+  --
+  -- La primera version exigia estado = 'exportado' y por eso salio FAILED en el
+  -- job #318, con el rol IAM rcncr-batch-redshift-geo sin asociar al cluster.
+  -- Pero la parte de datos del criterio HABIA pasado: 56000 candidatos marcados
+  -- 'pendiente de geocodificacion' contra un conteo_esperado de 56000. Lo unico
+  -- que fallo fue el UNLOAD, que el documento excluye del criterio.
+  --
+  -- Ahora decide primero el conteo -- la parte que si pertenece al criterio -- y
+  -- el estado del Lote solo distingue certificado de bloqueado por I/O.
   SELECT p_lote, p_fase, 'CA-01',
-         CASE WHEN m.lote IS NULL                                   THEN 'SIN_DATO'
-              WHEN lc.estado = 'exportado'
-               AND COALESCE(ga.pendientes, 0) = COALESCE(lc.conteo_esperado, -1)
-                                                                    THEN 'PASSED'
+         CASE WHEN m.lote IS NULL                                  THEN 'SIN_DATO'
+              WHEN COALESCE(ga.pendientes, 0)
+                   <> COALESCE(lc.conteo_esperado, -1)             THEN 'FAILED'
+              WHEN lc.estado = 'exportado'                         THEN 'PASSED'
+              WHEN lc.estado = 'fallido'
+               AND lc.fase_fallo = 'exportacion'                   THEN 'BLOQUEADO'
               ELSE 'FAILED' END,
          'lote GEO=' || COALESCE(CAST(m.lote AS VARCHAR), 'ninguno (no se asigno Lote)')
            || ', estado=' || COALESCE(lc.estado, '-')
            || ', conteo_esperado=' || COALESCE(CAST(lc.conteo_esperado AS VARCHAR), '-')
            || ', ubicaciones pendientes de geocodificacion='
            || CAST(COALESCE(ga.pendientes, 0) AS VARCHAR)
-           || CASE WHEN m.lote IS NULL
-                   THEN '. Sin Lote no hay nada que afirmar: revisar si el '
-                        || 'Exportador_GEO quedo fallido (rol IAM sin asociar al cluster) '
-                        || 'o si no habia Ubicacion_Candidata.'
-                   ELSE '' END,
+           || CASE
+                WHEN m.lote IS NULL
+                THEN '. Sin Lote no hay nada que afirmar: revisar si el '
+                     || 'Exportador_GEO quedo fallido o si no habia Ubicacion_Candidata.'
+                WHEN lc.estado = 'fallido' AND lc.fase_fallo = 'exportacion'
+                THEN '. El Lote y el marcado de candidatos SI cuadran, que es lo '
+                     || 'que el criterio pide. Lo que fallo es el UNLOAD a S3 ('
+                     || COALESCE(LEFT(lc.ultimo_error, 180), 'sin detalle')
+                     || '), que la guia de QA declara esperado y no bloqueante.'
+                ELSE '' END,
          GETDATE(), CURRENT_USER
   FROM      ( SELECT MAX(lote) AS lote FROM bdm_datos.geo_lote_control_mock ) m
   LEFT JOIN bdm_datos.geo_lote_control_mock lc
