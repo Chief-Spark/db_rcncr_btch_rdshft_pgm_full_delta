@@ -12,7 +12,8 @@
 --     cod_dw_persona_ubic = id_buro_persona * 10 + k
 -- de donde  ARQ = (cod_dw_persona_ubic / 10 - 9000000) / 10000.
 --
--- Se acota a BETWEEN 90100000 AND 95609999, el rango de la semilla: las
+-- Se acota a BETWEEN 90100000 AND 95909999, el rango de la semilla
+-- (incluye la banda 9570000..9590999 del Grupo A): las
 -- direcciones que genera el motor llevan clave FNV_HASH y calcularian un ARQ
 -- sin sentido. Hoy no pueden aparecer como HIJA (nacen sin unificar y quedan
 -- solas en su grupo), pero el filtro lo garantiza aunque eso cambie.
@@ -100,7 +101,16 @@ BEGIN
     SELECT 53, 3 UNION ALL
     SELECT 54, 3 UNION ALL
     SELECT 55, 2 UNION ALL
-    SELECT 56, 1
+    SELECT 56, 1 UNION ALL
+    -- SLCOPRBA-1355: arquetipos del Grupo A (banda 9570000..9590999).
+    --   57  CIIU 82  padre CRR, hija LAB  -> 1 pareja  (cierra R1-07)
+    --   58  CIIU 90  padre CRR, hija LAB  -> 1 pareja  (cierra R1-07)
+    --   59  hija BLOQUEADA                -> 0 parejas (cierra R1-06 y G-04)
+    -- El 0 del 59 es la afirmacion: el filtro de bloqueo saca a la hija del
+    -- insumo y el grupo se queda sin con que unificar.
+    SELECT 57, 1 UNION ALL
+    SELECT 58, 1 UNION ALL
+    SELECT 59, 0
   ) v;
 
   CREATE TABLE bdm_tempo.stg_gate_arq_real
@@ -112,7 +122,7 @@ BEGIN
     COUNT(DISTINCT u.cod_dw_persona_ubic / 10)                      AS personas,
     SUM(CASE WHEN u.lote = p_lote THEN 1 ELSE 0 END)                AS filas_del_lote
   FROM bdm_datos.unificacion_direccion_mock u
-  WHERE u.cod_dw_persona_ubic BETWEEN 90100000 AND 95609999
+  WHERE u.cod_dw_persona_ubic BETWEEN 90100000 AND 95909999
   GROUP BY 1;
 
   -- ------------------------------------------------------------------
@@ -140,9 +150,9 @@ BEGIN
 
     INSERT INTO bdm_stage.mock_unif_ca_result (criterio_ca, estado, detalle)
     SELECT 'FULL/CA-U02',
-           CASE WHEN SUM(filas) = 51000 THEN 'PASSED' ELSE 'FAILED' END,
+           CASE WHEN SUM(filas) = 53000 THEN 'PASSED' ELSE 'FAILED' END,
            'total unificacion_direccion_mock=' || CAST(COALESCE(SUM(filas), 0) AS VARCHAR)
-             || ' (esperado 51000)'
+             || ' (esperado 53000 = 51000 + 2000 de los ARQ 57 y 58)'
     FROM bdm_tempo.stg_gate_arq_real;
 
     INSERT INTO bdm_stage.mock_unif_ca_result (criterio_ca, estado, detalle)
@@ -220,9 +230,9 @@ BEGIN
     -- Lo que ya estaba no se re-escribe: el total del FULL sigue en pie.
     INSERT INTO bdm_stage.mock_unif_ca_result (criterio_ca, estado, detalle)
     SELECT 'DELTA2/CA-U10',
-           CASE WHEN SUM(filas) = 51200 THEN 'PASSED' ELSE 'FAILED' END,
+           CASE WHEN SUM(filas) = 53200 THEN 'PASSED' ELSE 'FAILED' END,
            'total tras la mutacion=' || CAST(COALESCE(SUM(filas), 0) AS VARCHAR)
-             || ' (esperado 51200 = 51000 del FULL + 200 nuevas)'
+             || ' (esperado 53200 = 53000 del FULL + 200 nuevas)'
     FROM bdm_tempo.stg_gate_arq_real;
   END IF;
 
