@@ -160,6 +160,30 @@ BEGIN
         AND u.cod_dw_direccion_unificada = s.cod_dw_direccion_unificada);
   END IF;
 
+  -- SLCOPRBA-1355: SELLO DE esc6, para que el censo lo pueda contar.
+  --
+  -- El legado NO marca esc6, y con razon: es el ULTIMO escenario y nadie lee
+  -- la marca despues. Pero sin marca una direccion resuelta por esc6 queda en
+  -- el staging con n_id NULL, exactamente igual que una que NO resolvio nadie
+  -- -- y esa es justo la distincion que bdm_datos.unif_escenario_censo tiene
+  -- que medir. Sin este sello el censo no puede separar "lo hizo esc6" de
+  -- "falta implementar".
+  --
+  -- 'E6' NO ES UN SELLO DEL LEGADO. PRO_UnificacionR2.sql usa H1, K2, L3, X4,
+  -- B5, A6 y C7, y ninguno para esc6. El censo lo declara como tal en su
+  -- columna ref_legado, para que nadie lo confunda con uno portado.
+  --
+  -- No cambia ningun resultado: nada lee el VALOR de n_id (solo si es nulo, y
+  -- aqui se marca despues del ultimo escenario), y stg_regla2_e2 se dropea al
+  -- cerrar la Regla 2.
+  UPDATE bdm_tempo.stg_mock_regla2_e2
+  SET id_padre        = stg.cod_dw_direccion_unificada,
+      ind_unificacion = 'S',
+      n_id            = 'E6'
+  FROM bdm_tempo.sp_unificacion_mock_r2_esc6_frecuencia_complemento_gana_persist stg
+  WHERE bdm_tempo.stg_mock_regla2_e2.cod_dw_persona_ubic = stg.cod_dw_persona_ubic
+    AND bdm_tempo.stg_mock_regla2_e2.id_padre IS NULL;
+
   DROP TABLE IF EXISTS bdm_tempo.sp_unificacion_mock_r2_esc6_frecuencia_complemento_gana_persist;
 
 

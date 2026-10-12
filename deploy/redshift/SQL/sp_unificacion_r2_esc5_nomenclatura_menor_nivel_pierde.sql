@@ -134,7 +134,11 @@ BEGIN
   UPDATE bdm_tempo.stg_regla2_e2
   SET id_padre = e.id_padre,
       ind_unificacion = 'S',
-      n_id = 'E5'
+      -- SLCOPRBA-1355: el legado sella esc5 con 'C7'
+      -- (PRO_UnificacionR2.sql linea 3991), no con 'E5'. Nada lee el VALOR
+      -- de n_id, asi que no cambia ningun resultado; se alinea porque una
+      -- diferencia gratuita estorbaria en la conciliacion contra el legado.
+      n_id = 'C7'
   FROM bdm_tempo.stg_regla2_e05_pares e
   WHERE bdm_tempo.stg_regla2_e2.cod_dw_persona_ubic = e.cod_dw_persona_ubic
     AND bdm_tempo.stg_regla2_e2.id_padre IS NULL;
