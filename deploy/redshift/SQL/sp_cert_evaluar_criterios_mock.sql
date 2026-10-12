@@ -46,8 +46,17 @@ BEGIN
   DROP TABLE IF EXISTS bdm_tempo.stg_cert_pares;
   DROP TABLE IF EXISTS bdm_tempo.stg_cert_ent;
 
+  -- DISTSTYLE ALL en las dos tablas de apoyo, por dos razones:
+  --   1) Son chicas (del orden de 50 mil filas), de modo que replicarlas sale
+  --      mas barato que redistribuirlas en cada join.
+  --   2) Los criterios R2-10, R2-11, R2-14, G-02 y G-03 hacen SELF-JOIN de
+  --      stg_cert_pares con la condicion hija = padre. Ningun DISTKEY puede
+  --      colocalizar las dos caras de ese join, asi que una clave de
+  --      distribucion no compraria nada y si costaba el error del job #315:
+  --      el DISTKEY tiene que ser una columna de la LISTA DEL SELECT, y aqui
+  --      cod_dw_persona_ubic sale con alias 'hija'.
   CREATE TABLE bdm_tempo.stg_cert_ent
-  DISTSTYLE KEY DISTKEY(cod_dw_persona_ubic)
+  DISTSTYLE ALL
   AS
   SELECT cod_dw_persona_ubic,
          COUNT(DISTINCT id_buro_suscriptor) AS entidades
@@ -55,7 +64,7 @@ BEGIN
   GROUP  BY 1;
 
   CREATE TABLE bdm_tempo.stg_cert_pares
-  DISTSTYLE KEY DISTKEY(cod_dw_persona_ubic)
+  DISTSTYLE ALL
   AS
   SELECT
     u.cod_dw_persona_ubic                      AS hija,
@@ -66,6 +75,12 @@ BEGIN
     rh.id_buro_persona                         AS persona_hija,
     rp.id_buro_persona                         AS persona_padre,
     rh.ind_unificacion                         AS ind_unif_hija,
+    -- El ind_unificacion ALMACENADO en la tabla base, que es distinto del
+    -- derivado de la vista: el derivado vale 1 para TODA hija despues de la
+    -- corrida, de modo que no sirve para preguntar si la direccion YA ERA hija
+    -- ANTES. La matriz lo siembra en 1 en las posiciones YA_UNIF (ARQ 5, 10,
+    -- 15, 20), y eso es lo que hace verificable la segunda mitad de R1-06.
+    rb.ind_unificacion                         AS ind_unif_base,
     COALESCE(rh.bloqueado, 0)                  AS bloqueado_hija,
     COALESCE(rp.bloqueado, 0)                  AS bloqueado_padre,
     th.descripcion_tipo_ubicacion_dir          AS tipo_hija,
@@ -87,7 +102,9 @@ BEGIN
   LEFT JOIN       bdm_tempo.stg_cert_ent ep
                ON ep.cod_dw_persona_ubic = u.cod_dw_direccion_unificada
   LEFT JOIN       bdm_tempo.v_mock_ciiu_persona ci
-               ON ci.id_buro_persona = rh.id_buro_persona;
+               ON ci.id_buro_persona = rh.id_buro_persona
+  LEFT JOIN       bdm_stage.relacion_persona_ubicacion rb
+               ON rb.cod_dw_persona_ubic = u.cod_dw_persona_ubic;
 
   -- ==================================================================
   -- REGLA 1
@@ -165,16 +182,41 @@ BEGIN
          GETDATE(), CURRENT_USER
   FROM   bdm_tempo.stg_cert_pares;
 
-  -- R1-06. Ninguna hija puede estar bloqueada, y ninguna direccion que ya era
-  -- hija de una corrida anterior puede recibir un padre nuevo en esta.
+  -- R1-06. Dos mitades, y solo una tiene dato.
+  --   "ya son hijas": SI es verificable. La matriz siembra ind_unificacion = 1
+  --      en las posiciones YA_UNIF, y ninguna de esas direcciones puede
+  --      aparecer como hija de una pareja nueva.
+  --   "bloqueadas": NO hay dato. El seed nunca escribe bloqueado y la vista lo
+  --      fija en 0 en sus dos ramas. Un COUNT(*) = 0 sobre cero direcciones
+  --      bloqueadas no es evidencia de nada -- seria un PASSED vacuo, el mismo
+  --      defecto que corregi en G-02 y R2-14.
+  -- Por eso el veredicto exige que exista dato de las dos mitades; si falta la
+  -- de bloqueo, el criterio queda SIN_DATO y el detalle dice cual mitad si se
+  -- verifico. G-04 sigue el bloqueo por separado.
   INSERT INTO bdm_datos.cert_resultado
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
   SELECT p_lote, p_fase, 'R1-06',
-         CASE WHEN COUNT(*) = 0 THEN 'PASSED' ELSE 'FAILED' END,
-         'parejas con hija bloqueada o ya unificada antes=' || CAST(COUNT(*) AS VARCHAR),
+         CASE WHEN SUM(viola) > 0                     THEN 'FAILED'
+              WHEN SUM(hay_bloqueo) = 0               THEN 'SIN_DATO'
+              ELSE 'PASSED' END,
+         'parejas cuya hija ya era hija antes de la corrida='
+           || CAST(COALESCE(SUM(CASE WHEN ya_era_hija = 1 THEN 1 ELSE 0 END), 0) AS VARCHAR)
+           || ', parejas con hija bloqueada='
+           || CAST(COALESCE(SUM(CASE WHEN bloq = 1 THEN 1 ELSE 0 END), 0) AS VARCHAR)
+           || ', direcciones bloqueadas en el universo='
+           || CAST(COALESCE(SUM(hay_bloqueo), 0) AS VARCHAR)
+           || '. Con 0 bloqueadas la mitad de bloqueo no se puede afirmar (ver G-04).',
          GETDATE(), CURRENT_USER
-  FROM   bdm_tempo.stg_cert_pares
-  WHERE  bloqueado_hija = 1;
+  FROM ( SELECT CASE WHEN COALESCE(p.ind_unif_base, 0) = 1 THEN 1 ELSE 0 END AS ya_era_hija,
+                CASE WHEN p.bloqueado_hija = 1 THEN 1 ELSE 0 END             AS bloq,
+                CASE WHEN COALESCE(p.ind_unif_base, 0) = 1
+                       OR p.bloqueado_hija = 1 THEN 1 ELSE 0 END             AS viola,
+                0                                                            AS hay_bloqueo
+           FROM bdm_tempo.stg_cert_pares p
+         UNION ALL
+         SELECT 0, 0, 0, COUNT(*)
+           FROM bdm_tempo.v_mock_relacion_persona_ubicacion
+          WHERE COALESCE(bloqueado, 0) = 1 ) r16;
 
   -- R1-07. El baseline es verificable solo si el universo TIENE los tres
   -- valores. Mientras falten 82 y 90 el criterio no se puede afirmar: el
@@ -329,25 +371,23 @@ BEGIN
   -- con STRPOS: se busca la nomenclatura y despues se vuelve a buscar en el
   -- resto de la cadena; si aparece otra vez, esta repetida. Se enmarca con
   -- espacios para no confundir 'CA' dentro de otra palabra.
-  FROM ( SELECT GREATEST(MAX(CASE WHEN d.vacio = 1 THEN 1 ELSE 0 END),
-                         MAX(CASE WHEN d.repetida = 1 THEN 1 ELSE 0 END)) AS malos
-           FROM ( SELECT g.cod_dw_direccion_fisica,
-                         CASE WHEN NULLIF(TRIM(COALESCE(g.complemento, '')), '') IS NULL
-                              THEN 1 ELSE 0 END AS vacio,
-                         MAX(CASE
-                               WHEN n.nomenclatura IS NOT NULL
-                                AND STRPOS( SUBSTRING( ' ' || g.complemento || ' ',
-                                                       STRPOS(' ' || g.complemento || ' ',
-                                                              ' ' || TRIM(n.nomenclatura) || ' ')
-                                                       + LENGTH(TRIM(n.nomenclatura)) + 1 ),
-                                            ' ' || TRIM(n.nomenclatura) || ' ' ) > 0
-                               THEN 1 ELSE 0 END) AS repetida
-                    FROM      bdm_datos.direccion_fisica_generada_mock g
-                    LEFT JOIN bdm_datos.nomenclatura n
-                           ON STRPOS(' ' || g.complemento || ' ',
-                                     ' ' || TRIM(n.nomenclatura) || ' ') > 0
-                   GROUP BY 1, 2, g.complemento ) d
-          GROUP BY d.cod_dw_direccion_fisica ) z;
+  FROM ( SELECT g.cod_dw_direccion_fisica,
+                MAX(CASE
+                      WHEN NULLIF(TRIM(COALESCE(g.complemento, '')), '') IS NULL
+                      THEN 1
+                      WHEN n.nomenclatura IS NOT NULL
+                       AND STRPOS( SUBSTRING( ' ' || g.complemento || ' ',
+                                              STRPOS(' ' || g.complemento || ' ',
+                                                     ' ' || TRIM(n.nomenclatura) || ' ')
+                                              + LENGTH(TRIM(n.nomenclatura)) + 1 ),
+                                   ' ' || TRIM(n.nomenclatura) || ' ' ) > 0
+                      THEN 1
+                      ELSE 0 END) AS malos
+           FROM      bdm_datos.direccion_fisica_generada_mock g
+           LEFT JOIN bdm_datos.nomenclatura n
+                  ON STRPOS(' ' || g.complemento || ' ',
+                            ' ' || TRIM(n.nomenclatura) || ' ') > 0
+          GROUP BY 1 ) z;
 
   -- R2-13. El diccionario existe y se construyo con frecuencias.
   INSERT INTO bdm_datos.cert_resultado
@@ -584,27 +624,44 @@ BEGIN
 
   -- CA-01. Es el unico de los cinco con variante mock: el ciclo mock invoca
   -- sp_geo_exportar_insumo_mock, de modo que se afirma con dato de la bateria.
+  --
+  -- LA FORMA IMPORTA: la version anterior arrancaba en
+  -- "FROM (SELECT ... FROM geo_lote_control_mock WHERE lote = (SELECT MAX...))".
+  -- Con la tabla VACIA esa subconsulta devuelve CERO filas, el INSERT no
+  -- inserta nada y el criterio sale SIN_EVALUAR -- que en el tablero significa
+  -- "defecto del gate", no "no hay lote GEO". Y vacia es justo como queda en
+  -- DEV: el job #315 mostro el rol IAM rcncr-batch-redshift-geo sin asociar al
+  -- cluster y despues "0 Ubicacion_Candidata".
+  -- Ahora el FROM es un MAX() sin GROUP BY, que SIEMPRE devuelve exactamente
+  -- una fila (NULL si la tabla esta vacia). Asi el criterio siempre escribe su
+  -- veredicto, y la ausencia de lote se reporta como SIN_DATO con su razon.
   INSERT INTO bdm_datos.cert_resultado
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
   SELECT p_lote, p_fase, 'CA-01',
-         CASE WHEN lc.lote IS NULL THEN 'SIN_DATO'
+         CASE WHEN m.lote IS NULL                                   THEN 'SIN_DATO'
               WHEN lc.estado = 'exportado'
                AND COALESCE(ga.pendientes, 0) = COALESCE(lc.conteo_esperado, -1)
-              THEN 'PASSED' ELSE 'FAILED' END,
-         'lote GEO=' || COALESCE(CAST(lc.lote AS VARCHAR), 'ninguno')
+                                                                    THEN 'PASSED'
+              ELSE 'FAILED' END,
+         'lote GEO=' || COALESCE(CAST(m.lote AS VARCHAR), 'ninguno (no se asigno Lote)')
            || ', estado=' || COALESCE(lc.estado, '-')
            || ', conteo_esperado=' || COALESCE(CAST(lc.conteo_esperado AS VARCHAR), '-')
            || ', ubicaciones pendientes de geocodificacion='
-           || CAST(COALESCE(ga.pendientes, 0) AS VARCHAR),
+           || CAST(COALESCE(ga.pendientes, 0) AS VARCHAR)
+           || CASE WHEN m.lote IS NULL
+                   THEN '. Sin Lote no hay nada que afirmar: revisar si el '
+                        || 'Exportador_GEO quedo fallido (rol IAM sin asociar al cluster) '
+                        || 'o si no habia Ubicacion_Candidata.'
+                   ELSE '' END,
          GETDATE(), CURRENT_USER
-  FROM ( SELECT lote, estado, conteo_esperado
-           FROM bdm_datos.geo_lote_control_mock
-          WHERE lote = ( SELECT MAX(lote) FROM bdm_datos.geo_lote_control_mock ) ) lc
+  FROM      ( SELECT MAX(lote) AS lote FROM bdm_datos.geo_lote_control_mock ) m
+  LEFT JOIN bdm_datos.geo_lote_control_mock lc
+         ON lc.lote = m.lote
   LEFT JOIN ( SELECT lote, COUNT(*) AS pendientes
                 FROM bdm_datos.geo_atributos_mock
                WHERE estado_geo = 'pendiente de geocodificacion'
                GROUP BY 1 ) ga
-         ON ga.lote = lc.lote;
+         ON ga.lote = m.lote;
 
   -- CA-02, CA-03, CA-05: el Cargador_GEO y el Reenganchador no tienen variante
   -- mock. Se ejercitan sobre las tablas reales con un Lote preparado a mano,
