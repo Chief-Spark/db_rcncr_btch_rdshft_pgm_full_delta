@@ -90,6 +90,36 @@ BEGIN
   --     Es el COMPLEMENTO exacto de esc3: esc3 resuelve "sin NIT, misma
   --     nomenclatura" uniendo contra un padre real; esta etapa resuelve "CON
   --     NIT, misma nomenclatura" creando una direccion nueva.
+  -- SLCOPRBA-1355 (B): JERARQUIA de la direccion = cuantos tokens del catalogo
+  -- aparecen en su complemento. 'AP 9' tiene 1, 'AP 302 TO 5' tiene 2,
+  -- 'AP 301 TO 2 CS 4' tiene 3. MENOS componentes = mas general = PADRE.
+  --
+  -- Antes el padre se elegia por a.id_orden (fecha + entidades) ascendente. Eso
+  -- coincidia con el padre correcto SOLO por accidente: en DENTRO, FUERA y NULL
+  -- las tres direcciones comparten fecha, el id_orden empata y desempataba
+  -- cod_dw_persona_ubic, que pone primero al k = 1 ('AP 9'). En CABALLO el k = 1
+  -- tiene fecha POSTERIOR, su id_orden es mayor, pierde, y el motor se queda sin
+  -- construir la direccion fusionada: por eso ARQ 54 daba 2000 filas en vez de
+  -- 3000 y faltaban 1000 direcciones generadas en el job #303.
+  --
+  -- El legado tampoco usa la fecha aqui: elige por MDIR, que su propio
+  -- comentario define como "ID para identificar la direccion de mayor
+  -- jerarquia" (linea 891 de PRO_UnificacionR2.sql), y ordena por MDIR antes
+  -- que por nada mas (lineas 1337 y 1405). MDIR se calcula con SQL dinamico que
+  -- genera columnas val<N>; contar los tokens del catalogo es la lectura
+  -- directa de esa jerarquia sin decodificar el pivote, y queda anotado como
+  -- aproximacion deliberada.
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_nit_ncomp;
+  CREATE TABLE bdm_tempo.stg_motor_nit_ncomp
+  DISTSTYLE KEY DISTKEY(cod_dw_persona_ubic)
+  AS
+  SELECT e.cod_dw_persona_ubic,
+         COUNT(DISTINCT TRIM(n.nomenclatura)) AS n_comp
+  FROM bdm_tempo.stg_regla2_e2 e
+  JOIN bdm_datos.nomenclatura n
+    ON UPPER(COALESCE(e.complemento, '')) LIKE '%' || TRIM(n.nomenclatura) || '%'
+  GROUP BY 1;
+
   CREATE TABLE bdm_tempo.stg_motor_nit_base
   DISTSTYLE KEY DISTKEY(id_buro_persona)
   AS
@@ -112,12 +142,15 @@ BEGIN
     ( (DATE_PART(year,  COALESCE(e.fecha_relacion_persona_ubicaci, DATE '1900-01-01')) - 1900) * 10000
     +  DATE_PART(month, COALESCE(e.fecha_relacion_persona_ubicaci, DATE '1900-01-01')) * 100
     +  DATE_PART(day,   COALESCE(e.fecha_relacion_persona_ubicaci, DATE '1900-01-01'))
-    +  COALESCE(e.numero_entidades_reportan, 0) + 10000000 ) AS id_orden
+    +  COALESCE(e.numero_entidades_reportan, 0) + 10000000 ) AS id_orden,
+    COALESCE(nc.n_comp, 99) AS n_comp
   FROM bdm_tempo.stg_regla2_e2 e
   JOIN bdm_tempo.stg_regla2_insumo i
     ON i.cod_dw_persona_ubic = e.cod_dw_persona_ubic
   JOIN bdm_datos.nomenclatura nmc
     ON UPPER(COALESCE(e.complemento, '')) LIKE TRIM(nmc.nomenclatura) || '%'
+  LEFT JOIN bdm_tempo.stg_motor_nit_ncomp nc
+    ON nc.cod_dw_persona_ubic = e.cod_dw_persona_ubic
   WHERE e.ind_unificacion = 'N'
     -- SLCOPRBA-1355: comparacion TEXTUAL. cod_tipo_ident_fte es VARCHAR(20)
     -- en el legado y en el mock; la via real lo exponia como INTEGER y el
@@ -134,7 +167,8 @@ BEGIN
     ROW_NUMBER() OVER (
       PARTITION BY a.id_buro_persona, a.texto_ubicacion,
                    a.cod_dw_tipo_ubicacion_dir, a.cod_dw_municipio, a.nomen_pri
-      ORDER BY a.id_orden, a.cod_dw_persona_ubic
+      -- JERARQUIA primero; la fecha solo desempata entre iguales.
+      ORDER BY a.n_comp, a.id_orden, a.cod_dw_persona_ubic
     ) AS orden
   FROM bdm_tempo.stg_motor_nit_base a
   WHERE EXISTS ( SELECT 1

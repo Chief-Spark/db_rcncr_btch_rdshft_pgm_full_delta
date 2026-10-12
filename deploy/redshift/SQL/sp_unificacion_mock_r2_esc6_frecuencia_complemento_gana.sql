@@ -29,25 +29,62 @@ BEGIN
    AND a.id_buro_persona = dc.id_buro_persona
   GROUP BY 1;
 
+  -- SLCOPRBA-1355 (C): UN SOLO PADRE POR HIJA.
+  -- Antes este CREATE terminaba en 'WHERE fa.freq > fb.freq' y nada mas, de
+  -- modo que una direccion recibia un par por CADA candidato de frecuencia
+  -- mayor. Con el arquetipo E6 -- 'CA 1 LT 2' (frecuencia 5), 'CA 3 LT 4' (5),
+  -- 'CA 9' (3) -- las dos primeras EMPATAN en el maximo, ninguna puede ser hija
+  -- de la otra, y 'CA 9' acababa con DOS padres. Es lo que el job #303 reporto
+  -- como "direcciones con mas de un padre=4000" en CA-U05 y CA-C06, y lo
+  -- confirmo la consulta sobre la persona 9460000:
+  --     94600003 -> 94600001   (CA 9 -> CA 1 LT 2)
+  --     94600003 -> 94600002   (CA 9 -> CA 3 LT 4)
+  -- El conteo salia bien (2 filas por persona) pero la FORMA estaba mal: una
+  -- hija con dos padres en vez de dos hijas con un padre. Por eso CA-U01 no lo
+  -- veia y CA-U05 si.
+  --
+  -- Todos los demas escenarios ya reducen a un padre: esc1 y esc2 con
+  -- ROW_NUMBER ... rn = 1, esc3 con el MAX(ORDEN) del legado. esc6 era el unico
+  -- sin reduccion. El desempate secundario por cod_dw_persona_ubic es
+  -- DETERMINISTA a proposito: sin el, el padre elegido entre dos frecuencias
+  -- iguales podria variar entre corridas y romperia CA-C02..C04, que comparan
+  -- por checksum.
+  --
+  -- PENDIENTE, y NO se toca aqui: el CRITERIO de esc6. La frecuencia no rompe
+  -- el empate 5/5, asi que tras este cambio E6 produce 1 fila por persona en
+  -- vez de 2 y CA-U01 lo reportara. El 'esc6' del legado no es un escenario de
+  -- emparejamiento sino un SITIO DE CREACION de direcciones: Tmp_Unificacion_
+  -- E061_D empareja con T1.ID > T2.ID y su ID_PADRE lleva el marcador /*#6*/
+  -- del secuenciador MAX_ID, es decir el sitio 2 que sigue sin implementar.
+  -- Hasta decodificarlo no hay con que fijar el criterio correcto, y es
+  -- preferible un dato consistente e incompleto a un dato corrupto.
   CREATE TABLE bdm_tempo.stg_mock_regla2_e06_pares
   DISTSTYLE KEY DISTKEY(cod_dw_persona_ubic)
   AS
-  SELECT DISTINCT
-    b.cod_dw_persona_ubic,
-    a.cod_dw_persona_ubic AS id_padre
-  FROM (SELECT * FROM bdm_tempo.stg_mock_regla2_e2 WHERE ind_unificacion = 'N') a
-  JOIN (SELECT * FROM bdm_tempo.stg_mock_regla2_e2 WHERE ind_unificacion = 'N') b
-    ON a.id_buro_persona = b.id_buro_persona
-   AND a.texto_ubicacion = b.texto_ubicacion
-   AND a.cod_dw_tipo_ubicacion_dir = b.cod_dw_tipo_ubicacion_dir
-   AND a.cod_dw_municipio = b.cod_dw_municipio
-   AND a.cod_dw_persona_ubic <> b.cod_dw_persona_ubic
-   AND a.complemento <> b.complemento
-  JOIN bdm_tempo.stg_mock_regla2_e06_freq fa
-    ON a.cod_dw_persona_ubic = fa.cod_dw_persona_ubic
-  JOIN bdm_tempo.stg_mock_regla2_e06_freq fb
-    ON b.cod_dw_persona_ubic = fb.cod_dw_persona_ubic
-  WHERE fa.freq > fb.freq;
+  SELECT cod_dw_persona_ubic, id_padre
+  FROM (
+    SELECT
+      b.cod_dw_persona_ubic,
+      a.cod_dw_persona_ubic AS id_padre,
+      ROW_NUMBER() OVER (
+        PARTITION BY b.cod_dw_persona_ubic
+        ORDER BY fa.freq DESC, a.cod_dw_persona_ubic
+      ) AS rn
+    FROM (SELECT * FROM bdm_tempo.stg_mock_regla2_e2 WHERE ind_unificacion = 'N') a
+    JOIN (SELECT * FROM bdm_tempo.stg_mock_regla2_e2 WHERE ind_unificacion = 'N') b
+      ON a.id_buro_persona = b.id_buro_persona
+     AND a.texto_ubicacion = b.texto_ubicacion
+     AND a.cod_dw_tipo_ubicacion_dir = b.cod_dw_tipo_ubicacion_dir
+     AND a.cod_dw_municipio = b.cod_dw_municipio
+     AND a.cod_dw_persona_ubic <> b.cod_dw_persona_ubic
+     AND a.complemento <> b.complemento
+    JOIN bdm_tempo.stg_mock_regla2_e06_freq fa
+      ON a.cod_dw_persona_ubic = fa.cod_dw_persona_ubic
+    JOIN bdm_tempo.stg_mock_regla2_e06_freq fb
+      ON b.cod_dw_persona_ubic = fb.cod_dw_persona_ubic
+    WHERE fa.freq > fb.freq
+  )
+  WHERE rn = 1;
 
   -- Persistencia condicional al modo (Tarea 6.1, Req 5.1..5.6).
   -- 1) Materializar el resultado de la regla (SELECT DISTINCT, Req 5.5).
