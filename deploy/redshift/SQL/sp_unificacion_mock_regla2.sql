@@ -88,6 +88,17 @@ BEGIN
       e.id_buro_persona,
       CASE
         WHEN e.n_id IS NOT NULL THEN e.n_id
+        -- SLCOPRBA-1355: el PADRE de una unificacion no es una brecha.
+        -- Cada escenario (salvo el motor) sella SOLO a la hija: el UPDATE
+        -- matchea cod_dw_persona_ubic contra la tabla persist, que lleva las
+        -- hijas. El padre se queda sin sello. Sin esta rama caia en
+        -- SIN_RESOLVER, y en la primera corrida del censo (job #310) eso
+        -- inflo la brecha de ~6000 a 31000: 25000 de esas filas eran los
+        -- padres de las 25000 unificaciones que SI ocurrieron
+        -- (H1 5000 + K2/L3/B5/C7/E6 4000 cada uno).
+        -- El motor no sufre el problema porque marca el grupo COMPLETO, y por
+        -- eso X4 da ~3 direcciones por persona.
+        WHEN pad.id_padre IS NOT NULL THEN 'PADRE'
         -- "tenia pareja posible" = en su grupo hay al menos DOS complementos
         -- distintos, que es lo que todos los escenarios exigen para emparejar.
         -- Un grupo de un solo complemento no es una brecha: no hay con que
@@ -107,6 +118,10 @@ BEGIN
         ELSE 'SIN_PAREJA'
       END AS bucket
     FROM bdm_tempo.stg_mock_regla2_e2 e
+    LEFT JOIN ( SELECT DISTINCT id_padre
+                  FROM bdm_tempo.stg_mock_regla2_e2
+                 WHERE id_padre IS NOT NULL ) pad
+      ON pad.id_padre = e.cod_dw_persona_ubic
   ) b
   GROUP BY 1;
 
@@ -134,6 +149,8 @@ BEGIN
                        'sello AGREGADO: el legado no marca esc6'            UNION ALL
     SELECT 'A6', 'A6', 'sitio 2 (etapa 5.1) - NO IMPLEMENTADO',
                        'PRO_UnificacionR2.sql lineas 3533 y 3573'           UNION ALL
+    SELECT 'PADRE', NULL, 'PADRE de una unificacion de esta corrida (no es brecha)',
+                       'ninguno: el escenario sella solo a la hija'         UNION ALL
     SELECT 'SIN_RESOLVER', NULL, 'sin resolver, tenia pareja posible <- BRECHA',
                        'ninguno: es lo que el port no cubre'                UNION ALL
     SELECT 'SIN_PAREJA',   NULL, 'sin pareja posible (un solo complemento en el grupo)',
