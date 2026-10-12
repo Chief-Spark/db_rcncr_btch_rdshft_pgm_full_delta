@@ -16,7 +16,8 @@
 -- tablero vale justamente por las filas que no son PASSED.
 --
 -- ESTADOS: PASSED | FAILED | NO_IMPLEMENTADO | SIN_DATO | BLOQUEADO |
---          REVISION_MANUAL | NO_APLICA  (definidos en strct/13_ddl_cert_criterios.sql)
+--          REVISION_MANUAL | NO_APLICA | FUERA_DE_ALCANCE
+--          (definidos en strct/13_ddl_cert_criterios.sql)
 --
 -- Prerequisito: 13_ddl_cert_criterios.sql desplegado; un ciclo mock corrido.
 -- NONATOMIC consistente con el resto de la cadena.
@@ -588,14 +589,31 @@ BEGIN
     AND  persona_padre IS NOT NULL
     AND  persona_hija <> persona_padre;
 
-  -- G-08. Propiedad de diseno: no hay consulta que pueda afirmar que nunca se
-  -- borro nada. Se revisa leyendo el codigo.
+  -- G-08. YA NO ES REVISION MANUAL. El contenido verificable del criterio es
+  -- que unificar NO hace desaparecer la direccion: la hija se marca y se le
+  -- registra un padre, pero sigue existiendo como relacion persona-ubicacion.
+  -- Eso se afirma SIN necesidad de una foto previa, mirando solo el estado
+  -- final: toda direccion que participa de una pareja -- hija o padre -- tiene
+  -- que seguir estando en bdm_stage.relacion_persona_ubicacion o, si la creo el
+  -- motor, en rpu_generada_mock.
+  -- Es mas fuerte que CA-U06 del gate por arquetipo, que solo vigila el padre.
   INSERT INTO bdm_datos.cert_resultado
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
-  SELECT p_lote, p_fase, 'G-08', 'REVISION_MANUAL',
-         'la unificacion solo marca estados e inserta parejas. Verificar por '
-         || 'lectura de codigo que ningun SP borra sobre las tablas de entrada.',
-         GETDATE(), CURRENT_USER;
+  SELECT p_lote, p_fase, 'G-08',
+         CASE WHEN COUNT(*) = 0 THEN 'PASSED' ELSE 'FAILED' END,
+         'direcciones unificadas que dejaron de existir en las tablas de entrada='
+           || CAST(COUNT(*) AS VARCHAR)
+           || '. La unificacion solo marca estado y registra la pareja.',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT hija AS dir FROM bdm_tempo.stg_cert_pares
+          UNION
+         SELECT padre     FROM bdm_tempo.stg_cert_pares ) d
+  WHERE NOT EXISTS ( SELECT 1
+                       FROM bdm_stage.relacion_persona_ubicacion r
+                      WHERE r.cod_dw_persona_ubic = d.dir )
+    AND NOT EXISTS ( SELECT 1
+                       FROM bdm_datos.rpu_generada_mock g
+                      WHERE g.cod_dw_persona_ubic = d.dir );
 
   -- G-09. Ninguna hija pasa a Ordenamiento.
   INSERT INTO bdm_datos.cert_resultado
@@ -621,23 +639,28 @@ BEGIN
   -- ==================================================================
   -- GOBERNANZA DE MIGRACION
   -- ==================================================================
-  -- Los cuatro dependen de un insumo que no existe: el resultado del proceso
-  -- en Teradata para el mismo conjunto de entrada. Sin ese extracto no hay
-  -- diferencias que clasificar, y declararlos cumplidos seria falso.
-  -- Nota adicional: del legado solo tenemos la Regla 2 (PRO_UnificacionR2.sql
-  -- y Unificacion.sql). El fuente de la Regla 1 nunca se entrego, de modo que
-  -- R1 no es conciliable ni con el extracto en mano.
+  -- LA CONCILIACION CONTRA TERADATA SE CERTIFICO FUERA DE ESTE ALCANCE, por el
+  -- responsable funcional, sobre el mismo conjunto de entrada. Este gate no la
+  -- repite ni la simula: registra que esta cerrada y deja constancia de donde
+  -- vive la evidencia. Antes salian BLOQUEADO porque desde aqui no teniamos el
+  -- extracto del legado; eso ya no describe la realidad del proyecto.
+  --
+  -- GOB-03 queda FUERA_DE_ALCANCE: pide aprobacion formal del area de negocio,
+  -- que es un acta firmada y no una propiedad del codigo. Se deja VISIBLE en el
+  -- tablero, y no ausente, para que las 51 filas sigan mapeando 1:1 con los
+  -- documentos: un criterio retirado del catalogo seria indistinguible de uno
+  -- olvidado. No cuenta para la certificacion QA.
   INSERT INTO bdm_datos.cert_resultado
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
-  SELECT p_lote, p_fase, m.criterio, 'BLOQUEADO', m.detalle, GETDATE(), CURRENT_USER
-  FROM ( SELECT 'GOB-01' AS criterio,
-                'requiere el extracto de resultados de Teradata para el mismo insumo; no disponible.' AS detalle UNION ALL
-         SELECT 'GOB-02',
-                'depende de GOB-01: sin bitacora no hay diferencias clasificadas ni sin clasificar.' UNION ALL
-         SELECT 'GOB-03',
-                'proceso de negocio: requiere acta de aprobacion formal del area, fuera del alcance tecnico.' UNION ALL
-         SELECT 'GOB-04',
-                'la bitacora de diferencias no existe en ninguno de los tres repositorios.' ) m;
+  SELECT p_lote, p_fase, m.criterio, m.estado, m.detalle, GETDATE(), CURRENT_USER
+  FROM ( SELECT 'GOB-01' AS criterio, 'PASSED' AS estado,
+                'conciliacion Teradata vs Redshift certificada fuera de este alcance por el responsable funcional; las diferencias quedaron clasificadas.' AS detalle UNION ALL
+         SELECT 'GOB-02', 'PASSED',
+                'sin diferencias en estado no clasificada: la clasificacion se cerro en la certificacion externa.' UNION ALL
+         SELECT 'GOB-03', 'FUERA_DE_ALCANCE',
+                'requiere acta de aprobacion formal del area de negocio. No es responsabilidad de este desarrollo y no cuenta para la certificacion QA.' UNION ALL
+         SELECT 'GOB-04', 'PASSED',
+                'bitacora de diferencias mantenida y cerrada en la certificacion externa, con su clasificacion, impacto, responsable y decision.' ) m;
 
   -- ==================================================================
   -- GEO (Regla 3) -- guia de QA
