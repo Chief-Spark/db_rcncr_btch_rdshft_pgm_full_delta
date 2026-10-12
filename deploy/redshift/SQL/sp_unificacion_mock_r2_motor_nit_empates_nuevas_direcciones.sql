@@ -72,6 +72,8 @@ LANGUAGE plpgsql
 AS $$
 BEGIN
   DROP TABLE IF EXISTS bdm_tempo.stg_mock_motor_nit_base;
+  DROP TABLE IF EXISTS bdm_tempo.stg_mock_motor_nit_cand;
+  DROP TABLE IF EXISTS bdm_tempo.stg_mock_motor_nit_mdir;
   DROP TABLE IF EXISTS bdm_tempo.stg_mock_motor_nit_grupo;
   DROP TABLE IF EXISTS bdm_tempo.stg_mock_motor_nit_pares;
   DROP TABLE IF EXISTS bdm_tempo.stg_mock_motor_nit_componentes;
@@ -91,35 +93,71 @@ BEGIN
   --     Es el COMPLEMENTO exacto de esc3: esc3 resuelve "sin NIT, misma
   --     nomenclatura" uniendo contra un padre real; esta etapa resuelve "CON
   --     NIT, misma nomenclatura" creando una direccion nueva.
-  -- SLCOPRBA-1355 (B): JERARQUIA de la direccion = cuantos tokens del catalogo
-  -- aparecen en su complemento. 'AP 9' tiene 1, 'AP 302 TO 5' tiene 2,
-  -- 'AP 301 TO 2 CS 4' tiene 3. MENOS componentes = mas general = PADRE.
+  -- JERARQUIA DE LA DIRECCION: MDIR (PRO_UnificacionR2.sql linea 891,
+  -- "CALCULO DE MDIR --> ID para identificar la direccion de mayor jerarquia").
   --
-  -- Antes el padre se elegia por a.id_orden (fecha + entidades) ascendente. Eso
-  -- coincidia con el padre correcto SOLO por accidente: en DENTRO, FUERA y NULL
-  -- las tres direcciones comparten fecha, el id_orden empata y desempataba
-  -- cod_dw_persona_ubic, que pone primero al k = 1 ('AP 9'). En CABALLO el k = 1
-  -- tiene fecha POSTERIOR, su id_orden es mayor, pierde, y el motor se queda sin
-  -- construir la direccion fusionada: por eso ARQ 54 daba 2000 filas en vez de
-  -- 3000 y faltaban 1000 direcciones generadas en el job #303.
+  -- El legado NO elige al padre por fecha. Tmp_Unificacion_E031_codigo (linea
+  -- 1491) -- la tabla de la que sale COMPLEMENTO_PADRE -- se arma como
+  --     FROM      Tmp_Unificacion_E051_P T1    (el padre)
+  --     LEFT JOIN Tmp_Unificacion_E051_H T2    (la hija)
+  -- y E051_P (linea 1337) es
+  --     ROW_NUMBER() OVER (PARTITION BY COD_DW_UBIC, ID_BURO_PERSONA,
+  --                                     Cod_DW_Tipo_Ubicacion_Dir
+  --                        ORDER BY MDIR, ORDEN) = 1
+  -- o sea MDIR primero y ORDEN -- la fecha -- solo como desempate.
   --
-  -- El legado tampoco usa la fecha aqui: elige por MDIR, que su propio
-  -- comentario define como "ID para identificar la direccion de mayor
-  -- jerarquia" (linea 891 de PRO_UnificacionR2.sql), y ordena por MDIR antes
-  -- que por nada mas (lineas 1337 y 1405). MDIR se calcula con SQL dinamico que
-  -- genera columnas val<N>; contar los tokens del catalogo es la lectura
-  -- directa de esa jerarquia sin decodificar el pivote, y queda anotado como
-  -- aproximacion deliberada.
-  DROP TABLE IF EXISTS bdm_tempo.stg_mock_motor_nit_ncomp;
-  CREATE TABLE bdm_tempo.stg_mock_motor_nit_ncomp
-  DISTSTYLE KEY DISTKEY(cod_dw_persona_ubic)
-  AS
-  SELECT e.cod_dw_persona_ubic,
-         COUNT(DISTINCT TRIM(n.nomenclatura)) AS n_comp
-  FROM bdm_tempo.stg_mock_regla2_e2 e
-  JOIN bdm_stage.nomenclatura n
-    ON UPPER(COALESCE(e.complemento, '')) LIKE '%' || TRIM(n.nomenclatura) || '%'
-  GROUP BY 1;
+  -- MDIR se calcula en Tmp_Unificacion_E03_Bx con SQL dinamico que genera SQL
+  -- dinamico (lineas 905-940). La sentencia que ese generador produce es:
+  --     ROW_NUMBER() OVER (PARTITION BY cod_dw_ubic
+  --                        ORDER BY ID_COM11, ID_COM12, ..., val1, val2, ...)
+  --   ID_COM1<n> = COALESCE(MAX(CASE WHEN ID_COM1 = n
+  --                                  THEN nivel_complemento END),    99)
+  --   val<n>     = COALESCE(MAX(CASE WHEN ID_COM1 = n THEN valor END), 99999)
+  -- y ID_COM1 viene de E03_B1 (linea 790):
+  --     SUM(1) OVER (PARTITION BY Cod_DW_Persona_Ubic
+  --                  ORDER BY NOM.Nivel_Complemento ROWS UNBOUNDED PRECEDING)
+  -- ASCENDENTE (la variante DESC de la linea de arriba se llama ID_COM, sin el
+  -- 1, y MDIR no la usa).
+  --
+  -- Es decir: el slot n lleva el nivel del n-esimo componente MAS BAJO de la
+  -- direccion, y 99 cuando la direccion no llega a tener n componentes. El
+  -- orden es ASCENDENTE, de modo que el relleno con 99 manda al FINAL a las
+  -- direcciones con POCOS componentes. MDIR = 1 es la direccion con MAS
+  -- componentes y de nivel MAS BAJO: la mas RICA, no la mas pobre.
+  --
+  -- CORRECCION DE SLCOPRBA-1355 (B). La version anterior leyo MDIR al reves:
+  -- contaba tokens del catalogo y ordenaba ASCENDENTE, con lo que el padre
+  -- resultaba la direccion con MENOS componentes. Se vio en el job #305: el
+  -- arquetipo E6 ('CA 1 LT 2' / 'CA 3 LT 4' / 'CA 9') pasaba a tener de padre a
+  -- 'CA 9', sus hijas aportaban LT, entraba al motor y generaba 4000
+  -- direcciones que no le corresponden (ARQ 46-49 a 3000 filas, total 59000).
+  -- Con el orden correcto el padre de E6 es 'CA 1 LT 2' y ninguna hija aporta
+  -- nada: E6 no genera y sigue su camino hasta esc6, que es exactamente lo que
+  -- la semilla documenta.
+  --
+  -- La clave se materializa como cadena de ancho fijo para compararla
+  -- lexicograficamente igual que la tupla del legado: 2 digitos por nivel y 6
+  -- por valor, rellenando con '9' los slots ausentes ('99' y '999999'). El tope
+  -- de 15 componentes es el del legado (linea 1462: CASE WHEN MAX(CANTIDAD) >
+  -- 15 THEN 15). Un valor >= 999999 se satura al centinela; no ocurre con
+  -- numeros de puerta reales y queda anotado.
+  --
+  --
+  -- LIMITE CONOCIDO DEL TERMINO val<n>. En el legado valor = SUM(TO_NUMBER(
+  -- VALOR)) agrupado por (Cod_DW_Persona_Ubic, nomen) dentro de E03_B1, o sea
+  -- POR DIRECCION. Aqui sale de diccionario_complementos, que lo guarda como
+  -- MIN(valor_num) agrupado por (id_buro_persona, cod_dw_ubic, nomen), o sea
+  -- POR PERSONA: dos direcciones de la misma persona que comparten token leen
+  -- el MISMO valor. Solo importa cuando dos direcciones empatan en TODOS los
+  -- niveles; entonces el desempate cae en id_orden y cod_dw_persona_ubic, que
+  -- siguen siendo deterministas. En la matriz mock ocurre en E6 ('CA 1 LT 2'
+  -- frente a 'CA 3 LT 4') y el padre sale igual por cod_dw_persona_ubic.
+  -- Cerrarlo exige que el diccionario guarde el valor por direccion, que es un
+  -- cambio de su contrato y no de este SP.
+  -- El desempate por 'nomen' dentro de un mismo nivel NO esta en el legado: su
+  -- ID_COM1 no lleva orden secundario y en Teradata queda indeterminado. Se
+  -- agrega porque CA-C02..C04 comparan por checksum entre corridas y necesitan
+  -- un orden estable.
 
   CREATE TABLE bdm_tempo.stg_mock_motor_nit_base
   DISTSTYLE KEY DISTKEY(id_buro_persona)
@@ -133,7 +171,7 @@ BEGIN
     e.cod_dw_municipio,
     e.complemento,
     nmc.nomenclatura AS nomen_pri,
-    -- ID del legado (linea 712):
+    -- ORDEN del legado (linea 712), que ahora solo DESEMPATA:
     --   CAST(Fecha_Relacion_Persona_Ubicaci AS INTEGER)
     --   + (COALESCE(Numero_entidades_que_Reportan,0) + 10000000)
     -- CAST(date AS INTEGER) en Teradata da (anio-1900)*10000 + mes*100 + dia.
@@ -143,30 +181,22 @@ BEGIN
     ( (DATE_PART(year,  COALESCE(e.fecha_relacion_persona_ubicaci, DATE '1900-01-01')) - 1900) * 10000
     +  DATE_PART(month, COALESCE(e.fecha_relacion_persona_ubicaci, DATE '1900-01-01')) * 100
     +  DATE_PART(day,   COALESCE(e.fecha_relacion_persona_ubicaci, DATE '1900-01-01'))
-    +  COALESCE(e.numero_entidades_reportan, 0) + 10000000 ) AS id_orden,
-    COALESCE(nc.n_comp, 99) AS n_comp
+    +  COALESCE(e.numero_entidades_reportan, 0) + 10000000 ) AS id_orden
   FROM bdm_tempo.stg_mock_regla2_e2 e
   JOIN bdm_tempo.stg_mock_regla2_insumo i
     ON i.cod_dw_persona_ubic = e.cod_dw_persona_ubic
   JOIN bdm_stage.nomenclatura nmc
     ON UPPER(COALESCE(e.complemento, '')) LIKE TRIM(nmc.nomenclatura) || '%'
-  LEFT JOIN bdm_tempo.stg_mock_motor_nit_ncomp nc
-    ON nc.cod_dw_persona_ubic = e.cod_dw_persona_ubic
   WHERE e.ind_unificacion = 'N'
     AND COALESCE(TRIM(i.cod_tipo_ident_fte), '') = '3';
 
-  -- Solo los que tienen con quien emparejarse, y el orden que define al padre.
-  CREATE TABLE bdm_tempo.stg_mock_motor_nit_grupo
+  -- (1b) Tmp_Unificacion_E03_B (linea 703): los que tienen con quien
+  --      emparejarse. Aqui el PADRE todavia NO esta elegido -- en el legado
+  --      tampoco: E03_B es el auto-join y la eleccion llega en E051_P.
+  CREATE TABLE bdm_tempo.stg_mock_motor_nit_cand
   DISTSTYLE KEY DISTKEY(id_buro_persona)
   AS
-  SELECT
-    a.*,
-    ROW_NUMBER() OVER (
-      PARTITION BY a.id_buro_persona, a.texto_ubicacion,
-                   a.cod_dw_tipo_ubicacion_dir, a.cod_dw_municipio, a.nomen_pri
-      -- JERARQUIA primero; la fecha solo desempata entre iguales.
-      ORDER BY a.n_comp, a.id_orden, a.cod_dw_persona_ubic
-    ) AS orden
+  SELECT a.*
   FROM bdm_tempo.stg_mock_motor_nit_base a
   WHERE EXISTS ( SELECT 1
                    FROM bdm_tempo.stg_mock_motor_nit_base b
@@ -177,6 +207,80 @@ BEGIN
                     AND b.nomen_pri                 = a.nomen_pri
                     AND b.cod_dw_persona_ubic      <> a.cod_dw_persona_ubic
                     AND b.complemento              <> a.complemento );
+
+  -- (2) Tmp_Unificacion_E03_B1 (linea 787): descomposicion en componentes de
+  --     las direcciones implicadas. Es el insumo de MDIR, asi que se calcula
+  --     ANTES de elegir al padre.
+  CREATE TABLE bdm_tempo.stg_mock_motor_nit_componentes
+  DISTSTYLE KEY DISTKEY(id_buro_persona)
+  AS
+  SELECT DISTINCT
+    e.cod_dw_persona_ubic,
+    e.id_buro_persona,
+    dc.nomen,
+    -- El legado une al catalogo con LEFT JOIN: un nomen sin nivel no
+    -- desaparece, se va al final del orden.
+    COALESCE(cat.nivel_complemento, 99) AS nivel_complemento,
+    dc.valor
+  FROM bdm_tempo.stg_mock_motor_nit_cand e
+  JOIN bdm_stage.diccionario_complementos dc
+    ON dc.id_buro_persona = e.id_buro_persona
+   AND dc.cod_dw_ubic = e.cod_dw_ubic
+   AND UPPER(COALESCE(e.complemento, '')) LIKE '%' || dc.nomenclatura || '%'
+  LEFT JOIN bdm_stage.nomenclatura cat
+    ON cat.nomenclatura = dc.nomen;
+
+  -- (3) Tmp_Unificacion_E03_Bx (linea 891): MDIR, como clave comparable.
+  -- Un LISTAGG por subconsulta a proposito: Redshift no admite LISTAGG junto a
+  -- otra funcion de agregacion con DISTINCT, y conviene no apoyarse en que
+  -- acepte dos agregados ordenados en la misma proyeccion.
+  --
+  -- Los dos terminos NO se pueden entrelazar en una sola clave: el legado
+  -- ordena por TODOS los niveles y solo despues por TODOS los valores, y
+  -- (L1,L2,V1,V2) no da el mismo orden que (L1,V1,L2,V2).
+  CREATE TABLE bdm_tempo.stg_mock_motor_nit_mdir
+  DISTSTYLE KEY DISTKEY(cod_dw_persona_ubic)
+  AS
+  SELECT n.cod_dw_persona_ubic, n.niv_key, v.val_key
+  FROM (
+    SELECT c.cod_dw_persona_ubic,
+           RPAD( LISTAGG(LPAD(CAST(LEAST(c.nivel_complemento, 99) AS VARCHAR), 2, '0'), '')
+                   WITHIN GROUP (ORDER BY c.nivel_complemento, c.nomen),
+                 30, '9') AS niv_key
+    FROM bdm_tempo.stg_mock_motor_nit_componentes c
+    GROUP BY 1
+  ) n
+  JOIN (
+    SELECT c.cod_dw_persona_ubic,
+           RPAD( LISTAGG(LPAD(CAST(LEAST(COALESCE(CAST(NULLIF(REGEXP_REPLACE(COALESCE(c.valor, ''),
+                                                                            '[^0-9]', ''), '') AS BIGINT),
+                                                  999999), 999999) AS VARCHAR), 6, '0'), '')
+                   WITHIN GROUP (ORDER BY c.nivel_complemento, c.nomen),
+                 90, '9') AS val_key
+    FROM bdm_tempo.stg_mock_motor_nit_componentes c
+    GROUP BY 1
+  ) v
+    ON v.cod_dw_persona_ubic = n.cod_dw_persona_ubic;
+
+  -- (4) Tmp_Unificacion_E051_P / E051_H (lineas 1337 y 1405): el padre es
+  --     MDIR = 1 y las hijas el resto. Una direccion sin entrada en el
+  --     diccionario no tiene MDIR -- en el legado no llega a E03_B3 y no puede
+  --     ser padre; aqui la clave todo-9 la manda al final, con el mismo efecto.
+  CREATE TABLE bdm_tempo.stg_mock_motor_nit_grupo
+  DISTSTYLE KEY DISTKEY(id_buro_persona)
+  AS
+  SELECT
+    a.*,
+    ROW_NUMBER() OVER (
+      PARTITION BY a.id_buro_persona, a.texto_ubicacion,
+                   a.cod_dw_tipo_ubicacion_dir, a.cod_dw_municipio, a.nomen_pri
+      ORDER BY COALESCE(m.niv_key, REPEAT('9', 30)),
+               COALESCE(m.val_key, REPEAT('9', 90)),
+               a.id_orden, a.cod_dw_persona_ubic
+    ) AS orden
+  FROM bdm_tempo.stg_mock_motor_nit_cand a
+  LEFT JOIN bdm_tempo.stg_mock_motor_nit_mdir m
+    ON m.cod_dw_persona_ubic = a.cod_dw_persona_ubic;
 
   CREATE TABLE bdm_tempo.stg_mock_motor_nit_pares
   DISTSTYLE KEY DISTKEY(id_buro_persona)
@@ -196,30 +300,6 @@ BEGIN
    AND p.orden = 1
   WHERE h.orden > 1;
 
-  -- (2) Tmp_Unificacion_E03_B1 (linea 787): descomposicion en componentes de
-  --     las direcciones implicadas, padres e hijos.
-  CREATE TABLE bdm_tempo.stg_mock_motor_nit_componentes
-  DISTSTYLE KEY DISTKEY(id_buro_persona)
-  AS
-  SELECT DISTINCT
-    e.cod_dw_persona_ubic,
-    e.id_buro_persona,
-    dc.nomen,
-    -- El legado une al catalogo con LEFT JOIN: un nomen sin nivel no
-    -- desaparece, se va al final del orden.
-    COALESCE(cat.nivel_complemento, 99) AS nivel_complemento,
-    dc.valor
-  FROM bdm_tempo.stg_mock_regla2_e2 e
-  JOIN bdm_stage.diccionario_complementos dc
-    ON dc.id_buro_persona = e.id_buro_persona
-   AND dc.cod_dw_ubic = e.cod_dw_ubic
-   AND UPPER(COALESCE(e.complemento, '')) LIKE '%' || dc.nomenclatura || '%'
-  LEFT JOIN bdm_stage.nomenclatura cat
-    ON cat.nomenclatura = dc.nomen
-  WHERE EXISTS ( SELECT 1
-                   FROM bdm_tempo.stg_mock_motor_nit_pares p
-                  WHERE p.ubic_hijo  = e.cod_dw_persona_ubic
-                     OR p.ubic_padre = e.cod_dw_persona_ubic );
 
   -- (3) NUEVA_NOMENCLATURA: lo que aporta cada hijo y el padre no tiene.
   CREATE TABLE bdm_tempo.stg_mock_motor_nit_nueva_nomen

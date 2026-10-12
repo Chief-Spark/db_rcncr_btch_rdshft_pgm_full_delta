@@ -77,7 +77,8 @@ BEGIN
   DROP TABLE IF EXISTS bdm_tempo.stg_regla2_e05_pares;
   DROP TABLE IF EXISTS bdm_tempo.stg_regla2_e06_freq;
   DROP TABLE IF EXISTS bdm_tempo.stg_regla2_e06_pares;
-  DROP TABLE IF EXISTS bdm_tempo.stg_motor_nit_ncomp;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_nit_cand;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_nit_mdir;
   DROP TABLE IF EXISTS bdm_tempo.stg_motor_nit_base;
   DROP TABLE IF EXISTS bdm_tempo.stg_motor_nit_grupo;
   DROP TABLE IF EXISTS bdm_tempo.stg_motor_nit_pares;

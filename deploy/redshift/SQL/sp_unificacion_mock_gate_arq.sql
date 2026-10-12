@@ -90,10 +90,10 @@ BEGIN
     SELECT 43, 1 UNION ALL
     SELECT 44, 1 UNION ALL
     SELECT 45, 0 UNION ALL
-    SELECT 46, 2 UNION ALL
-    SELECT 47, 2 UNION ALL
-    SELECT 48, 2 UNION ALL
-    SELECT 49, 2 UNION ALL
+    SELECT 46, 1 UNION ALL
+    SELECT 47, 1 UNION ALL
+    SELECT 48, 1 UNION ALL
+    SELECT 49, 1 UNION ALL
     SELECT 50, 0 UNION ALL
     SELECT 51, 3 UNION ALL
     SELECT 52, 3 UNION ALL
@@ -140,9 +140,9 @@ BEGIN
 
     INSERT INTO bdm_stage.mock_unif_ca_result (criterio_ca, estado, detalle)
     SELECT 'FULL/CA-U02',
-           CASE WHEN SUM(filas) = 55000 THEN 'PASSED' ELSE 'FAILED' END,
+           CASE WHEN SUM(filas) = 51000 THEN 'PASSED' ELSE 'FAILED' END,
            'total unificacion_direccion_mock=' || CAST(COALESCE(SUM(filas), 0) AS VARCHAR)
-             || ' (esperado 55000)'
+             || ' (esperado 51000)'
     FROM bdm_tempo.stg_gate_arq_real;
 
     INSERT INTO bdm_stage.mock_unif_ca_result (criterio_ca, estado, detalle)
@@ -155,16 +155,21 @@ BEGIN
     FROM bdm_datos.direccion_fisica_generada_mock d;
 
     -- El complemento que el motor arma para E7. Es el criterio que distingue
-    -- "el motor corrio" de "el motor fusiono bien": lleva el complemento del
-    -- padre al frente, el aporte de los hijos ordenado por nivel (TO=4, CS=5) y
-    -- TO deduplicado, que lo aportan los DOS hijos.
+    -- "el motor corrio" de "el motor fusiono bien".
+    --
+    -- SLCOPRBA-1355: cambia con el arquetipo E7 reconstruido. El padre es el de
+    -- MAYOR jerarquia por MDIR -- 'TO 2 CS 4', niveles (4,5) -- y las dos hijas
+    -- 'TO 9 AP 1' y 'TO 7 AP 1', niveles (4,7), aportan AP con el MISMO valor,
+    -- de modo que la deduplicacion deja uno solo. Resultado 'TO 2 CS 4 AP 1',
+    -- identico en el grupo de tres y en la posicion YA_UNIF, que se queda con
+    -- dos: por eso este criterio sigue siendo UN conteo de un unico texto.
     INSERT INTO bdm_stage.mock_unif_ca_result (criterio_ca, estado, detalle)
     SELECT 'FULL/CA-U04',
            CASE WHEN COUNT(*) = 5000 THEN 'PASSED' ELSE 'FAILED' END,
-           'generadas con complemento ''AP 9 TO 2 CS 4''=' || CAST(COUNT(*) AS VARCHAR)
+           'generadas con complemento ''TO 2 CS 4 AP 1''=' || CAST(COUNT(*) AS VARCHAR)
              || ' (esperado 5000)'
     FROM bdm_datos.direccion_fisica_generada_mock d
-    WHERE TRIM(d.complemento) = 'AP 9 TO 2 CS 4';
+    WHERE TRIM(d.complemento) = 'TO 2 CS 4 AP 1';
 
   END IF;
 
@@ -215,9 +220,9 @@ BEGIN
     -- Lo que ya estaba no se re-escribe: el total del FULL sigue en pie.
     INSERT INTO bdm_stage.mock_unif_ca_result (criterio_ca, estado, detalle)
     SELECT 'DELTA2/CA-U10',
-           CASE WHEN SUM(filas) = 55200 THEN 'PASSED' ELSE 'FAILED' END,
+           CASE WHEN SUM(filas) = 51200 THEN 'PASSED' ELSE 'FAILED' END,
            'total tras la mutacion=' || CAST(COALESCE(SUM(filas), 0) AS VARCHAR)
-             || ' (esperado 55200 = 55000 del FULL + 200 nuevas)'
+             || ' (esperado 51200 = 51000 del FULL + 200 nuevas)'
     FROM bdm_tempo.stg_gate_arq_real;
   END IF;
 
