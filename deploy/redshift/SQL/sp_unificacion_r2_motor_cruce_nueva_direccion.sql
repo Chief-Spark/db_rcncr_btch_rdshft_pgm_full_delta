@@ -263,8 +263,15 @@ BEGIN
     g.cod_dw_tipo_ubicacion_dir,
     g.cod_dw_municipio,
     COUNT(*)                                      AS miembros,
+    -- Los DOS LISTAGG comparten el mismo WITHIN GROUP, y no solo porque Redshift
+    -- lo exija ("within group ORDER BY clauses for aggregate functions must be
+    -- the same"): es lo FIEL al legado. En Tmp_Unificacion_E061_E la lista de
+    -- personas y el complemento se construyen en la MISMA recursion
+    -- (T1 || ',' || T2 y T1 || ' ' || T2 avanzan juntos), de modo que ambas
+    -- comparten orden por construccion. El desempate por cod_dw_persona_ubic
+    -- sustituye al no-determinismo del legado ante longitudes iguales.
     LISTAGG(CAST(g.cod_dw_persona_ubic AS VARCHAR), ',')
-      WITHIN GROUP (ORDER BY g.cod_dw_persona_ubic) AS hijos,
+      WITHIN GROUP (ORDER BY g.id_len DESC, g.cod_dw_persona_ubic) AS hijos,
     LISTAGG(g.aporte, ' ')
       WITHIN GROUP (ORDER BY g.id_len DESC, g.cod_dw_persona_ubic) AS complemento_fusion
   FROM bdm_tempo.stg_motor_crz_grupo g
