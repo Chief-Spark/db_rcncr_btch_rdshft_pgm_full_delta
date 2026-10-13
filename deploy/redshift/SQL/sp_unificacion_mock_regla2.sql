@@ -45,9 +45,11 @@ BEGIN
   -- Orden del legado: cada etapa marca sus filas en stg_mock_regla2_e2 para que
   -- las POSTERIORES no las vuelvan a procesar.
   --   esc1/esc2 -> esc3 'L3' -> motor NIT 'X4' -> esc4 'B5'
-  --             -> motor NIVEL 'A6' -> esc5 'C7' -> esc6
-  -- Los dos sitios que crean direcciones (PRO_UnificacionR2.sql:1602 y :3423)
-  -- van INTERCALADOS, no al final: por eso el motor son dos llamadas.
+  --             -> motor NIVEL 'A6' -> esc5 'C7'
+  --             -> motor CRUCE 'A8' -> esc6
+  -- Los sitios que crean direcciones (PRO_UnificacionR2.sql:1602, :3423 y
+  -- :4016) van INTERCALADOS, no al final: por eso el motor son tres
+  -- llamadas y no una.
   CALL bdm_datos.sp_unificacion_mock_r2_esc3_sin_nit_misma_nomenclatura(p_modo, p_lote);
   CALL bdm_datos.sp_unificacion_mock_r2_motor_nit_empates_nuevas_direcciones(p_modo, p_lote);
   CALL bdm_datos.sp_unificacion_mock_r2_esc4_diccionario_frecuencia_complemento(p_modo, p_lote);
@@ -59,6 +61,18 @@ BEGIN
   -- iguales. No hay starvation entre ellos.
   CALL bdm_datos.sp_unificacion_mock_r2_motor_nivel_nueva_direccion(p_modo, p_lote);
   CALL bdm_datos.sp_unificacion_mock_r2_esc5_nomenclatura_menor_nivel_pierde(p_modo, p_lote);
+  -- SITIO 3 ('A8', etapa 6.1 del legado, PRO_UnificacionR2.sql:4016-4708).
+  -- El tercero de los cuatro sitios que crean direcciones, y el primero de los
+  -- dos que faltaban para R2-07. Entra AQUI, entre esc5 y esc6, que es su
+  -- posicion en el legado: esc5 subcaso 2 cierra en la linea 4011 y esc6
+  -- subcaso 1 abre en la 4016.
+  --
+  -- Su poblacion es DISJUNTA de todo lo anterior: exige que una nomenclatura
+  -- coincida en POSICION CRUZADA -- la que encabeza en un complemento va en
+  -- medio en el otro -- y que las colas se contengan. El sitio 2 ('A6') y esc5
+  -- ('C7') exigen coincidencia en la MISMA posicion, de modo que ningun par
+  -- puede entrar a los dos. El sello 'A8' lo fija el legado en la linea 4672.
+  CALL bdm_datos.sp_unificacion_mock_r2_motor_cruce_nueva_direccion(p_modo, p_lote);
   CALL bdm_datos.sp_unificacion_mock_r2_esc6_frecuencia_complemento_gana(p_modo, p_lote);
 
   -- ------------------------------------------------------------------
@@ -147,6 +161,8 @@ BEGIN
                        'sello AGREGADO: el legado no marca esc6'            UNION ALL
     SELECT 'A6', 'A6', 'sitio 2 (etapa 5.1) - direccion nueva por nivel distinto',
                        'PRO_UnificacionR2.sql linea 3423'                   UNION ALL
+    SELECT 'A8', 'A8', 'sitio 3 (etapa 6.1) - direccion nueva por nomenclatura cruzada',
+                       'PRO_UnificacionR2.sql linea 4016'                   UNION ALL
     SELECT 'PADRE', NULL, 'PADRE de una unificacion de esta corrida (no es brecha)',
                        'ninguno: el escenario sella solo a la hija'         UNION ALL
     SELECT 'SIN_RESOLVER', NULL, 'sin resolver, tenia pareja posible <- BRECHA',
