@@ -1,4 +1,4 @@
--- R3 — Regla 3 completa: dos escenarios, Diccionario de Via y puntaje
+-- R3 -- Regla 3 completa: dos escenarios, Diccionario de Via y puntaje
 -- Fuente: edf_views -> bdm_tempo.v_mock_* | Salida: bdm_datos.unificacion_direccion_mock
 -- Prerequisito: Regla 2 ejecutada; geo_atributos poblado por el Ciclo GEO
 --
@@ -60,7 +60,7 @@
 --
 --   (D3) UMBRAL DE PUERTA. El legado escribe ABS(diff) = 2, EXACTAMENTE dos, de
 --        modo que una diferencia de 1 no empareja -- y el comentario que esta
---        tres lineas arriba del propio legado dice "± 2 unidades". El codigo y
+--        tres lineas arriba del propio legado dice "+- 2 unidades". El codigo y
 --        su comentario se contradicen entre si; el criterio dice "umbral de
 --        mas/menos 2". Se implementa BETWEEN 1 AND 2.--
 --   (D4) ALCANCE DEL UMBRAL. En el legado el escenario 2 (puerta a +-2)

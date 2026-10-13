@@ -12,9 +12,9 @@
 --     cod_dw_persona_ubic = id_buro_persona * 10 + k
 -- de donde  ARQ = (cod_dw_persona_ubic / 10 - 9000000) / 10000.
 --
--- Se acota a BETWEEN 90100000 AND 96009999, el rango de la semilla
--- (incluye la banda 9570000..9590999 del Grupo A y la 9600000..9600999 del
--- ARQ 60, la cascada R1 -> R2): las
+-- Se acota a BETWEEN 90100000 AND 97009999, el rango de la semilla
+-- (incluye la banda 9570000..9590999 del Grupo A, la 9600000..9600999 del
+-- ARQ 60 -- la cascada R1 -> R2 -- y la 9610000..9700999 de la Regla 3): las
 -- direcciones que genera el motor llevan clave FNV_HASH y calcularian un ARQ
 -- sin sentido. Hoy no pueden aparecer como HIJA (nacen sin unificar y quedan
 -- solas en su grupo), pero el filtro lo garantiza aunque eso cambie.
@@ -118,7 +118,30 @@ BEGIN
     -- R2, de modo que k=1 es padre en una regla e hija en la otra. Un 1 aqui
     -- significaria que una de las dos mitades no disparo y G-02 volveria a
     -- quedarse sin evidencia.
-    SELECT 60, 2
+    SELECT 60, 2 UNION ALL
+    -- SLCOPRBA-1355: arquetipos de la Regla 3 (banda 9610000..9700999).
+    -- Uno por subcaso del criterio, y la mitad espera CERO a proposito: el
+    -- contraste entre el que unifica y el que no es lo que afirma el criterio.
+    --   61 una sola geolocalizada     -> 1   R3-02
+    --   62 ninguna geolocalizada      -> 1   R3-03 (gana la fecha)
+    --   63 las dos geolocalizadas     -> 1   R3-04 (gana el diccionario)
+    --   64 puerta a +-2               -> 1   R3-05
+    --   65 puerta a +-5               -> 0   R3-06  (contraste con el 64)
+    --   66 modificador de via '45B'   -> 0   R3-07
+    --   67 cuadrante en la principal  -> 1   R3-08  (NO excluye)
+    --   68 tipo MZ                    -> 0   R3-01
+    --   69 tipo Rural                 -> 0   R3-01
+    --   70 empate de diccionario      -> 0   R3-10
+    SELECT 61, 1 UNION ALL
+    SELECT 62, 1 UNION ALL
+    SELECT 63, 1 UNION ALL
+    SELECT 64, 1 UNION ALL
+    SELECT 65, 0 UNION ALL
+    SELECT 66, 0 UNION ALL
+    SELECT 67, 1 UNION ALL
+    SELECT 68, 0 UNION ALL
+    SELECT 69, 0 UNION ALL
+    SELECT 70, 0
   ) v;
 
   CREATE TABLE bdm_tempo.stg_gate_arq_real
@@ -130,7 +153,7 @@ BEGIN
     COUNT(DISTINCT u.cod_dw_persona_ubic / 10)                      AS personas,
     SUM(CASE WHEN u.lote = p_lote THEN 1 ELSE 0 END)                AS filas_del_lote
   FROM bdm_datos.unificacion_direccion_mock u
-  WHERE u.cod_dw_persona_ubic BETWEEN 90100000 AND 96009999
+  WHERE u.cod_dw_persona_ubic BETWEEN 90100000 AND 97009999
   GROUP BY 1;
 
   -- ------------------------------------------------------------------
@@ -158,9 +181,10 @@ BEGIN
 
     INSERT INTO bdm_stage.mock_unif_ca_result (criterio_ca, estado, detalle)
     SELECT 'FULL/CA-U02',
-           CASE WHEN SUM(filas) = 55000 THEN 'PASSED' ELSE 'FAILED' END,
+           CASE WHEN SUM(filas) = 60000 THEN 'PASSED' ELSE 'FAILED' END,
            'total unificacion_direccion_mock=' || CAST(COALESCE(SUM(filas), 0) AS VARCHAR)
-             || ' (esperado 55000 = 51000 + 2000 de los ARQ 57 y 58 + 2000 del ARQ 60)'
+             || ' (esperado 60000 = 51000 + 2000 de los ARQ 57 y 58 + 2000 del ARQ 60'
+             || ' + 5000 de la Regla 3, ARQ 61 a 70)'
     FROM bdm_tempo.stg_gate_arq_real;
 
     INSERT INTO bdm_stage.mock_unif_ca_result (criterio_ca, estado, detalle)
@@ -238,9 +262,9 @@ BEGIN
     -- Lo que ya estaba no se re-escribe: el total del FULL sigue en pie.
     INSERT INTO bdm_stage.mock_unif_ca_result (criterio_ca, estado, detalle)
     SELECT 'DELTA2/CA-U10',
-           CASE WHEN SUM(filas) = 55200 THEN 'PASSED' ELSE 'FAILED' END,
+           CASE WHEN SUM(filas) = 60200 THEN 'PASSED' ELSE 'FAILED' END,
            'total tras la mutacion=' || CAST(COALESCE(SUM(filas), 0) AS VARCHAR)
-             || ' (esperado 55200 = 55000 del FULL + 200 nuevas)'
+             || ' (esperado 60200 = 60000 del FULL + 200 nuevas)'
     FROM bdm_tempo.stg_gate_arq_real;
   END IF;
 
