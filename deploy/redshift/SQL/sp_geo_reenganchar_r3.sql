@@ -100,8 +100,19 @@ BEGIN
   --    las 'U'/pendientes/no geocodificadas quedan excluidas (Req 6.3, 10.2,
   --    10.4). La invocacion se aisla con un bloque de manejo de errores para
   --    que un fallo de la Regla 3 sea LOCAL al Lote y no aborte el global.
+  --    SLCOPRBA-1355: LA LLAMADA IBA SIN ARGUMENTOS y la firma pide dos
+  --    (p_modo, p_lote). No fallaba al desplegar -- CREATE OR REPLACE
+  --    PROCEDURE no compila el cuerpo -- sino en la primera invocacion, que
+  --    caia en el EXCEPTION de abajo y marcaba el Lote 'fallido' con un error
+  --    de aridez disfrazado de fallo de la Regla 3. Es el primero de los dos
+  --    defectos encadenados que CA-04 reporta; el segundo era que ninguna
+  --    vista de insumo leia geo_atributos, ya corregido en strct.
+  --    El reenganche es incremental por definicion: aporta coordenadas nuevas
+  --    a direcciones que ya existen, de modo que el modo es DELTA (upsert) y
+  --    nunca FULL. El Lote que sella las parejas es el Lote GEO, que es el que
+  --    permite rastrear que reenganche las produjo.
   BEGIN
-    CALL bdm_datos.sp_unificacion_r3_esc1_geo_misma_via_puerta_cercana();
+    CALL bdm_datos.sp_unificacion_r3_esc1_geo_misma_via_puerta_cercana('DELTA', in_lote);
   EXCEPTION WHEN OTHERS THEN
     -- 4.a) Fallo de la Regla 3 (Req 6.5): NO se insertan unificaciones del
     --      Lote (la propia Regla 3 hace su limpieza de staging al fallar),

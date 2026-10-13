@@ -17,9 +17,14 @@
 -- SP cierra esa brecha y es el punto de entrada de la bateria de certificacion.
 --
 -- DIFERENCIAS DELIBERADAS CON EL ORQUESTADOR REAL
--- 1. SIN Regla 3. R3 exige coordenadas (geo_atributos.latitud/longitud) y en la
---    via mock no hay enriquecimiento, de modo que nunca produciria filas.
---    Incluirla solo agregaria una etapa vacia a la evidencia.
+-- 1. CON Regla 3, desde SLCOPRBA-1355. Hasta entonces se omitia, y la razon
+--    era buena: R3 decide por coordenadas, en la via mock no habia ninguna y
+--    ademas las cuatro columnas de via (tipo_via_principal, via_principal,
+--    via_generadora, numero_puerta) eran CAST(NULL AS ...) en la vista, asi
+--    que la etapa habria quedado vacia. Lo que cambio: las columnas salen de
+--    la tabla, las vistas de ubicacion leen geo_atributos y el seed de R3
+--    siembra los tres subcasos de coordenadas. La etapa produce filas y es lo
+--    que hace verificables los diez criterios del bloque REGLA3.
 -- 2. El FULL resetea TAMBIEN las tablas GEO mock. Decision de la certificacion:
 --    "el FULL borra todo y hace un nuevo primer calculo de toda la data". En la
 --    via real el FULL NO toca geo_atributos (perderia el enriquecimiento ya
@@ -78,6 +83,7 @@ DECLARE
     -- Metricas por etapa (reales, no marcadores)
     v_unif_r1       BIGINT := 0;
     v_unif_r2       BIGINT := 0;
+    v_unif_r3       BIGINT := 0;
     v_geo_lote_ini  INTEGER := 0;
     v_geo_lote_fin  INTEGER := 0;
     v_geo_export    BIGINT := 0;
@@ -241,6 +247,34 @@ BEGIN
 
     CALL bdm_datos.unif_traza_mock_fin(v_corrida_id, 'geo', 'completado',
                                        0, 0, 0, v_geo_export, v_geo_cargados);
+
+    -- ---- Etapa REGLA 3 -----------------------------------------------------
+    -- SLCOPRBA-1355: la etapa se AGREGA al ciclo. Hasta ahora se omitia a
+    -- proposito, y el comentario de la cabecera decia que "incluirla solo
+    -- agregaria una etapa vacia a la evidencia". Era cierto y ya no lo es:
+    --   * las cuatro columnas de via eran CAST(NULL AS ...) en la vista mock,
+    --     de modo que R3 no tenia con que comparar;
+    --   * el insumo exigia coordenadas en AMBOS lados y ninguna ubicacion mock
+    --     las tenia, de modo que el emparejamiento no corria nunca.
+    -- Con las columnas pobladas, el Diccionario de Via construido y el seed de
+    -- R3 sembrado, la etapa produce filas y es lo que hace verificables los
+    -- diez criterios del bloque REGLA3.
+    --
+    -- VA DESPUES DE GEO Y NO ANTES, y eso es la cascada: R3 decide por
+    -- coordenadas, y las coordenadas de la via real las escribe el Ciclo GEO
+    -- en geo_atributos. Correrla antes seria evaluarla a ciegas.
+    v_etapa_actual := 'regla3';
+    CALL bdm_datos.unif_traza_mock_inicio(v_corrida_id, v_lote, 'regla3');
+    CALL bdm_datos.sp_unificacion_mock_regla3(v_modo_efectivo, v_lote, v_wm_anterior);
+
+    SELECT COUNT(*)
+      INTO v_unif_r3
+      FROM bdm_datos.unificacion_direccion_mock
+     WHERE unifica_atributos = 3
+       AND (lote = v_lote OR lote_actualizacion = v_lote);
+
+    CALL bdm_datos.unif_traza_mock_fin(v_corrida_id, 'regla3', 'completado',
+                                       0, 0, v_unif_r3, NULL, NULL);
 
     -- (8) WATERMARK NUEVO ----------------------------------------------------
     -- Nivel dia: MAX(fecha) entre las relaciones con fecha NO NULA de la

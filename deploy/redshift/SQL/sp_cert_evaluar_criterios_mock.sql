@@ -107,6 +107,58 @@ BEGIN
   LEFT JOIN       bdm_stage.relacion_persona_ubicacion rb
                ON rb.cod_dw_persona_ubic = u.cod_dw_persona_ubic;
 
+  -- SLCOPRBA-1355: apoyo del bloque REGLA3. Una fila por direccion de la banda
+  -- de arquetipos de R3 (ARQ 61..70 -> 96100000..97009999) con TODO lo que los
+  -- diez criterios necesitan: el tipo de via, los cuatro componentes, las
+  -- coordenadas, el ultimo reporte, el numero de entidades, el numero de FILAS
+  -- de reporte -- que es lo que cuenta el Diccionario de Via, distinto de las
+  -- entidades, que son suscriptores DISTINTOS -- y su padre de regla 3 si lo
+  -- tiene. Con esto cada criterio queda en una consulta corta y legible.
+  --
+  -- DISTSTYLE ALL: son 20 mil filas y varios criterios hacen self-join por
+  -- dir = padre_r3, que ningun DISTKEY puede colocalizar (misma razon que
+  -- stg_cert_pares; ver el job #315).
+  DROP TABLE IF EXISTS bdm_tempo.stg_cert_r3;
+  CREATE TABLE bdm_tempo.stg_cert_r3
+  DISTSTYLE ALL
+  AS
+  SELECT
+    rpu.cod_dw_persona_ubic                                           AS dir,
+    CAST((rpu.cod_dw_persona_ubic / 10 - 9000000) / 10000 AS INTEGER) AS arq,
+    rpu.id_buro_persona                                               AS persona,
+    ubi.tipo_ubicacion,
+    ubi.texto_ubicacion,
+    ubi.latitud,
+    ubi.longitud,
+    df.tipo_via_principal,
+    df.via_principal,
+    df.via_generadora,
+    df.numero_puerta,
+    CAST(NULLIF(REGEXP_SUBSTR(COALESCE(df.numero_puerta, ''), '^[0-9]+$'), '') AS INTEGER) AS puerta_num,
+    COALESCE(r.entidades, 0) AS entidades,
+    COALESCE(r.filas_rep, 0) AS filas_rep,
+    r.ult_reporte,
+    u3.padre                 AS padre_r3
+  FROM bdm_tempo.v_mock_relacion_persona_ubicacion rpu
+  JOIN bdm_tempo.v_mock_ubicacion_estandarizada ubi
+    ON ubi.cod_dw_ubic = rpu.cod_dw_ubic
+  LEFT JOIN bdm_tempo.v_mock_direccion_fisica df
+    ON df.cod_dw_direccion_fisica = rpu.cod_dw_direccion_fisica
+  LEFT JOIN ( SELECT cod_dw_persona_ubic,
+                     COUNT(DISTINCT id_buro_suscriptor) AS entidades,
+                     COUNT(*)                           AS filas_rep,
+                     MAX(fecha_reporte)                 AS ult_reporte
+                FROM bdm_tempo.v_mock_reporte_relacion_persona_ubica
+               GROUP BY 1 ) r
+    ON r.cod_dw_persona_ubic = rpu.cod_dw_persona_ubic
+  LEFT JOIN ( SELECT cod_dw_persona_ubic,
+                     MAX(cod_dw_direccion_unificada) AS padre
+                FROM bdm_datos.unificacion_direccion_mock
+               WHERE unifica_atributos = 3
+               GROUP BY 1 ) u3
+    ON u3.cod_dw_persona_ubic = rpu.cod_dw_persona_ubic
+  WHERE rpu.cod_dw_persona_ubic BETWEEN 96100000 AND 97009999;
+
   -- ==================================================================
   -- REGLA 1
   -- ==================================================================
@@ -476,48 +528,293 @@ BEGIN
   -- ==================================================================
   -- REGLA 3
   -- ==================================================================
-  -- Los diez criterios comparten tres bloqueos encadenados, por eso se
-  -- reportan juntos y con la misma razon: (1) el ciclo mock NO llama a la
-  -- Regla 3; (2) en la via real latitud y longitud son CAST(NULL AS
-  -- DECIMAL(10,6)) en v_xpm_contacto_direccion, o sea el datashare no las
-  -- publica; (3) ninguna vista de insumo lee bdm_datos.geo_atributos, que es
-  -- donde el Ciclo GEO escribe las coordenadas -- GEO y R3 no estan
-  -- conectadas. Ademas no existe el Diccionario de Via.
+  -- SLCOPRBA-1355: los diez criterios pasan de un bloque de texto a diez
+  -- aserciones con dato. Lo que lo permitio fue encontrar el legado -- el
+  -- bloque anterior decia "no existe el Diccionario de Via" y si existe:
+  -- P0021_UNIFICACION_111.BTQ lo construye -- y cerrar los tres agujeros de
+  -- estructura: las cuatro columnas de via eran CAST(NULL AS ...) en la vista,
+  -- las coordenadas no salian de geo_atributos y el ciclo mock no llamaba R3.
+  --
+  -- CADA CRITERIO SE AFIRMA CON SU ARQUETIPO, no con un invariante global: la
+  -- banda 9610000..9700999 siembra un subcaso por arquetipo y la asercion
+  -- compara lo que ese subcaso produjo contra lo que debia producir. Los que
+  -- esperan CERO exigen ademas que el arquetipo TENGA dato: un 0 sobre un
+  -- universo vacio no es evidencia de nada, es el PASSED vacuo que ya corregi
+  -- en G-02, R1-06 y R2-14.
+  --
+  --   61  una sola geolocalizada          R3-02   1 pareja
+  --   62  ninguna geolocalizada           R3-03   1 pareja (gana la fecha)
+  --   63  las dos geolocalizadas          R3-04   1 pareja (gana el diccionario)
+  --   64  puerta a +-2                    R3-05   1 pareja
+  --   65  puerta a +-5                    R3-06   0 parejas
+  --   66  modificador de via '45B'        R3-07   0 parejas
+  --   67  cuadrante en la via principal   R3-08   1 pareja (NO excluye)
+  --   68  tipo MZ                         R3-01   0 parejas
+  --   69  tipo Rural                      R3-01   0 parejas
+  --   70  empate de diccionario           R3-10   0 parejas
+
+  -- R3-01. Solo tipo Via: Manzana y Rural quedan fuera de la regla.
+  -- Las dos mitades necesitan dato: que existan direcciones MZ y Rural en el
+  -- universo, y que ninguna haya unificado.
   INSERT INTO bdm_datos.cert_resultado
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
-  SELECT p_lote, p_fase, m.criterio, m.estado, m.detalle, GETDATE(), CURRENT_USER
-  FROM ( SELECT 'R3-01' AS criterio, 'NO_IMPLEMENTADO' AS estado,
-                'el insumo de R3 no filtra por tipo de direccion; tipo_ubicacion existe en la vista real y es NULL en la mock.' AS detalle UNION ALL
-         SELECT 'R3-02','NO_IMPLEMENTADO',
-                'el insumo exige latitud en AMBOS lados, de modo que el caso de una sola direccion geolocalizada nunca unifica.' UNION ALL
-         SELECT 'R3-03','NO_IMPLEMENTADO',
-                'el caso sin coordenadas queda excluido por el mismo WHERE; no hay desempate por fecha ni por entidades.' UNION ALL
-         SELECT 'R3-04','NO_IMPLEMENTADO',
-                'no existe el Diccionario de Via; hoy el padre se elige por mayor numero de entidades reportantes.' UNION ALL
-         SELECT 'R3-05','NO_IMPLEMENTADO',
-                'el umbral esta como heuristica sobre los tokens 3 y 4 de texto_ubicacion; numero_puerta existe en v_xpm_direccion_fisica y no se usa.' UNION ALL
-         SELECT 'R3-06','SIN_DATO',
-                'el BETWEEN 1 AND 2 implementa la no-unificacion mas alla de 2, pero R3 no corre en la bateria mock.' UNION ALL
-         SELECT 'R3-07','NO_IMPLEMENTADO',
-                'no se excluyen los modificadores de via B, C, F ni BIS.' UNION ALL
-         SELECT 'R3-08','NO_IMPLEMENTADO',
-                'los cuadrantes no se omiten; la igualdad por SPLIT_PART hace que un cuadrante IMPIDA el emparejamiento, el efecto contrario al pedido.' UNION ALL
-         SELECT 'R3-09','SIN_DATO',
-                'se cumple por consecuencia (ambas coordenadas es la unica rama), no por diseno; R3 no corre en la bateria mock.' UNION ALL
-         SELECT 'R3-10','NO_IMPLEMENTADO',
-                'sin Diccionario de Via no hay empate de diccionario que evaluar.' ) m;
+  SELECT p_lote, p_fase, 'R3-01',
+         -- COALESCE en cada SUM y COUNT(*) = 0 como primera rama: sobre cero
+         -- filas los SUM dan NULL, toda comparacion da NULL y el CASE caeria
+         -- al ELSE. Seria un PASSED vacuo, el mismo defecto corregido antes en
+         -- G-02, R1-06 y R2-14.
+         CASE WHEN COUNT(*) = 0 THEN 'SIN_DATO'
+              WHEN COALESCE(SUM(CASE WHEN padre_r3 IS NOT NULL THEN 1 ELSE 0 END), 0) > 0 THEN 'FAILED'
+              WHEN COALESCE(SUM(CASE WHEN UPPER(TRIM(COALESCE(tipo_ubicacion,''))) = 'MZ'    THEN 1 ELSE 0 END), 0) = 0
+                OR COALESCE(SUM(CASE WHEN UPPER(TRIM(COALESCE(tipo_ubicacion,''))) = 'RURAL' THEN 1 ELSE 0 END), 0) = 0
+                   THEN 'SIN_DATO'
+              ELSE 'PASSED' END,
+         'direcciones de tipo MZ='
+           || CAST(SUM(CASE WHEN UPPER(TRIM(COALESCE(tipo_ubicacion,''))) = 'MZ' THEN 1 ELSE 0 END) AS VARCHAR)
+           || ', de tipo Rural='
+           || CAST(SUM(CASE WHEN UPPER(TRIM(COALESCE(tipo_ubicacion,''))) = 'RURAL' THEN 1 ELSE 0 END) AS VARCHAR)
+           || ', de ellas unificadas por R3='
+           || CAST(SUM(CASE WHEN padre_r3 IS NOT NULL THEN 1 ELSE 0 END) AS VARCHAR)
+           || ' (debe ser 0: el insumo de R3 exige tipo Via).',
+         GETDATE(), CURRENT_USER
+  FROM   bdm_tempo.stg_cert_r3
+  WHERE  arq IN (68, 69);
+
+  -- R3-02. Solo una geolocalizada: el padre es la geolocalizada.
+  -- El 100000000 del puntaje es lo que lo garantiza; aqui se verifica el
+  -- RESULTADO, no la formula.
+  INSERT INTO bdm_datos.cert_resultado
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'R3-02',
+         CASE WHEN COUNT(*) = 0                                     THEN 'SIN_DATO'
+              WHEN SUM(CASE WHEN p.latitud IS NULL
+                              OR h.latitud IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'parejas del arquetipo 61 (una sola geolocalizada)=' || CAST(COUNT(*) AS VARCHAR)
+           || ', de ellas con el padre SIN coordenadas o la hija CON coordenadas='
+           || CAST(COALESCE(SUM(CASE WHEN p.latitud IS NULL
+                                       OR h.latitud IS NOT NULL THEN 1 ELSE 0 END), 0) AS VARCHAR),
+         GETDATE(), CURRENT_USER
+  FROM      bdm_tempo.stg_cert_r3 h
+  JOIN      bdm_tempo.stg_cert_r3 p ON p.dir = h.padre_r3
+  WHERE     h.arq = 61;
+
+  -- R3-03. Ninguna geolocalizada: gana la de fecha mas reciente y las
+  -- entidades desempatan. La fecha que puntua es MAX(fecha_reporte), no la de
+  -- la relacion: es la que el legado mete en el puntaje.
+  INSERT INTO bdm_datos.cert_resultado
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'R3-03',
+         CASE WHEN COUNT(*) = 0 THEN 'SIN_DATO'
+              WHEN SUM(CASE WHEN h.latitud IS NOT NULL OR p.latitud IS NOT NULL
+                            THEN 1 ELSE 0 END) > 0                       THEN 'FAILED'
+              WHEN SUM(CASE WHEN p.ult_reporte < h.ult_reporte THEN 1 ELSE 0 END) > 0 THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'parejas del arquetipo 62 (ninguna geolocalizada)=' || CAST(COUNT(*) AS VARCHAR)
+           || ', con alguna coordenada='
+           || CAST(COALESCE(SUM(CASE WHEN h.latitud IS NOT NULL OR p.latitud IS NOT NULL
+                                     THEN 1 ELSE 0 END), 0) AS VARCHAR)
+           || ', con el padre de fecha ANTERIOR a la hija='
+           || CAST(COALESCE(SUM(CASE WHEN p.ult_reporte < h.ult_reporte THEN 1 ELSE 0 END), 0) AS VARCHAR),
+         GETDATE(), CURRENT_USER
+  FROM      bdm_tempo.stg_cert_r3 h
+  JOIN      bdm_tempo.stg_cert_r3 p ON p.dir = h.padre_r3
+  WHERE     h.arq = 62;
+
+  -- R3-04. Las dos geolocalizadas: decide el Diccionario de Via.
+  -- EL ARQUETIPO AISLA EL DISCRIMINANTE: las dos direcciones tienen el MISMO
+  -- numero de entidades y distinto numero de FILAS de reporte, que es lo que
+  -- el diccionario cuenta. Asi la victoria no se le puede atribuir a las
+  -- entidades, que es el otro termino del puntaje.
+  INSERT INTO bdm_datos.cert_resultado
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'R3-04',
+         CASE WHEN COUNT(*) = 0 THEN 'SIN_DATO'
+              WHEN SUM(CASE WHEN h.latitud IS NULL OR p.latitud IS NULL THEN 1 ELSE 0 END) > 0 THEN 'FAILED'
+              WHEN SUM(CASE WHEN p.entidades <> h.entidades             THEN 1 ELSE 0 END) > 0 THEN 'FAILED'
+              WHEN SUM(CASE WHEN COALESCE(dp.conteo,0) <= COALESCE(dh.conteo,0) THEN 1 ELSE 0 END) > 0 THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'parejas del arquetipo 63 (las dos geolocalizadas)=' || CAST(COUNT(*) AS VARCHAR)
+           || ', con el padre de conteo de diccionario MENOR o IGUAL al de la hija='
+           || CAST(COALESCE(SUM(CASE WHEN COALESCE(dp.conteo,0) <= COALESCE(dh.conteo,0)
+                                     THEN 1 ELSE 0 END), 0) AS VARCHAR)
+           || '. Las entidades EMPATAN a proposito, de modo que lo que decide es el diccionario.',
+         GETDATE(), CURRENT_USER
+  FROM      bdm_tempo.stg_cert_r3 h
+  JOIN      bdm_tempo.stg_cert_r3 p ON p.dir = h.padre_r3
+  LEFT JOIN bdm_stage.diccionario_via dh
+         ON dh.tipo  = 'Via_Generadora'
+        AND dh.llave = COALESCE(h.tipo_via_principal,'') || '|' || COALESCE(h.via_principal,'') || '|' || COALESCE(h.numero_puerta,'')
+        AND COALESCE(dh.valor,'') = COALESCE(h.via_generadora,'')
+  LEFT JOIN bdm_stage.diccionario_via dp
+         ON dp.tipo  = 'Via_Generadora'
+        AND dp.llave = COALESCE(p.tipo_via_principal,'') || '|' || COALESCE(p.via_principal,'') || '|' || COALESCE(p.numero_puerta,'')
+        AND COALESCE(dp.valor,'') = COALESCE(p.via_generadora,'')
+  WHERE     h.arq = 63;
+
+  -- R3-05. Umbral de mas/menos 2 en el numero de puerta.
+  INSERT INTO bdm_datos.cert_resultado
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'R3-05',
+         CASE WHEN COUNT(*) = 0 THEN 'SIN_DATO'
+              WHEN SUM(CASE WHEN ABS(p.puerta_num - h.puerta_num) NOT BETWEEN 1 AND 2
+                            THEN 1 ELSE 0 END) > 0 THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'parejas del arquetipo 64 (puerta a +-2)=' || CAST(COUNT(*) AS VARCHAR)
+           || ', con diferencia de puerta FUERA de 1..2='
+           || CAST(COALESCE(SUM(CASE WHEN ABS(p.puerta_num - h.puerta_num) NOT BETWEEN 1 AND 2
+                                     THEN 1 ELSE 0 END), 0) AS VARCHAR)
+           || '. El umbral sale de numero_puerta, no de trocear texto_ubicacion.',
+         GETDATE(), CURRENT_USER
+  FROM      bdm_tempo.stg_cert_r3 h
+  JOIN      bdm_tempo.stg_cert_r3 p ON p.dir = h.padre_r3
+  WHERE     h.arq = 64;
+
+  -- R3-06. Diferencia mayor a 2: NO se unifica. El arquetipo 65 siembra una
+  -- diferencia de 5 con todo lo demas igual al 64, que si unifica: el
+  -- contraste entre los dos es la afirmacion.
+  INSERT INTO bdm_datos.cert_resultado
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'R3-06',
+         CASE WHEN COUNT(*) = 0                                               THEN 'SIN_DATO'
+              WHEN COALESCE(SUM(CASE WHEN padre_r3 IS NOT NULL THEN 1 ELSE 0 END), 0) > 0 THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'direcciones del arquetipo 65 (puerta a +-5)=' || CAST(COUNT(*) AS VARCHAR)
+           || ', de ellas unificadas por R3='
+           || CAST(COALESCE(SUM(CASE WHEN padre_r3 IS NOT NULL THEN 1 ELSE 0 END), 0) AS VARCHAR)
+           || ' (debe ser 0). El arquetipo 64, identico salvo la diferencia de puerta, SI unifica.',
+         GETDATE(), CURRENT_USER
+  FROM   bdm_tempo.stg_cert_r3
+  WHERE  arq = 65;
+
+  -- R3-07. Modificadores de via (B, C, F, BIS): excluidos de la regla.
+  -- Se exige que el dato EXISTA (el texto del arquetipo casa el patron) y que
+  -- ninguna de esas direcciones haya unificado.
+  INSERT INTO bdm_datos.cert_resultado
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'R3-07',
+         CASE WHEN COALESCE(SUM(con_modificador), 0) = 0                                   THEN 'SIN_DATO'
+              WHEN COALESCE(SUM(CASE WHEN padre_r3 IS NOT NULL THEN 1 ELSE 0 END), 0) > 0  THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'direcciones con modificador de via en el texto=' || CAST(COALESCE(SUM(con_modificador), 0) AS VARCHAR)
+           || ', de ellas unificadas por R3='
+           || CAST(COALESCE(SUM(CASE WHEN padre_r3 IS NOT NULL THEN 1 ELSE 0 END), 0) AS VARCHAR)
+           || ' (debe ser 0).',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT padre_r3,
+                CASE WHEN REGEXP_COUNT(UPPER(COALESCE(texto_ubicacion,'')), '[0-9]{1,3}[A-Z]{1,5}') > 0
+                     THEN 1 ELSE 0 END AS con_modificador
+           FROM bdm_tempo.stg_cert_r3
+          WHERE arq = 66 ) r37;
+
+  -- R3-08. Cuadrantes: se OMITEN para comparar, pero NO excluyen la direccion.
+  -- Es la divergencia (D2) del SP: el legado las excluye y el criterio no. La
+  -- asercion es la del criterio -- la direccion con cuadrante SI unifica -- y
+  -- exige que el cuadrante exista en el dato.
+  INSERT INTO bdm_datos.cert_resultado
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'R3-08',
+         CASE WHEN COALESCE(SUM(con_cuadrante), 0) = 0 THEN 'SIN_DATO'
+              WHEN COALESCE(SUM(participa), 0) = 0        THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'direcciones con cuadrante en la via principal='
+           || CAST(COALESCE(SUM(con_cuadrante), 0) AS VARCHAR)
+           || ', de ellas que participaron de una unificacion R3 (como hija o como padre)='
+           || CAST(COALESCE(SUM(participa), 0) AS VARCHAR)
+           || ' (debe ser > 0: el cuadrante se omite para comparar pero no excluye).',
+         GETDATE(), CURRENT_USER
+  -- El LEFT JOIN contra el conjunto de padres reemplaza un EXISTS que estaba
+  -- en la lista del SELECT: Redshift no lo acepta ahi, y no lo avisa al
+  -- desplegar porque CREATE OR REPLACE PROCEDURE no compila el cuerpo.
+  FROM ( SELECT CASE WHEN r.con_cuadrante = 1
+                      AND (r.padre_r3 IS NOT NULL OR pd.dir IS NOT NULL)
+                     THEN 1 ELSE 0 END AS participa,
+                r.con_cuadrante
+           FROM ( SELECT dir, padre_r3,
+                         CASE WHEN REGEXP_COUNT(UPPER(COALESCE(via_principal,'')),
+                                '[[:space:]]+(NORTE|OESTE|ESTE|SUR|SOE|NE|NO|SE|SO|OE|N|S|E|O)$') > 0
+                              THEN 1 ELSE 0 END AS con_cuadrante
+                    FROM bdm_tempo.stg_cert_r3
+                   WHERE arq = 67 ) r
+           LEFT JOIN ( SELECT DISTINCT padre_r3 AS dir
+                         FROM bdm_tempo.stg_cert_r3
+                        WHERE padre_r3 IS NOT NULL ) pd
+                  ON pd.dir = r.dir ) r38;
+
+  -- R3-09. El umbral de puerta aplica SOLO cuando las dos direcciones tienen
+  -- coordenadas. Es la divergencia (D4): el legado empareja por +-2 sin mirar
+  -- coordenadas. La asercion es global, no por arquetipo -- no puede existir
+  -- NINGUNA pareja de R3 con puertas distintas donde falte una coordenada --
+  -- y exige que el escenario de puerta haya disparado en alguna parte.
+  INSERT INTO bdm_datos.cert_resultado
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'R3-09',
+         CASE WHEN COALESCE(SUM(esc_puerta), 0) = 0 THEN 'SIN_DATO'
+              WHEN COALESCE(SUM(viola), 0) > 0       THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'parejas R3 del escenario de puerta (puertas distintas)='
+           || CAST(COALESCE(SUM(esc_puerta), 0) AS VARCHAR)
+           || ', de ellas con alguna coordenada ausente='
+           || CAST(COALESCE(SUM(viola), 0) AS VARCHAR)
+           || ' (debe ser 0).',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT CASE WHEN h.puerta_num <> p.puerta_num THEN 1 ELSE 0 END AS esc_puerta,
+                CASE WHEN h.puerta_num <> p.puerta_num
+                      AND (h.latitud IS NULL OR h.longitud IS NULL
+                        OR p.latitud IS NULL OR p.longitud IS NULL) THEN 1 ELSE 0 END AS viola
+           FROM bdm_tempo.stg_cert_r3 h
+           JOIN bdm_tempo.stg_cert_r3 p ON p.dir = h.padre_r3 ) r39;
+
+  -- R3-10. Empate en el diccionario: no se toma decision.
+  -- El arquetipo 70 siembra dos vias generadoras con el MISMO conteo y las dos
+  -- geolocalizadas: el puntaje maximo no es unico y el ganador no existe. Se
+  -- exige que el empate EXISTA en el diccionario, no solo que no haya parejas.
+  INSERT INTO bdm_datos.cert_resultado
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'R3-10',
+         CASE WHEN COUNT(*) = 0                                   THEN 'SIN_DATO'
+              WHEN COALESCE(MAX(emp.llaves_empatadas), 0) = 0      THEN 'SIN_DATO'
+              WHEN COALESCE(SUM(CASE WHEN r.padre_r3 IS NOT NULL THEN 1 ELSE 0 END), 0) > 0 THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'llaves del diccionario con el conteo maximo EMPATADO entre dos valores='
+           || CAST(COALESCE(MAX(emp.llaves_empatadas), 0) AS VARCHAR)
+           || ', direcciones del arquetipo 70 unificadas por R3='
+           || CAST(COALESCE(SUM(CASE WHEN r.padre_r3 IS NOT NULL THEN 1 ELSE 0 END), 0) AS VARCHAR)
+           || ' (debe ser 0: sin ganador unico no se decide).',
+         GETDATE(), CURRENT_USER
+  -- CROSS JOIN y no un subquery escalar en la lista del SELECT: Redshift no
+  -- garantiza el segundo y el CROSS JOIN de una fila es equivalente y barato.
+  FROM       ( SELECT padre_r3
+                 FROM bdm_tempo.stg_cert_r3
+                WHERE arq = 70 ) r
+  CROSS JOIN ( SELECT COUNT(*) AS llaves_empatadas
+                 FROM ( SELECT d.llave
+                          FROM bdm_stage.diccionario_via d
+                         WHERE d.tipo = 'Via_Generadora'
+                         GROUP BY d.llave, d.conteo
+                        HAVING COUNT(DISTINCT d.valor) > 1 ) e ) emp;
 
   -- ==================================================================
   -- GENERALES
   -- ==================================================================
 
-  -- G-01. Cascada estricta: la traza debe mostrar regla1 antes de regla2.
-  -- R3 no aparece en la cadena mock, y eso se reporta en el bloque REGLA3.
+  -- G-01. Cascada estricta R1 -> R2 -> R3.
+  -- SLCOPRBA-1355: la asercion ahora exige la cadena COMPLETA. Antes solo
+  -- comparaba regla1 < regla2 porque R3 no corria en la bateria mock, de modo
+  -- que el criterio afirmaba dos tercios de lo que enuncia. Con la etapa
+  -- 'regla3' en el ciclo se puede exigir el tercer eslabon.
+  --
+  -- LA ETAPA 'geo' QUEDA ENTRE regla2 y regla3 y eso es correcto, no un
+  -- desorden: R3 decide por coordenadas y las coordenadas las escribe el Ciclo
+  -- GEO. La asercion compara los eslabones de la cascada de REGLAS, no la
+  -- posicion de GEO, que el detalle muestra igual en el LISTAGG.
   INSERT INTO bdm_datos.cert_resultado
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
   SELECT p_lote, p_fase, 'G-01',
          CASE WHEN MAX(CASE WHEN etapa = 'regla1' THEN fecha_hora_inicio END)
                  < MAX(CASE WHEN etapa = 'regla2' THEN fecha_hora_inicio END)
+               AND MAX(CASE WHEN etapa = 'regla2' THEN fecha_hora_inicio END)
+                 < MAX(CASE WHEN etapa = 'regla3' THEN fecha_hora_inicio END)
               THEN 'PASSED' ELSE 'FAILED' END,
          'orden de etapas segun la traza='
            || COALESCE(LISTAGG(etapa, ' -> ') WITHIN GROUP (ORDER BY fecha_hora_inicio), 'sin traza'),
@@ -791,13 +1088,20 @@ BEGIN
                 'sp_geo_cargar_georreferenciacion no tiene variante mock; se certifica sobre tablas reales con el Lote de QA (requiere COPY desde S3).' AS detalle UNION ALL
          SELECT 'CA-03','BLOQUEADO',
                 'mismo SP que CA-02; el cierre a estado cargado solo se observa tras un COPY valido.' UNION ALL
-         SELECT 'CA-04','NO_IMPLEMENTADO',
-                'dos defectos encadenados: (1) sp_geo_reenganchar_r3 llama la Regla 3 con 0 argumentos y la firma pide 2, de modo que cae en el EXCEPTION y marca el Lote fallido; (2) ninguna vista de insumo lee geo_atributos, asi que la Regla 3 no ve las coordenadas que el Ciclo GEO escribe.' UNION ALL
+         -- SLCOPRBA-1355: los DOS defectos de codigo estan corregidos -- la
+         -- llamada ya pasa ('DELTA', in_lote) y las dos vistas de ubicacion
+         -- COALESCEan las coordenadas contra geo_atributos -- de modo que
+         -- NO_IMPLEMENTADO dejo de describir la realidad. Lo que queda no es
+         -- codigo: el criterio se observa sobre un Lote GEO real cargado por
+         -- COPY desde S3, que es lo mismo que bloquea a CA-02, CA-03 y CA-05.
+         SELECT 'CA-04','BLOQUEADO',
+                'los dos defectos de codigo que reportaba quedaron corregidos: la llamada a la Regla 3 ya pasa sus dos argumentos y las vistas de ubicacion leen geo_atributos. El reenganche se certifica sobre tablas reales con un Lote GEO cargado por COPY desde S3, igual que CA-02, CA-03 y CA-05.' UNION ALL
          SELECT 'CA-05','BLOQUEADO',
                 'la rama sin coordenadas retorna antes del CALL y es correcta por lectura, pero se certifica sobre tablas reales con el Lote de QA.' ) m;
 
   DROP TABLE IF EXISTS bdm_tempo.stg_cert_pares;
   DROP TABLE IF EXISTS bdm_tempo.stg_cert_ent;
+  DROP TABLE IF EXISTS bdm_tempo.stg_cert_r3;
 
 END;
 $$;
