@@ -293,6 +293,11 @@ BEGIN
     f.cod_dw_tipo_ubicacion_dir,
     f.cod_dw_municipio,
     dc.nomenclatura,
+    -- El VALOR va en su propia columna del diccionario: el constructor guarda
+    -- 'nomenclatura' y 'nomen' con el TOKEN SOLO ('BL') y el numero aparte en
+    -- 'valor' ('2'). Sin arrastrarlo, el complemento que se arma abajo saldria
+    -- sin numeros ('BL ED' en vez de 'BL 2 ED 7').
+    dc.valor,
     COALESCE(nom.nivel_complemento, 99) AS nivel_complemento,
     COALESCE(CAST(NULLIF(REGEXP_REPLACE(COALESCE(dc.valor, ''), '[^0-9]', ''), '') AS BIGINT),
              999999) AS valor_num
@@ -316,7 +321,10 @@ BEGIN
     c.texto_ubicacion,
     c.cod_dw_tipo_ubicacion_dir,
     c.cod_dw_municipio,
-    LISTAGG(TRIM(c.nomenclatura), ' ')
+    -- 'nomenclatura' || ' ' || 'valor', igual que el sello 'A6' en
+    -- stg_motor_niv_insumo: el diccionario guarda el token y el numero por
+    -- separado y aqui se vuelven a unir.
+    LISTAGG(TRIM(c.nomenclatura || ' ' || COALESCE(c.valor, '')), ' ')
       WITHIN GROUP (ORDER BY c.nivel_complemento, c.valor_num, c.nomenclatura) AS nuevo_complemento
   FROM bdm_tempo.stg_motor_crz_componentes c
   GROUP BY 1, 2, 3, 4, 5;
