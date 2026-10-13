@@ -47,15 +47,13 @@ BEGIN
   CALL bdm_datos.sp_unificacion_r2_esc3_sin_nit_misma_nomenclatura(p_modo, p_lote);
   CALL bdm_datos.sp_unificacion_r2_motor_nit_empates_nuevas_direcciones(p_modo, p_lote);
   CALL bdm_datos.sp_unificacion_r2_esc4_diccionario_frecuencia_complemento(p_modo, p_lote);
-  -- SITIO 2 ('A6', etapa 5.1 del legado) NO IMPLEMENTADO. Su poblacion base
-  -- si esta leida (Tmp_Unificacion_E051, PRO_UnificacionR2.sql:2280: grupo sin
-  -- unificar con complemento distinto, SIN filtro de NIT ni de nomenclatura),
-  -- pero NO la regla con que elige al padre: eso vive en el pivote dinamico de
-  -- E051_A / E051_D (lineas 2331-2900), que genera SQL dinamico sobre hasta 15
-  -- posiciones de componente. Implementarlo por analogia con esc5 seria una
-  -- suposicion, y ademas starveria a esc5 (misma poblacion, el sitio 2 corre
-  -- antes), cambiando el resultado de los arquetipos ya certificados. Queda
-  -- pendiente hasta decodificar ese pivote.
+  -- SITIO 2 ('A6', etapa 5.1 del legado, PRO_UnificacionR2.sql:2250-3607).
+  -- Va AQUI, entre esc4 y esc5, que es donde el legado lo intercala. Su
+  -- poblacion (Tmp_Unificacion_E051_C) y la de esc5 (Tmp_Unificacion_E05_C)
+  -- son los dos subcasos del escenario 5 y difieren en UN predicado: el sitio
+  -- 2 toma los pares cuyos VALORES difieren y esc5 aquellos cuyos valores son
+  -- iguales. No hay starvation entre ellos.
+  CALL bdm_datos.sp_unificacion_r2_motor_nivel_nueva_direccion(p_modo, p_lote);
   CALL bdm_datos.sp_unificacion_r2_esc5_nomenclatura_menor_nivel_pierde(p_modo, p_lote);
   CALL bdm_datos.sp_unificacion_r2_esc6_frecuencia_complemento_gana(p_modo, p_lote);
 
@@ -67,10 +65,10 @@ BEGIN
   -- solo aqui; la tabla final guarda el par (direccion, padre) y no el motivo.
   --
   -- El catalogo de sellos va EXPLICITO y se cruza con LEFT JOIN a proposito:
-  -- asi 'A6' -- el sitio 2, que no esta implementado -- aparece con 0 en vez
-  -- de faltar. "Falta la fila" y "midio cero" no son lo mismo para quien lee
-  -- el censo, y la diferencia importa: lo que no esta implementado no da
-  -- error, da cero en silencio.
+  -- un sello que no produjo nada en la corrida aparece con 0 en vez de
+  -- faltar. "Falta la fila" y "midio cero" no son lo mismo para quien lee el
+  -- censo, y la diferencia importa: lo que no se ejecuta no da error, da cero
+  -- en silencio.
   -- ------------------------------------------------------------------
   DROP TABLE IF EXISTS bdm_tempo.stg_regla2_censo;
   CREATE TABLE bdm_tempo.stg_regla2_censo
@@ -143,8 +141,8 @@ BEGIN
                        'PRO_UnificacionR2.sql linea 3991'                   UNION ALL
     SELECT 'E6', 'E6', 'esc6 - mayor frecuencia del complemento gana',
                        'sello AGREGADO: el legado no marca esc6'            UNION ALL
-    SELECT 'A6', 'A6', 'sitio 2 (etapa 5.1) - NO IMPLEMENTADO',
-                       'PRO_UnificacionR2.sql lineas 3533 y 3573'           UNION ALL
+    SELECT 'A6', 'A6', 'sitio 2 (etapa 5.1) - direccion nueva por nivel distinto',
+                       'PRO_UnificacionR2.sql linea 3423'                   UNION ALL
     SELECT 'PADRE', NULL, 'PADRE de una unificacion de esta corrida (no es brecha)',
                        'ninguno: el escenario sella solo a la hija'         UNION ALL
     SELECT 'SIN_RESOLVER', NULL, 'sin resolver, tenia pareja posible <- BRECHA',
@@ -186,6 +184,17 @@ BEGIN
   DROP TABLE IF EXISTS bdm_tempo.stg_motor_nit_insumo;
   DROP TABLE IF EXISTS bdm_tempo.stg_motor_nit_miembros;
   DROP TABLE IF EXISTS bdm_tempo.stg_motor_nit_persist;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_niv_base;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_niv_cand;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_niv_mdir;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_niv_grupo;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_niv_pares;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_niv_componentes;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_niv_nueva_nomen;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_niv_fusion;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_niv_insumo;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_niv_miembros;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_niv_persist;
 
 EXCEPTION WHEN OTHERS THEN
   RAISE EXCEPTION 'sp_unificacion_regla2 failed: %', SQLERRM;

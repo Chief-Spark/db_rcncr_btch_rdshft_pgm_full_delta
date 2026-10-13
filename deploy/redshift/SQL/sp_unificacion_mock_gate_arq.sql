@@ -12,9 +12,10 @@
 --     cod_dw_persona_ubic = id_buro_persona * 10 + k
 -- de donde  ARQ = (cod_dw_persona_ubic / 10 - 9000000) / 10000.
 --
--- Se acota a BETWEEN 90100000 AND 97009999, el rango de la semilla
+-- Se acota a BETWEEN 90100000 AND 97109999, el rango de la semilla
 -- (incluye la banda 9570000..9590999 del Grupo A, la 9600000..9600999 del
--- ARQ 60 -- la cascada R1 -> R2 -- y la 9610000..9700999 de la Regla 3): las
+-- ARQ 60 -- la cascada R1 -> R2 --, la 9610000..9700999 de la Regla 3 y la
+-- 9710000..9710999 del ARQ 71 -- el sitio 2 de creacion de direcciones): las
 -- direcciones que genera el motor llevan clave FNV_HASH y calcularian un ARQ
 -- sin sentido. Hoy no pueden aparecer como HIJA (nacen sin unificar y quedan
 -- solas en su grupo), pero el filtro lo garantiza aunque eso cambie.
@@ -141,7 +142,14 @@ BEGIN
     SELECT 67, 1 UNION ALL
     SELECT 68, 0 UNION ALL
     SELECT 69, 0 UNION ALL
-    SELECT 70, 0
+    SELECT 70, 0 UNION ALL
+    -- SLCOPRBA-1355: sitio 2 de creacion de direcciones (banda 9710000..9710999).
+    --   71  'ED 1 CS 5' / 'LC 3 CS 9' -> 2 parejas (cierra R2-06)
+    -- Las DOS filas son el criterio: el escenario 5 subcaso 1 crea una
+    -- direccion nueva y unifica contra ella a las dos originales, el padre
+    -- incluido. Un 1 aqui significaria que el padre no quedo unificado y el
+    -- criterio dice explicitamente "las dos originales quedan como hijas".
+    SELECT 71, 2
   ) v;
 
   CREATE TABLE bdm_tempo.stg_gate_arq_real
@@ -153,7 +161,7 @@ BEGIN
     COUNT(DISTINCT u.cod_dw_persona_ubic / 10)                      AS personas,
     SUM(CASE WHEN u.lote = p_lote THEN 1 ELSE 0 END)                AS filas_del_lote
   FROM bdm_datos.unificacion_direccion_mock u
-  WHERE u.cod_dw_persona_ubic BETWEEN 90100000 AND 97009999
+  WHERE u.cod_dw_persona_ubic BETWEEN 90100000 AND 97109999
   GROUP BY 1;
 
   -- ------------------------------------------------------------------
@@ -181,18 +189,18 @@ BEGIN
 
     INSERT INTO bdm_stage.mock_unif_ca_result (criterio_ca, estado, detalle)
     SELECT 'FULL/CA-U02',
-           CASE WHEN SUM(filas) = 60000 THEN 'PASSED' ELSE 'FAILED' END,
+           CASE WHEN SUM(filas) = 62000 THEN 'PASSED' ELSE 'FAILED' END,
            'total unificacion_direccion_mock=' || CAST(COALESCE(SUM(filas), 0) AS VARCHAR)
-             || ' (esperado 60000 = 51000 + 2000 de los ARQ 57 y 58 + 2000 del ARQ 60'
-             || ' + 5000 de la Regla 3, ARQ 61 a 70)'
+             || ' (esperado 62000 = 51000 + 2000 de los ARQ 57 y 58 + 2000 del ARQ 60'
+             || ' + 5000 de la Regla 3, ARQ 61 a 70 + 2000 del ARQ 71)'
     FROM bdm_tempo.stg_gate_arq_real;
 
     INSERT INTO bdm_stage.mock_unif_ca_result (criterio_ca, estado, detalle)
     SELECT 'FULL/CA-U03',
-           CASE WHEN COUNT(*) = 5000
+           CASE WHEN COUNT(*) = 6000
                  AND SUM(CASE WHEN COALESCE(d.generada_enriquecida, 0) = 1 THEN 0 ELSE 1 END) = 0
                 THEN 'PASSED' ELSE 'FAILED' END,
-           'direcciones generadas=' || CAST(COUNT(*) AS VARCHAR) || ' (esperado 5000), sin marca='
+           'direcciones generadas=' || CAST(COUNT(*) AS VARCHAR) || ' (esperado 6000 = 5000 del sitio 1 + 1000 del sitio 2), sin marca='
              || CAST(SUM(CASE WHEN COALESCE(d.generada_enriquecida, 0) = 1 THEN 0 ELSE 1 END) AS VARCHAR)
     FROM bdm_datos.direccion_fisica_generada_mock d;
 
@@ -212,6 +220,21 @@ BEGIN
              || ' (esperado 5000)'
     FROM bdm_datos.direccion_fisica_generada_mock d
     WHERE TRIM(d.complemento) = 'TO 2 CS 4 AP 1';
+
+    -- El complemento que arma el SITIO 2 para el ARQ 71. Mismo papel que
+    -- CA-U04 para el sitio 1: distingue "el sitio 2 corrio" de "el sitio 2
+    -- fusiono bien". El padre es 'ED 1 CS 5' (MDIR 1, niveles 2 y 5), la hija
+    -- 'LC 3 CS 9' aporta el unico componente que al padre le falta -- LC --
+    -- y CS, que comparten, NO se repite. Esa no-repeticion es lo que R2-12
+    -- exige y lo que separa esta implementacion de la lectura literal del
+    -- legado, donde N1 es el complemento ENTERO del hijo.
+    INSERT INTO bdm_stage.mock_unif_ca_result (criterio_ca, estado, detalle)
+    SELECT 'FULL/CA-U11',
+           CASE WHEN COUNT(*) = 1000 THEN 'PASSED' ELSE 'FAILED' END,
+           'generadas por el sitio 2 con complemento ''ED 1 CS 5 LC 3''='
+             || CAST(COUNT(*) AS VARCHAR) || ' (esperado 1000)'
+    FROM bdm_datos.direccion_fisica_generada_mock d
+    WHERE TRIM(d.complemento) = 'ED 1 CS 5 LC 3';
 
   END IF;
 
@@ -262,9 +285,9 @@ BEGIN
     -- Lo que ya estaba no se re-escribe: el total del FULL sigue en pie.
     INSERT INTO bdm_stage.mock_unif_ca_result (criterio_ca, estado, detalle)
     SELECT 'DELTA2/CA-U10',
-           CASE WHEN SUM(filas) = 60200 THEN 'PASSED' ELSE 'FAILED' END,
+           CASE WHEN SUM(filas) = 62200 THEN 'PASSED' ELSE 'FAILED' END,
            'total tras la mutacion=' || CAST(COALESCE(SUM(filas), 0) AS VARCHAR)
-             || ' (esperado 60200 = 60000 del FULL + 200 nuevas)'
+             || ' (esperado 62200 = 62000 del FULL + 200 nuevas)'
     FROM bdm_tempo.stg_gate_arq_real;
   END IF;
 

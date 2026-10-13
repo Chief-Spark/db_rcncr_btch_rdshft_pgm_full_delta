@@ -371,16 +371,67 @@ BEGIN
                GROUP BY 1 ) c
          ON c.n_id = m.n_id;
 
-  -- R2-06. Escenario 5 del legado = sello A6 (lineas 2250-3607): crea una
-  -- direccion nueva con ambas nomenclaturas y deja las dos originales como
-  -- hijas. No implementado. Nuestro esc5 resuelve el subcaso 2 (C7), que es
-  -- otro criterio.
+  -- R2-06. Escenario 5 subcaso 1 del legado = sello A6 (lineas 2250-3607):
+  -- crea una direccion nueva que combina ambas nomenclaturas y deja las dos
+  -- originales como hijas. El subcaso 2 (sello C7) es el que ya estaba
+  -- portado como esc5 y NO satisface este criterio: no crea nada.
+  --
+  -- El criterio tiene TRES mitades y las tres se afirman, no solo que el
+  -- sello disparo:
+  --   a) las DOS originales quedan como hijas de la misma direccion -- el
+  --      padre incluido, que es lo que dice la linea 2256 del legado;
+  --   b) el padre de esas dos existe como direccion GENERADA, no como una de
+  --      las originales;
+  --   c) el complemento generado combina ambas SIN repetir la nomenclatura
+  --      que comparten ('ED 1 CS 5' + 'LC 3 CS 9' -> 'ED 1 CS 5 LC 3'), que
+  --      es lo que R2-12 exige.
+  --
+  -- NO depende de la fase. Las parejas y las direcciones generadas PERSISTEN
+  -- entre corridas (el DELTA no trunca), de modo que las tres mitades siguen
+  -- siendo verificables en DELTA1 y DELTA2. Por eso no lleva la rama
+  -- NO_APLICA de R2-01..R2-05, que si dependen del censo del lote.
+  --
+  -- La primera rama, COUNT(*) = 0, no es decorativa: sin ella un arquetipo que
+  -- no produjo NADA daria SUM(...) = NULL en las tres comparaciones y el CASE
+  -- caeria al ELSE 'PASSED'. Es el mismo PASS vacuo que se corrigio en R3.
   INSERT INTO bdm_datos.cert_resultado
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
-  SELECT p_lote, p_fase, 'R2-06', 'NO_IMPLEMENTADO',
-         'sello A6 (escenario 5 subcaso 1 del legado, sitio de creacion de '
-         || 'direcciones) sin implementar. El censo lo reporta en 0 a proposito.',
-         GETDATE(), CURRENT_USER;
+  SELECT p_lote, p_fase, 'R2-06',
+         CASE WHEN COUNT(*) = 0
+                   THEN CASE WHEN p_fase IN ('FULL', 'FULL2') THEN 'FAILED' ELSE 'SIN_DATO' END
+              WHEN COALESCE(SUM(CASE WHEN a.hijas <> 2      THEN 1 ELSE 0 END), 0) > 0 THEN 'FAILED'
+              WHEN COALESCE(SUM(CASE WHEN a.padre_generado = 0 THEN 1 ELSE 0 END), 0) > 0 THEN 'FAILED'
+              WHEN COALESCE(SUM(CASE WHEN a.complemento_ok = 0 THEN 1 ELSE 0 END), 0) > 0 THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'direcciones nuevas del arquetipo 71 (sitio 2)=' || CAST(COUNT(*) AS VARCHAR)
+           || ', de ellas con las DOS originales como hijas='
+           || CAST(COALESCE(SUM(CASE WHEN a.hijas = 2 THEN 1 ELSE 0 END), 0) AS VARCHAR)
+           || ', con el padre en rpu_generada_mock='
+           || CAST(COALESCE(SUM(a.padre_generado), 0) AS VARCHAR)
+           || ', con complemento ''ED 1 CS 5 LC 3'' (sin repetir CS)='
+           || CAST(COALESCE(SUM(a.complemento_ok), 0) AS VARCHAR)
+           || '. Sello A6 del censo de esta corrida: direcciones='
+           || CAST(COALESCE(MAX(cen.a6_dir), 0) AS VARCHAR),
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT u.cod_dw_direccion_unificada                          AS padre,
+                COUNT(DISTINCT u.cod_dw_persona_ubic)                 AS hijas,
+                MAX(CASE WHEN g.cod_dw_persona_ubic IS NOT NULL
+                         THEN 1 ELSE 0 END)                           AS padre_generado,
+                MAX(CASE WHEN TRIM(COALESCE(d.complemento, '')) = 'ED 1 CS 5 LC 3'
+                         THEN 1 ELSE 0 END)                           AS complemento_ok
+           FROM bdm_datos.unificacion_direccion_mock u
+           LEFT JOIN bdm_datos.rpu_generada_mock g
+             ON g.cod_dw_persona_ubic = u.cod_dw_direccion_unificada
+           LEFT JOIN bdm_datos.direccion_fisica_generada_mock d
+             ON d.cod_dw_direccion_fisica = g.cod_dw_direccion_fisica
+          WHERE u.cod_dw_persona_ubic BETWEEN 97100000 AND 97109999
+            AND u.unifica_atributos = 2
+          GROUP BY 1 ) a
+  -- CROSS JOIN y no subconsulta escalar en la proyeccion: Redshift no la
+  -- resuelve de forma fiable dentro de una agregacion.
+  CROSS JOIN ( SELECT COALESCE(SUM(direcciones), 0) AS a6_dir
+                 FROM bdm_datos.unif_escenario_censo_mock
+                WHERE lote = p_lote AND n_id = 'A6' ) cen;
 
   -- R2-07. Escenario 6 del legado son TRES subcasos, con sellos A8, D9 y F1
   -- (lineas 4016-5847). A8 y D9 crean direcciones nuevas. Nuestro esc6 lleva
