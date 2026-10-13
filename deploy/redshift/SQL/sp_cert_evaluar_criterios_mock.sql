@@ -527,16 +527,44 @@ BEGIN
     AND  etapa IN ('regla1','regla2','geo','regla3');
 
   -- G-02. Un padre de R1 puede ser hija en R2.
-  INSERT INTO bdm_datos.cert_resultado
-    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  --
   -- El criterio es un PERMISO ("puede ser evaluada como hija"), no una
   -- obligacion, de modo que solo la evidencia POSITIVA lo afirma. Con cero
   -- casos no se puede distinguir "no esta excluido pero no se dio" de "esta
   -- excluido": eso es SIN_DATO, no PASSED.
+  --
+  -- SLCOPRBA-1355: la evidencia ya existe. El ARQ 60 (banda
+  -- 9600000..9600999) es un grupo de TRES direcciones con DOS tipos de
+  -- ubicacion -- k=1 CRR, k=2 RES, k=3 CRR -- donde k=1 gana R1 esc1 por tipo
+  -- preferido mas entidades y acto seguido pierde R2 esc1 contra k=3, que si
+  -- trae complemento. Ningun arquetipo anterior podia producir el caso: los de
+  -- R1 usan tipos DISTINTOS porque R1 lo exige y los de R2 los usan IGUALES
+  -- porque R2 lo exige, asi que un grupo construido para una regla es inmune a
+  -- la otra. Hacia falta uno que tuviera las dos cosas a la vez.
+  --
+  -- LA FASE IMPORTA, igual que en R2-01..R2-05: un DELTA sobre datos sin mutar
+  -- no produce unificaciones nuevas de R2, de modo que el cruce no se da y ese
+  -- 0 es correcto, no una ausencia de evidencia. NO_APLICA, y el criterio se
+  -- certifica en la fase FULL.
+  INSERT INTO bdm_datos.cert_resultado
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
   SELECT p_lote, p_fase, 'G-02',
-         CASE WHEN COUNT(*) > 0 THEN 'PASSED' ELSE 'SIN_DATO' END,
+         CASE WHEN COUNT(*) > 0                     THEN 'PASSED'
+              WHEN p_fase NOT IN ('FULL', 'FULL2')  THEN 'NO_APLICA'
+              ELSE 'SIN_DATO' END,
          'padres de R1 que luego fueron hijas en R2=' || CAST(COUNT(*) AS VARCHAR)
-           || '. Con 0 casos el criterio no se puede afirmar ni negar.',
+           || CASE
+                WHEN COUNT(*) > 0
+                THEN '. El ARQ 60 (banda 9600000..9600999) es el arquetipo que '
+                     || 'produce el cruce: k=1 es padre en R1 e hija en R2.'
+                WHEN p_fase NOT IN ('FULL', 'FULL2')
+                THEN '. Cero es correcto en un DELTA sobre datos sin mutar: R2 '
+                     || 'no produce parejas nuevas y el cruce no puede darse; '
+                     || 'este criterio se certifica en la fase FULL.'
+                ELSE '. Con 0 casos el criterio no se puede afirmar ni negar. '
+                     || 'El ARQ 60 deberia producirlo: revisar que el gate por '
+                     || 'arquetipo le cuente 2000 filas (CA-U01).'
+              END,
          GETDATE(), CURRENT_USER
   FROM ( SELECT DISTINCT a.padre
            FROM bdm_tempo.stg_cert_pares a
