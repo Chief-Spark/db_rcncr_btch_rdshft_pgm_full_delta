@@ -626,31 +626,67 @@ BEGIN
   -- numero de entidades y distinto numero de FILAS de reporte, que es lo que
   -- el diccionario cuenta. Asi la victoria no se le puede atribuir a las
   -- entidades, que es el otro termino del puntaje.
+  --
+  -- LA FASE IMPORTA, y la primera version no lo tenia en cuenta: en el job #330
+  -- este criterio salio FAILED en DELTA1 y DELTA2 teniendolo bien. El motivo es
+  -- la cascada, no la regla:
+  --   * las parejas de R3 PERSISTEN en unificacion_direccion_mock (el DELTA no
+  --     trunca), de modo que el join h/p sigue devolviendo sus 1000 filas;
+  --   * pero EL DICCIONARIO SE RECONSTRUYE en cada Regla 3, y en un DELTA la
+  --     hija del ARQ 63 ya quedo sellada por el FULL. El insumo la excluye por
+  --     ind_unificacion IS NULL -- que es G-03 funcionando -- no se forma
+  --     pareja, y el constructor no inserta ninguna fila para esa llave.
+  -- Con el diccionario vacio, un COALESCE(conteo, 0) convierte "no hay fila" en
+  -- "conteo 0" y la comparacion 0 <= 0 se vuelve verdadera. La ausencia de fila
+  -- y un conteo de cero NO son lo mismo, y aqui la diferencia es justo la que
+  -- decide el veredicto.
+  --
+  -- Se distinguen con IS NULL y la fase decide:
+  --   diccionario CON datos          -> se afirma o se niega el criterio
+  --   sin datos y fase DELTA         -> NO_APLICA; se certifica en el FULL
+  --   sin datos y fase FULL / FULL2  -> FAILED; alli el diccionario DEBE existir
   INSERT INTO bdm_datos.cert_resultado
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
   SELECT p_lote, p_fase, 'R3-04',
          CASE WHEN COUNT(*) = 0 THEN 'SIN_DATO'
-              WHEN SUM(CASE WHEN h.latitud IS NULL OR p.latitud IS NULL THEN 1 ELSE 0 END) > 0 THEN 'FAILED'
-              WHEN SUM(CASE WHEN p.entidades <> h.entidades             THEN 1 ELSE 0 END) > 0 THEN 'FAILED'
-              WHEN SUM(CASE WHEN COALESCE(dp.conteo,0) <= COALESCE(dh.conteo,0) THEN 1 ELSE 0 END) > 0 THEN 'FAILED'
+              WHEN COALESCE(SUM(con_dicc), 0) = 0
+                   THEN CASE WHEN p_fase IN ('FULL', 'FULL2') THEN 'FAILED' ELSE 'NO_APLICA' END
+              WHEN COALESCE(SUM(sin_coord), 0)     > 0 THEN 'FAILED'
+              WHEN COALESCE(SUM(ent_distinta), 0)  > 0 THEN 'FAILED'
+              WHEN COALESCE(SUM(dicc_no_decide), 0) > 0 THEN 'FAILED'
               ELSE 'PASSED' END,
          'parejas del arquetipo 63 (las dos geolocalizadas)=' || CAST(COUNT(*) AS VARCHAR)
-           || ', con el padre de conteo de diccionario MENOR o IGUAL al de la hija='
-           || CAST(COALESCE(SUM(CASE WHEN COALESCE(dp.conteo,0) <= COALESCE(dh.conteo,0)
-                                     THEN 1 ELSE 0 END), 0) AS VARCHAR)
-           || '. Las entidades EMPATAN a proposito, de modo que lo que decide es el diccionario.',
+           || ', de ellas con el diccionario poblado=' || CAST(COALESCE(SUM(con_dicc), 0) AS VARCHAR)
+           || ', con el padre de conteo MENOR o IGUAL al de la hija='
+           || CAST(COALESCE(SUM(dicc_no_decide), 0) AS VARCHAR)
+           || CASE WHEN COALESCE(SUM(con_dicc), 0) = 0 AND p_fase NOT IN ('FULL', 'FULL2')
+                   THEN '. El diccionario se reconstruye en cada Regla 3 y en un DELTA la hija '
+                        || 'ya quedo sellada por el FULL, de modo que no se forma pareja y la '
+                        || 'llave no se puebla. Este criterio se certifica en la fase FULL.'
+                   ELSE '. Las entidades EMPATAN a proposito, de modo que lo que decide es el diccionario.'
+              END,
          GETDATE(), CURRENT_USER
-  FROM      bdm_tempo.stg_cert_r3 h
-  JOIN      bdm_tempo.stg_cert_r3 p ON p.dir = h.padre_r3
-  LEFT JOIN bdm_stage.diccionario_via dh
-         ON dh.tipo  = 'Via_Generadora'
-        AND dh.llave = COALESCE(h.tipo_via_principal,'') || '|' || COALESCE(h.via_principal,'') || '|' || COALESCE(h.numero_puerta,'')
-        AND COALESCE(dh.valor,'') = COALESCE(h.via_generadora,'')
-  LEFT JOIN bdm_stage.diccionario_via dp
-         ON dp.tipo  = 'Via_Generadora'
-        AND dp.llave = COALESCE(p.tipo_via_principal,'') || '|' || COALESCE(p.via_principal,'') || '|' || COALESCE(p.numero_puerta,'')
-        AND COALESCE(dp.valor,'') = COALESCE(p.via_generadora,'')
-  WHERE     h.arq = 63;
+  FROM (
+    SELECT
+      CASE WHEN dh.conteo IS NULL AND dp.conteo IS NULL THEN 0 ELSE 1 END AS con_dicc,
+      CASE WHEN h.latitud IS NULL OR p.latitud IS NULL  THEN 1 ELSE 0 END AS sin_coord,
+      CASE WHEN p.entidades <> h.entidades              THEN 1 ELSE 0 END AS ent_distinta,
+      -- Solo cuenta como violacion si el diccionario TIENE dato para la pareja.
+      CASE WHEN (dh.conteo IS NOT NULL OR dp.conteo IS NOT NULL)
+                 AND COALESCE(dp.conteo, 0) <= COALESCE(dh.conteo, 0)
+           THEN 1 ELSE 0 END                                              AS dicc_no_decide
+    FROM      bdm_tempo.stg_cert_r3 h
+    JOIN      bdm_tempo.stg_cert_r3 p ON p.dir = h.padre_r3
+    LEFT JOIN bdm_stage.diccionario_via dh
+           ON dh.tipo  = 'Via_Generadora'
+          AND dh.llave = COALESCE(h.tipo_via_principal,'') || '|' || COALESCE(h.via_principal,'') || '|' || COALESCE(h.numero_puerta,'')
+          AND COALESCE(dh.valor,'') = COALESCE(h.via_generadora,'')
+    LEFT JOIN bdm_stage.diccionario_via dp
+           ON dp.tipo  = 'Via_Generadora'
+          AND dp.llave = COALESCE(p.tipo_via_principal,'') || '|' || COALESCE(p.via_principal,'') || '|' || COALESCE(p.numero_puerta,'')
+          AND COALESCE(dp.valor,'') = COALESCE(p.via_generadora,'')
+    WHERE     h.arq = 63
+  ) r34;
 
   -- R3-05. Umbral de mas/menos 2 en el numero de puerta.
   INSERT INTO bdm_datos.cert_resultado
