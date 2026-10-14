@@ -36,20 +36,51 @@ BEGIN
       direccion_fisica,
       MAX(tipo_ubicacion) AS tipo_ubicacion,
       MIN(meses_reporte) AS dir001in,
-      COUNT(*) AS dir002to,
+      -- DIR002TO (Caracteristicas.txt:2916): MAX de meses_reporte de ESTA
+      -- direccion, con guarda de texto vacio. Antes era COUNT(*), que es otra
+      -- magnitud: un conteo, no una recencia. No estaba en la lista de las
+      -- seis; entra porque alimenta DIR059.
+      MAX(CASE WHEN direccion_fisica <> '' THEN meses_reporte ELSE NULL END) AS dir002to,
+      -- Conteo de reportes de la direccion. Unico insumo de DIR050TO, que se
+      -- deja como estaba: el DIR050TO del legado (:3117-3121) necesita
+      -- CO00MOR037/CO00MOR038 de Insumo_Caracteristica, que es F1-F3 y no
+      -- tenemos. Se aisla aqui para que el arreglo de DIR002TO no lo corrompa
+      -- en silencio.
+      COUNT(*) AS cnt_reportes,
       SUM(CASE WHEN meses_reporte <= 12 THEN 1 ELSE 0 END) AS dir004ro,
-      SUM(CASE WHEN meses_reporte <= 6 THEN 1 ELSE 0 END) AS dir007to,
+      -- DIR007TO (:2919): ventana de 24 meses, no de 6, y con guarda de texto
+      -- vacio que devuelve NULL (no 0) a la direccion vacia -- la categoria
+      -- distingue NULL de 0 (:2664-2665), asi que la diferencia puntua.
+      SUM(CASE WHEN direccion_fisica <> ''
+               THEN (CASE WHEN meses_reporte <= 24 THEN 1 ELSE 0 END)
+               ELSE NULL END) AS dir007to,
       CAST(100.0 * SUM(CASE WHEN sector_financiero = 1 THEN 1 ELSE 0 END)
         / NULLIF(COUNT(*), 0) AS DECIMAL(18,2)) AS dir010fi,
       CAST(100.0 * SUM(CASE WHEN sector_financiero = 0 THEN 1 ELSE 0 END)
         / NULLIF(COUNT(*), 0) AS DECIMAL(18,2)) AS dir013ot,
-      MAX(CASE WHEN tipo_ubicacion = 'RES' THEN 1
-               WHEN tipo_ubicacion = 'LAB' THEN 2
-               WHEN tipo_ubicacion = 'CRR' THEN 3 ELSE 0 END) AS dir017,
-      MAX(CASE WHEN meses_reporte <= 3 THEN 1 ELSE 0 END) AS dir019,
+      -- DIR017 (:1795): conteo de reportes de tipo 'LAB' de esta direccion.
+      -- No es un codigo ordinal de tipo de ubicacion.
+      SUM(CASE WHEN TRIM(tipo_ubicacion) = 'LAB' AND direccion_fisica <> ''
+               THEN 1 ELSE NULL END) AS dir017,
+      -- DIR016 (:1794): no puntua por si misma, pero es el insumo de DIR009.
+      SUM(CASE WHEN TRIM(tipo_ubicacion) = 'CRR' AND direccion_fisica <> ''
+               THEN 1 ELSE NULL END) AS dir016,
+      -- DIR019 (:1796-1799): bandera 0/1 -- la direccion esta reportada a la
+      -- vez como 'RES' y como 'CRR'. No tiene nada que ver con la recencia.
+      CASE WHEN SUM(CASE WHEN TRIM(tipo_ubicacion) = 'RES' AND direccion_fisica <> ''
+                         THEN 1 ELSE NULL END) > 0
+            AND SUM(CASE WHEN TRIM(tipo_ubicacion) = 'CRR' AND direccion_fisica <> ''
+                         THEN 1 ELSE NULL END) > 0
+           THEN 1 ELSE 0 END AS dir019,
       CAST(100.0 * SUM(CASE WHEN sector_financiero = 1 AND meses_reporte <= 12 THEN 1 ELSE 0 END)
         / NULLIF(SUM(CASE WHEN meses_reporte <= 12 THEN 1 ELSE 0 END), 0) AS DECIMAL(18,2)) AS dir034fi,
-      COUNT(DISTINCT id_buro_suscriptor) AS dir009
+      -- DIR057 (:485-487): conteo de reportes no vacios de ESTA direccion.
+      -- Estaba a grano de persona (numero de direcciones distintas), que es
+      -- otra cosa: el legado agrupa por (persona, Direccion_Fisica) en :489.
+      SUM(CASE WHEN direccion_fisica <> '' THEN 1 ELSE NULL END) AS dir057
+      -- DIR009 sale de aqui: el legado lo calcula a grano de PERSONA
+      -- (GROUP BY 1,2 en :2396) y lo reparte a todas sus direcciones.
+      -- Ver persona_stats.
     FROM bdm_tempo.stg_insumo_direccion
     GROUP BY id_buro_persona, direccion_fisica
   ),
@@ -57,9 +88,27 @@ BEGIN
   -- Métricas a nivel persona (window functions separadas del GROUP BY)
   persona_stats AS (
     SELECT id_buro_persona,
-      SUM(dir002to) AS dir050to,
-      COUNT(*) AS dir057
+      SUM(cnt_reportes) AS dir050to,
+      -- DIR009 (:2390-2396): cuantas direcciones de la persona son de
+      -- correspondencia, es decir tienen al menos un reporte 'CRR'. Antes era
+      -- COUNT(DISTINCT id_buro_suscriptor), que ademas colgaba de la cubeta de
+      -- hash documentada como ruido.
+      SUM(CASE WHEN direccion_fisica <> '' AND dir016 > 0 THEN 1 ELSE 0 END) AS dir009
     FROM base_agg
+    GROUP BY id_buro_persona
+  ),
+
+  -- Extremos de recencia por PERSONA, sobre las filas de reporte.
+  -- Portado de REC_STAGE.TMP_V_DIR_VDDF_PIDR (:3000-3005). Son los Valor1,
+  -- Valor2 y Suma de DIR059. Se agrega desde el insumo, no desde base_agg:
+  -- el legado toma el MAX/MIN de Meses_Reporte de todas las filas de la
+  -- persona, no de los maximos por direccion.
+  persona_dir AS (
+    SELECT id_buro_persona,
+      MAX(meses_reporte) AS valor1,
+      MIN(meses_reporte) AS valor2,
+      COUNT(*)           AS suma
+    FROM bdm_tempo.stg_insumo_direccion
     GROUP BY id_buro_persona
   ),
 
@@ -67,10 +116,20 @@ BEGIN
     SELECT
       a.*,
       p.dir050to AS dir050to_raw,
-      p.dir057,
-      CAST(100.0 * a.dir002to / NULLIF(p.dir050to, 0) AS DECIMAL(18,2)) AS dir059
+      p.dir009,
+      -- DIR059 (:439-444): normalizacion min-max de la recencia de la
+      -- direccion contra el rango de recencias de la persona, NO un porcentaje
+      -- de reportes. Vale 100 cuando la persona tiene una sola recencia, y
+      -- crece cuanto MAS RECIENTE es la direccion (dir002to bajo => numerador
+      -- alto), que es lo que la escala de categorias premia.
+      CAST(100.0 * (CASE WHEN pd.valor1 = pd.valor2 AND pd.suma <> 0 THEN 1.0
+                         WHEN pd.suma = 0 THEN NULL
+                         ELSE CAST(pd.valor1 - a.dir002to AS DECIMAL(18,6))
+                              / NULLIF(pd.valor1 - pd.valor2, 0)
+                    END) AS DECIMAL(18,2)) AS dir059
     FROM base_agg a
     JOIN persona_stats p ON a.id_buro_persona = p.id_buro_persona
+    JOIN persona_dir  pd ON a.id_buro_persona = pd.id_buro_persona
   ),
 
   -- Categorización (CASE WHEN → 1..N)
@@ -91,8 +150,11 @@ BEGIN
            WHEN dir013ot <= 6.9 THEN 3 WHEN dir013ot <= 14.29 THEN 4 ELSE 5 END AS cat_013ot,
       -- DIR017: tipo ubicación
       CASE WHEN dir017 IS NULL THEN 1 WHEN dir017 <= 1 THEN 2 ELSE 3 END AS cat_017,
-      -- DIR019: reportes recientes
-      CASE WHEN dir019 IS NULL OR dir019 = 0 THEN 1 ELSE 2 END AS cat_019,
+      -- DIR019: el legado NO tiene tabla _Cat para esta. Su _Peso (:456) usa
+      -- el valor crudo 0/1 con divisor 2. El mapeo 0->1 / 1->2 que habia aqui
+      -- sumaba beta/2 constante a TODAS las filas: no movia el ranking, pero
+      -- no era el score del legado.
+      dir019 AS cat_019,
       -- DIR034FI: % financiero 12m
       CASE WHEN dir034fi IS NULL THEN 1 WHEN dir034fi <= 3.54 THEN 2 ELSE 3 END AS cat_034fi,
       -- DIR050TO: total reportes persona

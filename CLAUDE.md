@@ -199,9 +199,24 @@ en SIN_DATO, y conviene no volver a investigarlos.
 
 | Limite | Causa | Consecuencia |
 |---|---|---|
-| `sector_financiero` vale **0 siempre** | su catalogo se carga de la vista REAL del datashare (`02_catalogos_ordenamiento.sql:16`) y no tiene variante mock | `DIR010FI`, `TEL017`, `CEL017` y `EMA016` quedan clavadas en la categoria minima |
+| `sector_financiero` vale **0 siempre** | su catalogo se carga de la vista REAL del datashare (`02_catalogos_ordenamiento.sql:16`) y no tiene variante mock | `DIR010FI`, `TEL017` y `EMA016` quedan clavadas en la categoria minima |
 | `coincidencia_geo` esta **fijado al literal 0** | `preparar_insumos_edf.sql:234` | `TEL010` aporta una constante y `TEL020` no entra en la suma: ninguno discrimina |
-| No existe `'POSPAGO'` | `catalogo_tipo_cuenta_tel` solo trae `PREPAGO` y `FIJA` (`02_catalogos_ordenamiento.sql:27-32`) | `CEL014` y `CEL019` son constantes: 310 puntos de beta inmovilizados |
+| No existe `'POSPAGO'` | `catalogo_tipo_cuenta_tel` solo trae `PREPAGO` y `FIJA` (`02_catalogos_ordenamiento.sql:27-32`) | `CEL019` es constante: 186,72 puntos de beta inmovilizados |
+
+**Dos filas de esa tabla eran falsas y se corrigieron (SLCOPRBA-1355).** Decian
+que `CEL014` estaba clavada por `'POSPAGO'` y `CEL017` por `sector_financiero`.
+**El legado no mira ninguna de las dos cosas**: `CO01CEL014` es la cuota de la
+ventana `> 24` meses sobre `Total_Reportes_24m` (`Caracteristicas.txt:2450-2453`)
+y `CO01CEL017` la de la ventana `(12, 24]` sobre
+`Total_Reportes_24 - Total_Reportes_12` (`:2459-2463`). Eran invenciones
+nuestras, no limites del mock. Portarlas bien libero **165,97 puntos de beta**
+(124,48 + 41,49). `CEL019` si depende de verdad del tipo de cuenta
+(`:1285-1290`, `MAX(TCO.Valor)` sobre `V_Tipo_Cuenta_Ord`) y sigue bloqueada.
+
+**Moraleja, que es la que importa:** una caracteristica que sale constante en el
+mock no prueba que le falte un catalogo. Antes de anotarla como limite
+estructural hay que leer su formula en el legado. Dos de las tres filas de esta
+tabla no sobrevivieron a esa lectura.
 
 ### Dos trampas al sembrar arquetipos de Ordenamiento
 

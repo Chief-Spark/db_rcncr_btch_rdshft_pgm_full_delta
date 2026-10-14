@@ -20,6 +20,20 @@ BEGIN
     cod_dw_persona_ubic, cod_pin_persona, id_buro_persona, canal, score, lugar
   )
   WITH
+  -- SLCOPRBA-1355: contadores de reporte por ventana, por PERSONA.
+  -- Portados de REC_STAGE.NUM_TOTAL_REPORTE_CEL (Caracteristicas.txt:380-400),
+  -- que agrupa por (Cod_Pin_Persona, Id_Buro_Persona) -- la misma llave que
+  -- id_buro_persona, por FNV_HASH. Son los divisores de CEL006/014/015/017.
+  ventanas AS (
+    SELECT id_buro_persona,
+           SUM(CASE WHEN meses_reporte <=  3 THEN 1 ELSE 0 END) AS tr_3,
+           SUM(CASE WHEN meses_reporte <=  6 THEN 1 ELSE 0 END) AS tr_6,
+           SUM(CASE WHEN meses_reporte <= 12 THEN 1 ELSE 0 END) AS tr_12,
+           SUM(CASE WHEN meses_reporte <= 24 THEN 1 ELSE 0 END) AS tr_24,
+           SUM(CASE WHEN meses_reporte >  24 THEN 1 ELSE 0 END) AS tr_24m
+      FROM bdm_tempo.stg_insumo_celular
+     GROUP BY id_buro_persona
+  ),
   base_agg AS (
     SELECT
       MIN(ic.cod_dw_persona_ubic) AS cod_dw_persona_ubic,
@@ -27,17 +41,40 @@ BEGIN
       ic.id_buro_persona,
       ic.celular,
       MAX(ic.meses_reporte) AS cel003,
-      CAST(100.0 * SUM(CASE WHEN ic.meses_reporte <= 12 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS DECIMAL(18,2)) AS cel006,
+      -- CEL006 (Caracteristicas.txt:2444-2447): cuota de la ventana <= 3 meses
+      -- sobre Total_Reportes_3. Antes era la ventana de 12 meses sobre COUNT(*)
+      -- del grupo: ni la ventana ni el divisor eran los del legado.
+      CAST(100.0 * SUM(CASE WHEN ic.meses_reporte <= 3
+                            THEN 1.0 / GREATEST(v.tr_3, 1) ELSE 0 END) AS DECIMAL(18,2)) AS cel006,
+      -- CEL007 (:2448): conteo pelado. Ya era correcta; lo que estaba mal era
+      -- su categoria (ver mas abajo).
       SUM(CASE WHEN ic.meses_reporte <= 6 THEN 1 ELSE 0 END) AS cel007,
-      MAX(CASE WHEN ic.operador IN ('310','311','312','313','314') THEN 1 ELSE 0 END) AS cel013,
-      MAX(CASE WHEN ic.tipo_cuenta = 'POSPAGO' THEN 1 ELSE 0 END) AS cel014,
-      CAST(100.0 * COUNT(DISTINCT ic.id_buro_suscriptor) / NULLIF(COUNT(*), 0) AS DECIMAL(18,2)) AS cel015,
-      CAST(100.0 * SUM(CASE WHEN ic.sector_financiero = 1 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS DECIMAL(18,2)) AS cel017,
+      -- CEL013 (:2449): conteo de reportes de mas de 24 meses. Es la excepcion
+      -- del bloque: sin divisor y sin *100, confirmado por sus umbrales de
+      -- categoria (:2348-2354, <1 <2 <3 >=3). Antes era una bandera sobre el
+      -- prefijo del operador, que el legado no mira en ningun sitio.
+      SUM(CASE WHEN ic.meses_reporte > 24 THEN 1 ELSE 0 END) AS cel013,
+      -- CEL014 (:2450-2453): cuota de la ventana > 24 meses sobre
+      -- Total_Reportes_24m. NO depende de tipo_cuenta: la bandera POSPAGO que
+      -- habia aqui es la que tenia 124,48 de beta inmovilizados en el mock.
+      CAST(100.0 * SUM(CASE WHEN ic.meses_reporte > 24
+                            THEN 1.0 / GREATEST(v.tr_24m, 1) ELSE 0 END) AS DECIMAL(18,2)) AS cel014,
+      -- CEL015 (:2454-2458): cuota de la ventana (3, 6] sobre
+      -- (Total_Reportes_6 - Total_Reportes_3). No cuenta suscriptores.
+      CAST(100.0 * SUM(CASE WHEN ic.meses_reporte > 3 AND ic.meses_reporte <= 6
+                            THEN 1.0 / GREATEST(v.tr_6 - v.tr_3, 1) ELSE 0 END) AS DECIMAL(18,2)) AS cel015,
+      -- CEL017 (:2459-2463): cuota de la ventana (12, 24] sobre
+      -- (Total_Reportes_24 - Total_Reportes_12). NO depende de
+      -- sector_financiero: otros 41,49 de beta que estaban clavados.
+      CAST(100.0 * SUM(CASE WHEN ic.meses_reporte > 12 AND ic.meses_reporte <= 24
+                            THEN 1.0 / GREATEST(v.tr_24 - v.tr_12, 1) ELSE 0 END) AS DECIMAL(18,2)) AS cel017,
       CAST(100.0 * COALESCE(MAX(ooc.valor), 0.22) AS DECIMAL(18,2)) AS cel018,
       CAST(100.0 * SUM(CASE WHEN ic.tipo_cuenta = 'POSPAGO' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS DECIMAL(18,2)) AS cel019,
       COUNT(*) AS cel020_raw,
       MAX(CASE WHEN ic.texto_ubicacion IS NOT NULL AND ic.texto_ubicacion <> '' THEN 1 ELSE 0 END) AS cel023
     FROM bdm_tempo.stg_insumo_celular ic
+    INNER JOIN ventanas v
+      ON v.id_buro_persona = ic.id_buro_persona
     LEFT JOIN bdm_datos.catalogo_operador_ord_cel ooc
       ON ooc.cod_operador = LEFT(ic.celular, 3)
     GROUP BY ic.id_buro_persona, ic.celular
@@ -53,11 +90,15 @@ BEGIN
     SELECT cod_dw_persona_ubic, cod_pin_persona, id_buro_persona, celular,
       CASE WHEN cel003 < 21 THEN 1 WHEN cel003 < 33 THEN 2 WHEN cel003 < 54 THEN 3 WHEN cel003 >= 54 THEN 4 ELSE 0 END AS c03,
       CASE WHEN cel006 < 5 THEN 1 WHEN cel006 < 90 THEN 2 WHEN cel006 >= 90 THEN 3 ELSE 0 END AS c06,
-      CASE WHEN cel007 < 2 THEN 1 WHEN cel007 < 3 THEN 2 WHEN cel007 < 6 THEN 3 WHEN cel007 >= 6 THEN 4 ELSE 0 END AS c07,
-      CASE WHEN cel013 = 0 THEN 1 WHEN cel013 = 1 THEN 4 ELSE 0 END AS c13,
-      CASE WHEN cel014 = 0 THEN 1 WHEN cel014 = 1 THEN 4 ELSE 0 END AS c14,
-      CASE WHEN cel015 < 20 THEN 1 WHEN cel015 < 50 THEN 2 WHEN cel015 < 70 THEN 3 WHEN cel015 >= 70 THEN 4 ELSE 0 END AS c15,
-      CASE WHEN cel017 < 1 THEN 1 WHEN cel017 < 63 THEN 2 WHEN cel017 < 95 THEN 3 WHEN cel017 >= 95 THEN 4 ELSE 0 END AS c17,
+      -- Umbrales de CARACTERISTICA_CAT_CEL (Caracteristicas.txt:332-371).
+      -- Los cinco de abajo estaban calibrados contra los valores viejos.
+      -- c07 cambia aunque CEL007 no cambie: su categoria nunca fue la del
+      -- legado (teniamos 2/3/6, el legado 1/2/3).
+      CASE WHEN cel007 < 1 THEN 1 WHEN cel007 < 2 THEN 2 WHEN cel007 < 3 THEN 3 WHEN cel007 >= 3 THEN 4 ELSE 0 END AS c07,
+      CASE WHEN cel013 < 1 THEN 1 WHEN cel013 < 2 THEN 2 WHEN cel013 < 3 THEN 3 WHEN cel013 >= 3 THEN 4 ELSE 0 END AS c13,
+      CASE WHEN cel014 < 5 THEN 1 WHEN cel014 < 50 THEN 2 WHEN cel014 < 100 THEN 3 WHEN cel014 >= 100 THEN 4 ELSE 0 END AS c14,
+      CASE WHEN cel015 <= 0 THEN 1 WHEN cel015 > 0 THEN 4 ELSE 0 END AS c15,
+      CASE WHEN cel017 <= 0 THEN 1 WHEN cel017 > 0 THEN 4 ELSE 0 END AS c17,
       CASE WHEN cel018 < 51.11 THEN 1 WHEN cel018 < 61.48 THEN 2 WHEN cel018 < 73.33 THEN 3 WHEN cel018 >= 73.33 THEN 4 ELSE 0 END AS c18,
       CASE WHEN cel019 < 35 THEN 1 WHEN cel019 < 80 THEN 2 WHEN cel019 >= 80 THEN 3 ELSE 0 END AS c19,
       CASE WHEN cel020 < 33.33 THEN 1 WHEN cel020 < 45.67 THEN 2 WHEN cel020 < 100 THEN 3 WHEN cel020 >= 100 THEN 4 ELSE 0 END AS c20,
