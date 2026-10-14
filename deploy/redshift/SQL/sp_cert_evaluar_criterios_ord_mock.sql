@@ -613,7 +613,8 @@ BEGIN
          CASE WHEN COALESCE(SUM(x.hay), 0) = 0                       THEN 'SIN_DATO'
               WHEN COALESCE(SUM(x.falla), 0) > 0                     THEN 'FAILED'
               ELSE 'PASSED' END,
-         'arquetipos esperados=' || CAST(COUNT(*) AS VARCHAR)
+         SUBSTRING(
+           'arquetipos esperados=' || CAST(COUNT(*) AS VARCHAR)
            || ', presentes=' || CAST(COALESCE(SUM(x.hay), 0) AS VARCHAR)
            || ', con el delta de score esperado='
            || CAST(COALESCE(SUM(CASE WHEN x.falla = 0 AND x.hay = 1 THEN 1 ELSE 0 END), 0) AS VARCHAR)
@@ -627,7 +628,7 @@ BEGIN
                                             || ' (LAS REPLICAS NO COINCIDEN)'
                                        ELSE '' END, ' | ')
                        WITHIN GROUP (ORDER BY x.banda), 'nada que medir')
-           || ' -- ' || x2.nota,
+           || ' -- ' || x2.nota, 1, 1024),
          GETDATE(), CURRENT_USER
   FROM ( SELECT m.banda, m.canal, m.delta_esperado,
                 a.delta_min, a.delta_max,
