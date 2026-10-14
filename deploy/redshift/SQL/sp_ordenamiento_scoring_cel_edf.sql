@@ -75,11 +75,8 @@ BEGIN
       -- El legado devuelve 0 cuando el prefijo no esta en el catalogo
       -- ("CASE WHEN Valor_CO01CEL018 IS NULL THEN 0 ELSE ... END"); aqui
       -- habia un 0,22 inventado.
-      --   PENDIENTE DE DECISION, NO APLICADO: el legado ademas EXCLUYE del
-      --   ranking a los celulares con operador desconocido --
-      --   Orden_Celular lleva "WHERE CEl018.CO01CEL018 <> 0" (:899). Eso
-      --   quita filas de score_ordenamiento, no solo cambia su score, asi
-      --   que se deja anotado y se decide aparte.
+      --   Y es la COMPUERTA del canal: un 0 aqui saca la fila del ranking.
+      --   Ver el WHERE del SELECT final.
       CAST(100.0 * COALESCE(MAX(ooc.valor), 0) AS DECIMAL(18,2)) AS cel018,
       CAST(100.0 * SUM(CASE WHEN ic.tipo_cuenta = 'POSPAGO' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS DECIMAL(18,2)) AS cel019,
       COUNT(*) AS cel020_raw,
@@ -114,6 +111,7 @@ BEGIN
   ),
   categorized AS (
     SELECT cod_dw_persona_ubic, cod_pin_persona, id_buro_persona, celular,
+      cel018,   -- se arrastra crudo: es la compuerta del ranking, ver el WHERE final
       CASE WHEN cel003 < 21 THEN 1 WHEN cel003 < 33 THEN 2 WHEN cel003 < 54 THEN 3 WHEN cel003 >= 54 THEN 4 ELSE 0 END AS c03,
       CASE WHEN cel006 < 5 THEN 1 WHEN cel006 < 90 THEN 2 WHEN cel006 >= 90 THEN 3 ELSE 0 END AS c06,
       -- Umbrales de CARACTERISTICA_CAT_CEL (Caracteristicas.txt:332-371).
@@ -132,7 +130,7 @@ BEGIN
     FROM base
   ),
   scored AS (
-    SELECT c.cod_dw_persona_ubic, c.cod_pin_persona, c.id_buro_persona, c.celular,
+    SELECT c.cod_dw_persona_ubic, c.cod_pin_persona, c.id_buro_persona, c.celular, c.cel018,
       COALESCE((CAST(c.c03 AS FLOAT)/4)*b03.valor_beta,0) + COALESCE((CAST(c.c06 AS FLOAT)/4)*b06.valor_beta,0)
       + COALESCE((CAST(c.c07 AS FLOAT)/4)*b07.valor_beta,0) + COALESCE((CAST(c.c13 AS FLOAT)/4)*b13.valor_beta,0)
       + COALESCE((CAST(c.c14 AS FLOAT)/4)*b14.valor_beta,0) + COALESCE((CAST(c.c15 AS FLOAT)/4)*b15.valor_beta,0)
@@ -199,7 +197,27 @@ BEGIN
                        ORDER BY CAST(score AS DECIMAL(18,4)) DESC NULLS LAST,
                                 celular,
                                 cod_dw_persona_ubic)
-  FROM scored;
+  FROM scored
+  -- COMPUERTA DE ELEGIBILIDAD DEL CANAL (Caracteristicas.txt:890-900).
+  --
+  --   Orden_Celular del legado no ordena todo lo que puntua: une el score
+  --   con CO01CEL018 y filtra "WHERE CEl018.CO01CEL018 <> 0" (:899). Un
+  --   celular cuyo prefijo de 3 digitos no esta en el catalogo de operadores
+  --   vale 0 en CEL018 (:909, "CASE WHEN Valor_CO01CEL018 IS NULL THEN 0")
+  --   y queda FUERA del ranking: no es que puntue bajo, es que no se
+  --   contacta.
+  --
+  --   El WHERE va aqui, no en una CTE anterior, y eso importa: en SQL el
+  --   WHERE se aplica ANTES de las funciones de ventana, de modo que el
+  --   ROW_NUMBER numera 1..N sobre las filas que sobreviven. Es lo que hace
+  --   el legado, que tiene el filtro y el ROW_NUMBER en el mismo SELECT.
+  --
+  --   ESTO QUITA FILAS de score_ordenamiento, no solo cambia su score. Es
+  --   el comportamiento del legado y se aplica por decision expresa.
+  --   Los otros tres canales NO llevan compuerta: EMA no tiene ninguna
+  --   (Orden_Email, :804-813, un ROW_NUMBER pelado) y la de TEL cuelga de
+  --   CO01TEL022 (:1213), caracteristica que no calculamos.
+  WHERE cel018 <> 0;
 END;
 $$;
 -- SLCOPRBA-1355: re-DPLY DEV post DROP SCHEMA strct #256
