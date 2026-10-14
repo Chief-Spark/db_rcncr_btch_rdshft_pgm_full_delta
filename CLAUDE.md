@@ -174,7 +174,6 @@ en SIN_DATO, y conviene no volver a investigarlos.
 | `sector_financiero` vale **0 siempre** | su catalogo se carga de la vista REAL del datashare (`02_catalogos_ordenamiento.sql:16`) y no tiene variante mock | `DIR010FI`, `TEL017`, `CEL017` y `EMA016` quedan clavadas en la categoria minima |
 | `coincidencia_geo` esta **fijado al literal 0** | `preparar_insumos_edf.sql:234` | `TEL010` aporta una constante y `TEL020` no entra en la suma: ninguno discrimina |
 | No existe `'POSPAGO'` | `catalogo_tipo_cuenta_tel` solo trae `PREPAGO` y `FIJA` (`02_catalogos_ordenamiento.sql:27-32`) | `CEL014` y `CEL019` son constantes: 310 puntos de beta inmovilizados |
-| `TEL` da **una sola fila por persona** | `direccion_fisica` sale de `COALESCE(ref.dir_ref, ...)` y `dir_ref` es `MIN(texto_ubicacion)` agregado POR PERSONA (`preparar_insumos_edf.sql:127`) | todos los telefonos de una persona colapsan en un grupo. Para sembrar dos filas TEL hay que dejar a la persona SIN fila en `ubicacion_estandarizada` |
 
 ### Dos trampas al sembrar arquetipos de Ordenamiento
 
@@ -200,3 +199,22 @@ nunca por el valor absoluto. El delta es exactamente
 filas comparten: la fecha, el catalogo financiero, el numero de reportes y el
 de direcciones. Un score absoluto depende de las cuatro cosas y el criterio se
 caeria solo.
+
+### El colapso de TEL NO es un limite del mock: es un defecto de produccion
+
+`direccion_fisica` sale de `COALESCE(ref.dir_ref, ...)` y `dir_ref` es
+`MIN(texto_ubicacion)` agregado **por persona**
+(`sp_ordenamiento_preparar_insumos_edf.sql:127`) -- **en el SP REAL, no solo en
+el mock**. Si la persona tiene una sola ubicacion estandarizada, que es el caso
+normal, todos sus telefonos reciben el mismo valor y colapsan en un grupo:
+**una fila de score, `lugar = 1` siempre, nada que ordenar.**
+
+El legado agrupa por la direccion fisica **de cada fila de reporte**, de modo
+que una persona con N direcciones produce N grupos y el ranking elige entre
+ellos. Ese es el proposito del canal.
+
+Arrastra cinco caracteristicas mas: `TEL001`, `TEL006`, `TEL010`, `TEL023` y
+`TEL025` son en el legado *cuotas del grupo contra el total de la persona*. Con
+grupo = persona valen trivialmente 100 o 0.
+
+Detalle completo en `docs/AUDITORIA_SEMANTICA_ORDENAMIENTO_F4.md`.
