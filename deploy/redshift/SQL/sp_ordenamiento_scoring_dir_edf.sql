@@ -76,7 +76,7 @@ BEGIN
   -- Categorización (CASE WHEN → 1..N)
   categorized AS (
     SELECT
-      cod_dw_persona_ubic, cod_pin_persona, id_buro_persona,
+      cod_dw_persona_ubic, cod_pin_persona, id_buro_persona, direccion_fisica,
       -- DIR001IN: meses primer reporte
       CASE WHEN dir001in IS NULL THEN 1 WHEN dir001in <= 24 THEN 2 ELSE 3 END AS cat_001in,
       -- DIR004RO: reportes 12m
@@ -112,7 +112,7 @@ BEGIN
   -- Pesos: (cat / max_cat) × Beta
   scored AS (
     SELECT
-      c.cod_dw_persona_ubic, c.cod_pin_persona, c.id_buro_persona,
+      c.cod_dw_persona_ubic, c.cod_pin_persona, c.id_buro_persona, c.direccion_fisica,
       COALESCE((CAST(c.cat_001in AS FLOAT) / 3) * b01.valor_beta, 0)
       + COALESCE((CAST(c.cat_004ro AS FLOAT) / 3) * b04.valor_beta, 0)
       + COALESCE((CAST(c.cat_007to AS FLOAT) / 6) * b07.valor_beta, 0)
@@ -176,8 +176,21 @@ BEGIN
     --      guardan con el MISMO score y distinto lugar, por una diferencia que
     --      ya no existe en la tabla. El ranking tiene que ser funcion del valor
     --      que se guarda, o no hay forma de verificarlo leyendo la salida.
+    --
+    --   4) SLCOPRBA-1355: el desempate es la CLAVE DEL GRUPO, no la RPU.
+    --      cod_dw_persona_ubic entra como MIN() sobre el GROUP BY, de modo que
+    --      dos grupos distintos de la misma persona pueden compartirlo: una
+    --      persona con dos celulares en la misma RPU, o con dos correos. Ahi el
+    --      ORDER BY no determinaba nada y el lugar quedaba al azar del orden
+    --      fisico. Medido en el banco local: 578 filas de 298 000 con el lugar
+    --      distinto de un recalculo determinista, creciendo de 434 a 578 entre
+    --      FULL y DELTA2. La clave del grupo SI es unica dentro de
+    --      (persona, canal) por construccion, asi que el ranking vuelve a ser
+    --      reproducible. cod_dw_persona_ubic se queda detras: no estorba y
+    --      conserva el comportamiento donde la clave ya desempataba.
     ROW_NUMBER() OVER (PARTITION BY id_buro_persona
                        ORDER BY CAST(score AS DECIMAL(18,4)) DESC NULLS LAST,
+                                direccion_fisica,
                                 cod_dw_persona_ubic) AS lugar
   FROM scored;
 END;
