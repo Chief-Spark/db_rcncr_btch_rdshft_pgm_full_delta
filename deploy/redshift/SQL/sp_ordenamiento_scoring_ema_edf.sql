@@ -20,27 +20,58 @@ BEGIN
     cod_dw_persona_ubic, cod_pin_persona, id_buro_persona, canal, score, lugar
   )
   WITH
+  -- SLCOPRBA-1355: los contadores de ventana POR PERSONA del legado.
+  --
+  -- El legado los lleva en REC_STAGE.NUM_TOTAL_REPORTE, construidos asi
+  -- (Caracteristicas.txt:380-400, bloque NUM_TOTAL_REPORTE_CEL, identico para
+  -- los demas canales): cuenta de filas de reporte DE LA PERSONA -- todos sus
+  -- contactos del canal -- dentro de cada ventana, agrupando por
+  -- (Cod_Pin_Persona, Id_Buro_Persona).
+  --
+  -- Son el DENOMINADOR de cinco caracteristicas de EMA. Sin ellos no se puede
+  -- expresar la magnitud que el legado mide, que es una CUOTA: "que parte de
+  -- los reportes de esta persona en esta ventana corresponden a este correo".
+  ventanas AS (
+    SELECT id_buro_persona,
+           SUM(CASE WHEN meses_reporte <=  3 THEN 1 ELSE 0 END) AS tr_3,
+           SUM(CASE WHEN meses_reporte <=  6 THEN 1 ELSE 0 END) AS tr_6,
+           SUM(CASE WHEN meses_reporte <= 12 THEN 1 ELSE 0 END) AS tr_12,
+           SUM(CASE WHEN meses_reporte <= 24 THEN 1 ELSE 0 END) AS tr_24,
+           SUM(CASE WHEN meses_reporte >  24 THEN 1 ELSE 0 END) AS tr_24m
+      FROM bdm_tempo.stg_insumo_email
+     GROUP BY id_buro_persona
+  ),
   base_agg AS (
     SELECT
-      MIN(cod_dw_persona_ubic) AS cod_dw_persona_ubic,
-      MIN(cod_pin_persona) AS cod_pin_persona,
-      id_buro_persona,
-      email,
-      MAX(meses_reporte) AS ema003,
-      SUM(CASE WHEN meses_reporte <= 6 THEN 1 ELSE 0 END) AS ema007,
-      COUNT(DISTINCT id_buro_suscriptor) AS ema010,
-      MAX(CASE WHEN dominio IN ('gmail.com','hotmail.com','yahoo.com','outlook.com') THEN 1 ELSE 0 END) AS ema014,
-      CAST(100.0 * COUNT(DISTINCT id_buro_suscriptor) / NULLIF(COUNT(*), 0) AS DECIMAL(18,2)) AS ema015,
-      CAST(100.0 * SUM(CASE WHEN sector_financiero = 1 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS DECIMAL(18,2)) AS ema016,
-      CAST(100.0 * SUM(CASE WHEN tipo_cuenta = 'PERSONAL' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS DECIMAL(18,2)) AS ema017,
-      MAX(CASE WHEN meses_reporte <= 3 THEN 1 ELSE 0 END) AS ema018,
+      MIN(e.cod_dw_persona_ubic) AS cod_dw_persona_ubic,
+      MIN(e.cod_pin_persona) AS cod_pin_persona,
+      e.id_buro_persona,
+      e.email,
+      MAX(e.meses_reporte) AS ema003,
+      SUM(CASE WHEN e.meses_reporte <= 6 THEN 1 ELSE 0 END) AS ema007,
+      -- EMA010/014/015/016/017 reescritas contra Caracteristicas.txt:1718-1742.
+      -- GREATEST(x, 1) es el CASE WHEN divisor > 0 THEN divisor ELSE 1 END del
+      -- legado: con cero reportes en la ventana el termino vale 0 de todas
+      -- formas, y asi no hay division por cero.
+      CAST(100.0 * SUM(CASE WHEN e.meses_reporte <= 12
+                            THEN 1.0 / GREATEST(v.tr_12, 1) ELSE 0 END) AS DECIMAL(18,2)) AS ema010,
+      CAST(100.0 * SUM(CASE WHEN e.meses_reporte > 24
+                            THEN 1.0 / GREATEST(v.tr_24m, 1) ELSE 0 END) AS DECIMAL(18,2)) AS ema014,
+      CAST(100.0 * SUM(CASE WHEN e.meses_reporte > 3 AND e.meses_reporte <= 6
+                            THEN 1.0 / GREATEST(v.tr_6 - v.tr_3, 1) ELSE 0 END) AS DECIMAL(18,2)) AS ema015,
+      CAST(100.0 * SUM(CASE WHEN e.meses_reporte > 6 AND e.meses_reporte <= 12
+                            THEN 1.0 / GREATEST(v.tr_12 - v.tr_6, 1) ELSE 0 END) AS DECIMAL(18,2)) AS ema016,
+      CAST(100.0 * SUM(CASE WHEN e.meses_reporte > 12 AND e.meses_reporte <= 24
+                            THEN 1.0 / GREATEST(v.tr_24 - v.tr_12, 1) ELSE 0 END) AS DECIMAL(18,2)) AS ema017,
+      MAX(CASE WHEN e.meses_reporte <= 3 THEN 1 ELSE 0 END) AS ema018,
       COUNT(*) AS ema020_raw,
       COUNT(*) AS ema021_raw,
-      MAX(CASE WHEN sector_financiero = 1 THEN 1 ELSE 0 END) AS ema023_raw,
-      MAX(CASE WHEN dominio NOT IN ('gmail.com','hotmail.com','yahoo.com','outlook.com') THEN 1 ELSE 0 END) AS ema024,
-      CAST(100.0 * MIN(meses_reporte) / NULLIF(MAX(meses_reporte), 0) AS DECIMAL(18,2)) AS ema025
-    FROM bdm_tempo.stg_insumo_email
-    GROUP BY id_buro_persona, email
+      MAX(CASE WHEN e.sector_financiero = 1 THEN 1 ELSE 0 END) AS ema023_raw,
+      MAX(CASE WHEN e.dominio NOT IN ('gmail.com','hotmail.com','yahoo.com','outlook.com') THEN 1 ELSE 0 END) AS ema024,
+      CAST(100.0 * MIN(e.meses_reporte) / NULLIF(MAX(e.meses_reporte), 0) AS DECIMAL(18,2)) AS ema025
+    FROM bdm_tempo.stg_insumo_email e
+    INNER JOIN ventanas v ON v.id_buro_persona = e.id_buro_persona
+    GROUP BY e.id_buro_persona, e.email
   ),
   persona_ema AS (
     SELECT id_buro_persona, SUM(ema020_raw) AS total_rep FROM base_agg GROUP BY 1
