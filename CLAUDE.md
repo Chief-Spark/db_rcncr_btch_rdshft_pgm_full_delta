@@ -141,3 +141,24 @@ conserva su nombre en `RevSQL/`.
 Chequea ASCII, BOM, `$$` y parentesis balanceados, simetria de los `.par`, que
 toda entrada tenga su archivo, `WHERE` en `UPDATE`/`DELETE`, y `LISTAGG` con el
 mismo `WITHIN GROUP` por `SELECT`. Sale distinto de cero si algo falla.
+
+## Como responder en este proyecto
+
+Corto, claro y contundente. Quien lee necesita decidir, no leer.
+
+- **La conclusion primero**, en negrita. Luego la evidencia.
+- **Tablas** en vez de prosa cuando hay mas de dos cosas que comparar.
+- **Maximo 15 lineas**, salvo entregables (un plan, un informe, un documento).
+- **Cita `archivo:linea`** al afirmar algo del codigo. Una afirmacion sin cita
+  es una hipotesis, y hay que decir que lo es.
+- No recapitular lo ya dicho. No narrar lo que se va a hacer: hacerlo y
+  reportar.
+- No enumerar opciones que no se van a tomar. Recomendar una.
+- Nada de disculpas ni de rumiar errores propios: corregir en una linea y
+  seguir.
+- Un hallazgo son tres lineas: **que** es, **donde** esta, **que impacto**
+  tiene. Si hay varios, tabla.
+
+Y lo que mas importa en este proyecto: **si una afirmacion anterior resulta
+falsa, corregirla en cuanto se sepa, sin preambulo.** Ha pasado ya con el gate
+que se creia que tumbaba el build y no lo hacia.
