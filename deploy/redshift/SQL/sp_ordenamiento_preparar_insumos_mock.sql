@@ -247,6 +247,33 @@ BEGIN
   ANALYZE bdm_tempo.stg_reporte_rpu;
 
   -- 7) Contactos canal TEL/CEL/EMA — solo personas ganadoras
+  -- SLCOPRBA-1355: filtro de hijas a grano de RPU, no de PERSONA.
+  --
+  -- EL DEFECTO. El unico filtro de unificacion de esta rama era el INNER JOIN
+  -- a stg_persona_dir_ganadora, que es DISTINCT id_buro_persona de las RPU no
+  -- hijas. A una persona con AL MENOS UNA RPU no hija le pasaban TODAS sus
+  -- filas de contacto, hijas incluidas -- y los insumos de TEL, CEL y EMA
+  -- toman c.cod_dw_persona_ubic de aqui sin volver a mirar ind_unificacion.
+  -- Resultado medido en el banco local: 9000 hijas con score en cada uno de
+  -- los tres canales, y DIR en cero. Esperado 0 (criterios F4-07, RG-05,
+  -- CA-F02 del RF).
+  --
+  -- DIR no lo sufria porque arranca de stg_rpu_post_unificacion y vuelve a
+  -- asertar el predicado sobre ESE MISMO alias. Esto le da a los canales la
+  -- misma proteccion, en un solo sitio, y los tres insumos la heredan.
+  --
+  -- LEFT JOIN y no INNER a proposito: INNER exigiria que la RPU del contacto
+  -- este en la tabla, que ademas esta acotada al alcance de la corrida, y eso
+  -- descartaria contactos por una razon distinta de la que se quiere. Con
+  -- COALESCE se cae SOLO lo que se sabe hija.
+  --
+  -- stg_persona_dir_ganadora se queda: cumple su propio proposito -- que la
+  -- persona tenga una direccion ganadora -- y este filtro es adicional.
+  --
+  -- PENDIENTE DE NEGOCIO, anotado y no decidido aqui: un telefono reportado en
+  -- una RPU que la Unificacion absorbio sigue siendo un telefono valido. Esto
+  -- lo descarta, que es lo que pide el RF y lo coherente con DIR. Si negocio
+  -- prefiere re-apuntarlo a la direccion padre, es otro cambio.
   CREATE TABLE bdm_tempo.stg_contacto_canal
   DISTSTYLE KEY
   DISTKEY (id_buro_persona)
@@ -255,7 +282,10 @@ BEGIN
   SELECT c.*
   FROM bdm_tempo.v_mock_contacto_canal c
   INNER JOIN bdm_tempo.stg_persona_dir_ganadora pg
-    ON pg.id_buro_persona = c.id_buro_persona;
+    ON pg.id_buro_persona = c.id_buro_persona
+  LEFT JOIN bdm_tempo.stg_rpu_post_unificacion rpu
+    ON rpu.cod_dw_persona_ubic = c.cod_dw_persona_ubic
+  WHERE COALESCE(rpu.ind_unificacion, 0) <> 1;
 
   ANALYZE bdm_tempo.stg_contacto_canal;
 
