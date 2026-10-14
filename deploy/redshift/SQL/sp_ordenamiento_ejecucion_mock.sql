@@ -36,10 +36,14 @@
 --   FULL mock, cuyo alcance es todo el universo mock, reescribe por completo lo
 --   suyo sin tocar lo real.
 --
--- sp_ordenamiento_cargar_seed_mock y sp_ordenamiento_validar_mock siguen
--- desplegados y se pueden invocar aparte: son una verificacion independiente de
--- los criterios de aceptacion contra valores controlados. Ya no forman parte de
--- la cadena E2E, cuya evidencia sale de los gates sobre score_ordenamiento y
+-- sp_ordenamiento_cargar_seed_mock y sp_ordenamiento_validar_mock se RETIRARON
+-- (SLCOPRBA-1355). Dejaron de ser una verificacion independiente en cuanto
+-- reset_mock.sql:51-57 empezo a truncar bdm_stage.mock_ord_*: sobre tablas
+-- vacias, CA-O03, CA-O05 y CA-O07 son predicados de "cero filas malas" y daban
+-- PASSED. Eran una trampa de falso verde, desplegada en cada release y sin un
+-- solo llamador. Lo que pretendian cubrir lo cubre ahora el tablero de 90
+-- criterios (cert_criterio_ord), que mide la formula real.
+-- La evidencia del E2E sale de los gates sobre score_ordenamiento y
 -- rpu_orden_prioridad.
 --
 -- NONATOMIC en toda la cadena (leccion #13).

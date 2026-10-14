@@ -62,8 +62,6 @@ sp_ordenamiento_scoring_ema_edf.sql
 sp_ordenamiento_consolidacion_edf.sql
 sp_ordenamiento_drop_staging_edf.sql
 sp_ordenamiento_ejecucion_edf.sql
-sp_ordenamiento_cargar_seed_mock.sql
-sp_ordenamiento_validar_mock.sql
 sp_ordenamiento_ejecucion_mock.sql
 17_sp_ord_control_abrir_cerrar.sql
 18_sp_ord_traza.sql
