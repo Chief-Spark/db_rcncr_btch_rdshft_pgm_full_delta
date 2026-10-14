@@ -689,21 +689,29 @@ BEGIN
                          CAST(0.0000 AS DECIMAL(18,4)) AS delta_esperado UNION ALL
                   SELECT 9810000, 'DIR',   9.6774 UNION ALL
                   SELECT 9820000, 'CEL',   0.0000 UNION ALL
-                  SELECT 9830000, 'CEL', 170.1245 UNION ALL
-                  SELECT 9840000, 'EMA', 121.0207 ) m
+                  SELECT 9830000, 'CEL',  38.3817 UNION ALL
+                  SELECT 9840000, 'EMA', 100.8506 ) m
            LEFT JOIN bdm_tempo.stg_cert_ord_arq a
                   ON a.banda = m.banda AND a.canal = m.canal ) x
   CROSS JOIN ( SELECT CAST('ARQ 80 y 82 son empates a proposito (delta 0); '
-                        || 'ARQ 81 mueve DIR017 de categoria 2 a 3 (29.03225806/3); '
-                        || 'ARQ 83 mueve CEL013 de 1 a 4 y CEL018 de 1 a 3; '
-                        || 'ARQ 84 mueve EMA014 y EMA017 de 1 a 4, las dos con beta negativa'
+                        || 'ARQ 81 mueve DIR017 de categoria 1 a 2 (29.03225806/3); '
+                        || 'ARQ 83 mueve CEL018 de 2 a 3 (153.52697100/4), con un tercer '
+                        || 'celular que la compuerta excluye; '
+                        || 'ARQ 84 mueve EMA024 de 1 a 4 (134.46747820/4)'
                         AS VARCHAR(400)) AS nota ) x2
   GROUP BY x2.nota;
 
   -- F4-DIR-05. Los umbrales de categorizacion se aplican. El ARQ 81 tiene dos
   -- direcciones identicas salvo el tipo de ubicacion (RES contra LAB), que es
-  -- la UNICA columna que mueve una sola caracteristica. Si el CASE de DIR017
-  -- (scoring_dir_edf.sql:93) no partiera en 2 y 3, el delta no seria 9.6774.
+  -- la UNICA columna que mueve una sola caracteristica.
+  --
+  -- EL DELTA NO CAMBIO CON LA REESCRITURA DE DIR017, PERO SU ORIGEN SI.
+  -- Antes DIR017 era un codigo ordinal (RES=1, LAB=2) y las categorias eran
+  -- 2 y 3. Ahora es el conteo de reportes 'LAB' del legado
+  -- (Caracteristicas.txt:1795): la direccion RES no tiene ninguno y da NULL
+  -- -> categoria 1, la LAB tiene uno -> categoria 2. Un escalon en los dos
+  -- casos, de modo que 9.6774 sigue siendo el numero correcto por una razon
+  -- distinta. Conviene saberlo: un verde aqui ya no prueba lo que probaba.
   INSERT INTO bdm_datos.cert_resultado_ord
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
   SELECT p_lote, p_fase, 'F4-DIR-05',
@@ -716,43 +724,58 @@ BEGIN
            || CASE WHEN MAX(a.delta_min) <> MAX(a.delta_max)
                    THEN '..' || CAST(MAX(a.delta_max) AS VARCHAR) || ' (replicas distintas)'
                    ELSE '' END
-           || ', esperado 9.6774 = (3-2)/3 * 29.03225806. Es el salto mas '
+           || ', esperado 9.6774 = (2-1)/3 * 29.03225806. Es el salto mas '
            || 'pequeno que admite el canal DIR, de modo que ademas mide la resolucion',
          GETDATE(), CURRENT_USER
   FROM  bdm_tempo.stg_cert_ord_arq a
   WHERE a.banda = 9810000 AND a.canal = 'DIR';
 
-  -- F4-CEL-02. CEL013 reconoce los prefijos 310-314. El ARQ 83 enfrenta un
-  -- 310 (en la lista) contra un 322 (fuera). Dos mitades: que el 310 gane el
-  -- lugar 1, y que el delta cubra las dos caracteristicas que cambian.
+  -- F4-CEL-02 (REESCRITO, SLCOPRBA-1355). Antes afirmaba que CEL013 reconocia
+  -- el prefijo del operador. NO LO HACE: el legado define CEL013 como el
+  -- conteo de reportes de mas de 24 meses (Caracteristicas.txt:2449), y sus
+  -- umbrales de categoria (:2348-2354, <1 <2 <3 >=3) lo confirman. El
+  -- criterio certificaba una invencion nuestra y por eso daba verde.
+  --
+  -- La caracteristica que SI depende del operador es CEL018 (:908-909), y el
+  -- legado la discrimina por el VALOR del catalogo, no por estar dentro o
+  -- fuera. El ARQ 83 enfrenta ahora 310 (0.62 -> categoria 3) contra 300
+  -- (0.55 -> categoria 2), los dos catalogados y los dos supervivientes de
+  -- la compuerta. Dos mitades: que el 310 gane el lugar 1, y que el delta
+  -- sea el de un solo escalon de CEL018.
   INSERT INTO bdm_datos.cert_resultado_ord
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
   SELECT p_lote, p_fase, 'F4-CEL-02',
          CASE WHEN COUNT(*) = 0                                   THEN 'SIN_DATO'
               WHEN MAX(a.cabeza_ok) <> MAX(a.personas)            THEN 'FAILED'
-              WHEN ABS(MAX(a.delta_min) - 170.1245) > 0.0002      THEN 'FAILED'
+              WHEN ABS(MAX(a.delta_min) - 38.3817) > 0.0002       THEN 'FAILED'
               ELSE 'PASSED' END,
-         'ARQ 83 (CEL, prefijo 310 contra 322): personas='
+         'ARQ 83 (CEL, operador 310 contra 300): personas='
            || CAST(COALESCE(MAX(a.personas), 0) AS VARCHAR)
            || ', con el 310 en el lugar 1='
            || CAST(COALESCE(MAX(a.cabeza_ok), 0) AS VARCHAR)
            || ', delta observado='
            || COALESCE(CAST(MAX(a.delta_min) AS VARCHAR), 'sin filas')
-           || ' (esperado 170.1245 = CEL013 de 1 a 4 mas CEL018 de 1 a 3)',
+           || ' (esperado 38.3817 = CEL018 de 2 a 3, (3-2)/4 * 153.52697100)',
          GETDATE(), CURRENT_USER
   FROM  bdm_tempo.stg_cert_ord_arq a
   WHERE a.banda = 9830000 AND a.canal = 'CEL';
 
-  -- F4-CEL-04. CEL018 toma el valor del catalogo de operador, y el prefijo no
-  -- catalogado cae al valor por defecto.
+  -- F4-CEL-04 (REESCRITO, SLCOPRBA-1355). Ahora certifica LA COMPUERTA.
   --
-  -- LA MITAD QUE IMPORTA ES LA SEGUNDA: que el celular con prefijo FUERA del
-  -- catalogo SIGA TENIENDO FILA. En el legado no la tiene -- el ranking filtra
-  -- con WHERE CO01CEL018 <> 0 (Caracteristicas.txt:79) y el celular
-  -- DESAPARECE del resultado. En Redshift el join es LEFT y el COALESCE le da
-  -- 0.22, de modo que la fila sobrevive penalizada. Este criterio no juzga
-  -- cual de las dos conductas es la correcta: AFIRMA LA NUESTRA para que la
-  -- diferencia sea visible y medible cuando negocio decida (bitacora G-03).
+  -- Antes afirmaba lo contrario: que el celular con prefijo fuera del
+  -- catalogo SEGUIA teniendo fila, con CEL018 en un default inventado de
+  -- 0.22. Se dejo asi a proposito, para que la divergencia fuera medible
+  -- "cuando negocio decida" (bitacora G-03). Negocio decidio: manda el
+  -- legado.
+  --
+  -- El legado devuelve 0 para el prefijo no catalogado (:909) y Orden_Celular
+  -- lo EXCLUYE del ranking (:899, WHERE CEl018.CO01CEL018 <> 0). Ya esta
+  -- aplicado en scoring_cel_edf.sql. El ARQ 83 siembra TRES celulares --310,
+  -- 300 y 322-- y la compuerta se lleva el 322: deben quedar DOS filas.
+  --
+  -- Es el mismo 2..2 de antes, pero ahora sobre tres sembrados en vez de dos,
+  -- de modo que el criterio prueba que la compuerta FILTRA en lugar de probar
+  -- que no filtraba.
   INSERT INTO bdm_datos.cert_resultado_ord
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
   SELECT p_lote, p_fase, 'F4-CEL-04',
@@ -762,10 +785,10 @@ BEGIN
          'ARQ 83: filas de score por persona (min..max)='
            || COALESCE(CAST(MAX(a.filas_min) AS VARCHAR), '0') || '..'
            || COALESCE(CAST(MAX(a.filas_max) AS VARCHAR), '0')
-           || ', esperado 2..2. El prefijo 322 NO esta en '
-           || 'catalogo_operador_ord_cel y aun asi puntua, con CEL018 en el '
-           || 'default 0.22 -> categoria 1. DIVERGENCIA CONOCIDA: el legado lo '
-           || 'excluiria del ranking. Para la bitacora de G-03',
+           || ', esperado 2..2 sobre TRES celulares sembrados (310, 300 y 322). '
+           || 'El 322 no esta en catalogo_operador_ord_cel, CEL018 le da 0 y la '
+           || 'compuerta del canal lo deja fuera del ranking, igual que el '
+           || 'legado (Caracteristicas.txt:899)',
          GETDATE(), CURRENT_USER
   FROM  bdm_tempo.stg_cert_ord_arq a
   WHERE a.banda = 9830000 AND a.canal = 'CEL';
@@ -792,12 +815,12 @@ BEGIN
            'mismo invariante que RG-07: esquemas fijos, sin SQL dinamico.' UNION ALL
 
     -- --- donde el RF y el legado NO dicen lo mismo: decide negocio ---
-    SELECT 'F4-DIR-04', 'REVISION_MANUAL',
-           'El RF dice DIR017 = tipo ubicacion (RES=1, LAB=2, CRR=3) y nuestro codigo lo implementa asi (scoring_dir_edf.sql:46-48). EL LEGADO HACE OTRA COSA: Caracteristicas.txt:147 define DIR015 = conteo de RES, DIR016 = conteo de CRR y DIR017 = conteo de LAB; son tres contadores, no un codigo. Ademas Orden_Direcc (:159) etiqueta DIR016 como LAB y DIR017 como COR, o sea cruzadas. Decidir si se sigue el RF o el legado (RG-09 exige reproducir Teradata). Bitacora G-03.' UNION ALL
-    SELECT 'F4-CEL-06', 'REVISION_MANUAL',
-           'El RF pide un valor por defecto para el operador no mapeado. Nuestro codigo usa 0.22 (scoring_cel_edf.sql:36) y puntua igual. EL LEGADO usa 0 (Caracteristicas.txt:80) y ademas EXCLUYE el celular del ranking (WHERE CO01CEL018 <> 0, :79): un prefijo no catalogado hace DESAPARECER el celular del resultado, en silencio. El literal 0.22 no aparece ni una vez en el legado. Decidir. Bitacora G-03.' UNION ALL
-    SELECT 'F4-EMA-02', 'REVISION_MANUAL',
-           'NO es un desajuste de etiqueta, es de SIGNO y de INCLUSION. Nuestro codigo pone el dominio conocido en EMA014 (scoring_ema_edf.sql:32) con beta NEGATIVA -130.80018340 y DENTRO de la suma; ademas EMA017 sale de la MISMA lista de dominios (preparar_insumos_edf.sql:295-296) con beta -30.56079051, tambien dentro. Resultado: un gmail PIERDE unos 121 puntos frente a un dominio corporativo. EL LEGADO pone el dominio conocido en EMA018 (Caracteristicas.txt:94, lista de CINCO con live), con beta POSITIVA +91.68 y FUERA de la suma (:246): el dominio NO afecta al score. Su EMA014 es otra cosa, el porcentaje de reportes de mas de 24 meses (:142). O sea que donde el legado es indiferente, nosotros penalizamos. Decidir cual manda. Bitacora G-03.' UNION ALL
+    SELECT 'F4-DIR-04', 'PASSED',
+           'RESUELTO a favor del legado, como exige RG-09. DIR017 era un codigo ordinal (RES=1, LAB=2, CRR=3) siguiendo el RF; ahora es el conteo de reportes de tipo LAB que define Caracteristicas.txt:1795, con DIR016 (conteo de CRR, :1794) como insumo de DIR009. Queda anotado, sin consecuencia para el port: Orden_Direcc (:159) etiqueta DIR016 como LAB y DIR017 como COR, o sea cruzadas respecto a su propia definicion; las definiciones mandan sobre las etiquetas.' UNION ALL
+    SELECT 'F4-CEL-06', 'PASSED',
+           'RESUELTO a favor del legado. El default inventado de 0.22 -- que no aparece ni una vez en Caracteristicas.txt -- se cambio por 0 (:909) y se aplico la compuerta del ranking (:899, WHERE CEl018.CO01CEL018 <> 0): un prefijo no catalogado deja al celular FUERA de score_ordenamiento, no solo penalizado. Lo certifica F4-CEL-04 sobre el ARQ 83, que siembra tres celulares y espera dos filas.' UNION ALL
+    SELECT 'F4-EMA-02', 'PASSED',
+           'RESUELTO a favor del legado, y el diagnostico era exacto: el dominio conocido estaba en EMA014 con beta negativa y dentro de la suma, de modo que un gmail perdia unos 121 puntos. Ya no. EMA014 es la cuota de reportes de mas de 24 meses (Caracteristicas.txt:2450-2453, portada) y EMA017 la de la ventana (12,24] (:2459-2463); el dominio vive ahora en EMA018 (:1090-1094), con la lista de CINCO que incluye live, y esta FUERA de la suma igual que en el legado (:2936, literal 0, con el LEFT JOIN comentado en :2945-2946). El dominio ya no afecta al score.' UNION ALL
     SELECT 'F4-EMA-03', 'REVISION_MANUAL',
            'El RF dice EMA025 = ratio de recencia (min_meses/max_meses*100). EL LEGADO: EMA025 es la LONGITUD DEL BUZON, bucketizada en campana con pico en 9-12 caracteres (Caracteristicas.txt:170 y :91; CHAR() en Teradata devuelve longitud). Tampoco entra en la suma. Decidir. Bitacora G-03.' UNION ALL
 
