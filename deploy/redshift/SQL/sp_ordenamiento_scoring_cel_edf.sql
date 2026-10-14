@@ -30,7 +30,10 @@ BEGIN
            SUM(CASE WHEN meses_reporte <=  6 THEN 1 ELSE 0 END) AS tr_6,
            SUM(CASE WHEN meses_reporte <= 12 THEN 1 ELSE 0 END) AS tr_12,
            SUM(CASE WHEN meses_reporte <= 24 THEN 1 ELSE 0 END) AS tr_24,
-           SUM(CASE WHEN meses_reporte >  24 THEN 1 ELSE 0 END) AS tr_24m
+           SUM(CASE WHEN meses_reporte >  24 THEN 1 ELSE 0 END) AS tr_24m,
+           -- Divisor de CEL023 (Caracteristicas.txt:3130-3139): la recencia
+           -- MAS VIEJA entre TODOS los celulares de la persona.
+           MAX(meses_reporte) AS max_meses_persona
       FROM bdm_tempo.stg_insumo_celular
      GROUP BY id_buro_persona
   ),
@@ -68,10 +71,20 @@ BEGIN
       -- sector_financiero: otros 41,49 de beta que estaban clavados.
       CAST(100.0 * SUM(CASE WHEN ic.meses_reporte > 12 AND ic.meses_reporte <= 24
                             THEN 1.0 / GREATEST(v.tr_24 - v.tr_12, 1) ELSE 0 END) AS DECIMAL(18,2)) AS cel017,
-      CAST(100.0 * COALESCE(MAX(ooc.valor), 0.22) AS DECIMAL(18,2)) AS cel018,
+      -- CEL018 (:908-909): peso del operador por el prefijo de 3 digitos.
+      -- El legado devuelve 0 cuando el prefijo no esta en el catalogo
+      -- ("CASE WHEN Valor_CO01CEL018 IS NULL THEN 0 ELSE ... END"); aqui
+      -- habia un 0,22 inventado.
+      --   PENDIENTE DE DECISION, NO APLICADO: el legado ademas EXCLUYE del
+      --   ranking a los celulares con operador desconocido --
+      --   Orden_Celular lleva "WHERE CEl018.CO01CEL018 <> 0" (:899). Eso
+      --   quita filas de score_ordenamiento, no solo cambia su score, asi
+      --   que se deja anotado y se decide aparte.
+      CAST(100.0 * COALESCE(MAX(ooc.valor), 0) AS DECIMAL(18,2)) AS cel018,
       CAST(100.0 * SUM(CASE WHEN ic.tipo_cuenta = 'POSPAGO' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS DECIMAL(18,2)) AS cel019,
       COUNT(*) AS cel020_raw,
-      MAX(CASE WHEN ic.texto_ubicacion IS NOT NULL AND ic.texto_ubicacion <> '' THEN 1 ELSE 0 END) AS cel023
+      -- CEL023 se calcula en 'base': necesita el maximo por persona.
+      COUNT(*) AS cel023_filas
     FROM bdm_tempo.stg_insumo_celular ic
     INNER JOIN ventanas v
       ON v.id_buro_persona = ic.id_buro_persona
@@ -83,8 +96,21 @@ BEGIN
     SELECT id_buro_persona, SUM(cel020_raw) AS total_reportes FROM base_agg GROUP BY 1
   ),
   base AS (
-    SELECT a.*, CAST(100.0 * a.cel020_raw / NULLIF(p.total_reportes, 0) AS DECIMAL(18,2)) AS cel020
-    FROM base_agg a JOIN persona_cel p ON a.id_buro_persona = p.id_buro_persona
+    SELECT a.*,
+      CAST(100.0 * a.cel020_raw / NULLIF(p.total_reportes, 0) AS DECIMAL(18,2)) AS cel020,
+      -- CEL023 (:785-786): (recencia mas vieja de la PERSONA - la de ESTE
+      -- celular) / la de la persona. Es la MISMA forma que EMA023 y TEL025;
+      -- antes era una bandera de "tiene texto de ubicacion", que no se
+      -- parece en nada.
+      --   OJO: en el legado esta caracteristica se llama LOCALS/Total igual
+      --   que CEL020, pero ahi son CONTEOS y aqui son MAX(Meses_Reporte)
+      --   (:1566-1568 y :3133-3135). Portarla por analogia con CEL020 da un
+      --   numero equivocado.
+      CAST(100.0 * (CAST(v.max_meses_persona AS DECIMAL(18,6)) - a.cel003)
+           / NULLIF(v.max_meses_persona, 0) AS DECIMAL(18,2)) AS cel023
+    FROM base_agg a
+    JOIN persona_cel p ON a.id_buro_persona = p.id_buro_persona
+    JOIN ventanas   v ON v.id_buro_persona = a.id_buro_persona
   ),
   categorized AS (
     SELECT cod_dw_persona_ubic, cod_pin_persona, id_buro_persona, celular,
@@ -102,7 +128,7 @@ BEGIN
       CASE WHEN cel018 < 51.11 THEN 1 WHEN cel018 < 61.48 THEN 2 WHEN cel018 < 73.33 THEN 3 WHEN cel018 >= 73.33 THEN 4 ELSE 0 END AS c18,
       CASE WHEN cel019 < 35 THEN 1 WHEN cel019 < 80 THEN 2 WHEN cel019 >= 80 THEN 3 ELSE 0 END AS c19,
       CASE WHEN cel020 < 33.33 THEN 1 WHEN cel020 < 45.67 THEN 2 WHEN cel020 < 100 THEN 3 WHEN cel020 >= 100 THEN 4 ELSE 0 END AS c20,
-      CASE WHEN cel023 <= 0 THEN 1 WHEN cel023 > 0 THEN 4 ELSE 0 END AS c23
+      CASE WHEN cel023 <= 0 THEN 1 WHEN cel023 > 0 THEN 4 ELSE 0 END AS c23   -- :202-208, sin cubetas 2 ni 3
     FROM base
   ),
   scored AS (

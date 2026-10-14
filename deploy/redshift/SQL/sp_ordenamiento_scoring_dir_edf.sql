@@ -35,6 +35,11 @@ BEGIN
       id_buro_persona,
       direccion_fisica,
       MAX(tipo_ubicacion) AS tipo_ubicacion,
+      -- DIR001IN (:2118): BLOQUEADA. El legado restringe el MIN a los
+      -- reportes con Portafolio_Nuevo = 'IN' (:2123), columna que viene de
+      -- CTA_TOTALES_PERSONAS_TMP3 (:2647, :2653-2654) y no tenemos. Sin ese
+      -- filtro esto es el MIN de todos los reportes: la forma correcta pero
+      -- sobre el universo equivocado.
       MIN(meses_reporte) AS dir001in,
       -- DIR002TO (Caracteristicas.txt:2916): MAX de meses_reporte de ESTA
       -- direccion, con guarda de texto vacio. Antes era COUNT(*), que es otra
@@ -47,6 +52,12 @@ BEGIN
       -- tenemos. Se aisla aqui para que el arreglo de DIR002TO no lo corrompa
       -- en silencio.
       COUNT(*) AS cnt_reportes,
+      -- DIR004RO (:2917-2918): BLOQUEADA. El legado cuenta los reportes con
+      -- Portafolio_Nuevo = 'RO' y ventana <= 3 meses, con ELSE NULL exterior
+      -- para que la ausencia de 'RO' caiga en la rama IS NULL de la
+      -- categoria. Sin Portafolio_Nuevo no se puede filtrar; la ventana de
+      -- 12 que hay aqui tampoco es la del legado, pero cambiarla sola
+      -- empeoraria el numero en vez de arreglarlo.
       SUM(CASE WHEN meses_reporte <= 12 THEN 1 ELSE 0 END) AS dir004ro,
       -- DIR007TO (:2919): ventana de 24 meses, no de 6, y con guarda de texto
       -- vacio que devuelve NULL (no 0) a la direccion vacia -- la categoria
@@ -54,10 +65,24 @@ BEGIN
       SUM(CASE WHEN direccion_fisica <> ''
                THEN (CASE WHEN meses_reporte <= 24 THEN 1 ELSE 0 END)
                ELSE NULL END) AS dir007to,
-      CAST(100.0 * SUM(CASE WHEN sector_financiero = 1 THEN 1 ELSE 0 END)
-        / NULLIF(COUNT(*), 0) AS DECIMAL(18,2)) AS dir010fi,
-      CAST(100.0 * SUM(CASE WHEN sector_financiero = 0 THEN 1 ELSE 0 END)
-        / NULLIF(COUNT(*), 0) AS DECIMAL(18,2)) AS dir013ot,
+      -- DIR010FI (:2352) y DIR013OT (:2353): numeradores. Les faltaban las
+      -- DOS ventanas -- <= 6 meses y > 24 -- y el divisor estaba mal: el
+      -- legado divide por Total_Reportes_Dirc, que es por PERSONA
+      -- (:2649 -> :1950-1954), no por el grupo. El cociente se arma en
+      -- 'base'. La guarda de cero del legado es ELSE NULL, no ELSE 1
+      -- (:2176-2177, :1456): si la persona no tiene reportes, la
+      -- caracteristica es NULL y su categoria cae en la rama IS NULL.
+      --   DIVERGENCIA YA CONOCIDA: el legado discrimina Sector = 'FI' y
+      --   Sector = 'OT' sobre CTA_TOTALES_PERSONAS_TMP3 (:2354-2356), que es
+      --   datashare. Nuestra bandera 0/1 no distingue 'FI' de 'OT' ni de las
+      --   otras tres ('CO','CC','RE'). La FORMA queda portada; cuando llegue
+      --   el Sector solo cambia el predicado.
+      SUM(CASE WHEN sector_financiero = 1 AND direccion_fisica <> ''
+               THEN (CASE WHEN meses_reporte <= 6 THEN 1 ELSE 0 END)
+               ELSE NULL END) AS cnt_fi_6,
+      SUM(CASE WHEN sector_financiero = 0 AND direccion_fisica <> ''
+               THEN (CASE WHEN meses_reporte > 24 THEN 1 ELSE 0 END)
+               ELSE NULL END) AS cnt_ot_24,
       -- DIR017 (:1795): conteo de reportes de tipo 'LAB' de esta direccion.
       -- No es un codigo ordinal de tipo de ubicacion.
       SUM(CASE WHEN TRIM(tipo_ubicacion) = 'LAB' AND direccion_fisica <> ''
@@ -72,6 +97,12 @@ BEGIN
             AND SUM(CASE WHEN TRIM(tipo_ubicacion) = 'CRR' AND direccion_fisica <> ''
                          THEN 1 ELSE NULL END) > 0
            THEN 1 ELSE 0 END AS dir019,
+      -- DIR034FI (:2589-2590): BLOQUEADA, y no es una cuota. El legado suma
+      -- el IMPORTE CO00END005 de Insumo_Caracteristica (:2594-2595) para las
+      -- cuentas con Sector = 'FI', excluyendo los centinelas
+      -- ('-1','-2','-3','-4','-88','-99'). No tenemos ni el importe ni el
+      -- Sector. Lo de abajo es una invencion nuestra que se deja intacta
+      -- para no mover el tablero sin motivo; se cambia cuando llegue F2.
       CAST(100.0 * SUM(CASE WHEN sector_financiero = 1 AND meses_reporte <= 12 THEN 1 ELSE 0 END)
         / NULLIF(SUM(CASE WHEN meses_reporte <= 12 THEN 1 ELSE 0 END), 0) AS DECIMAL(18,2)) AS dir034fi,
       -- DIR057 (:485-487): conteo de reportes no vacios de ESTA direccion.
@@ -89,6 +120,11 @@ BEGIN
   persona_stats AS (
     SELECT id_buro_persona,
       SUM(cnt_reportes) AS dir050to,
+      -- Total_Reportes_Dirc (:2649 -> TM_AGR_DIR_TMP_DEF :1950-1954):
+      -- reportes de la PERSONA. Comparte expresion con dir050to hoy, pero
+      -- son cosas distintas y el nombre lo dice: dir050to es una
+      -- caracteristica (bloqueada), esto es un divisor.
+      SUM(cnt_reportes) AS total_reportes_dirc,
       -- DIR009 (:2390-2396): cuantas direcciones de la persona son de
       -- correspondencia, es decir tienen al menos un reporte 'CRR'. Antes era
       -- COUNT(DISTINCT id_buro_suscriptor), que ademas colgaba de la cubeta de
@@ -117,6 +153,12 @@ BEGIN
       a.*,
       p.dir050to AS dir050to_raw,
       p.dir009,
+      CAST(100.0 * a.cnt_fi_6
+           / (CASE WHEN p.total_reportes_dirc > 0 THEN p.total_reportes_dirc ELSE NULL END)
+           AS DECIMAL(18,2)) AS dir010fi,
+      CAST(100.0 * a.cnt_ot_24
+           / (CASE WHEN p.total_reportes_dirc > 0 THEN p.total_reportes_dirc ELSE NULL END)
+           AS DECIMAL(18,2)) AS dir013ot,
       -- DIR059 (:439-444): normalizacion min-max de la recencia de la
       -- direccion contra el rango de recencias de la persona, NO un porcentaje
       -- de reportes. Vale 100 cuando la persona tiene una sola recencia, y
