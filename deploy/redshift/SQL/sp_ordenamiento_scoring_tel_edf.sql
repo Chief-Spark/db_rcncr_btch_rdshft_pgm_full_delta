@@ -109,14 +109,25 @@ BEGIN
     --      cod_dw_persona_ubic ascendente, que es unico dentro del grupo.
     --      Lo exigen RG-03 y CA-F04 (idempotencia).
     --
-    --   2) Redshift pone NULLS FIRST por defecto en ORDER BY ... DESC; Teradata
-    --      hace lo contrario. Sin NULLS LAST, un score NULL se llevaria el
-    --      lugar 1 -- justo al reves que el legado. Y los NULL son posibles:
-    --      la suma del legado enlaza los terminos con LEFT JOIN y los suma con
-    --      '+' desnudo, sin COALESCE, de modo que un beta ausente anula el
-    --      score del canal entero.
+    --   2) NULLS LAST es DEFENSIVO, no correctivo: hoy no cambia nada. Redshift
+    --      pone NULLS FIRST por defecto en ORDER BY ... DESC y Teradata hace lo
+    --      contrario, pero aqui el score NUNCA es NULL porque cada termino va
+    --      envuelto en COALESCE(..., 0): un beta ausente aporta cero, no NULL.
+    --      Se deja escrito para el dia que alguien quite uno de esos COALESCE
+    --      -- que es justo lo que hace el legado, cuya sumatoria enlaza los
+    --      terminos con LEFT JOIN y los suma con '+' desnudo, de modo que un
+    --      beta ausente le anula el score del canal entero.
+    --
+    --   3) Se ordena por el score YA REDONDEADO a DECIMAL(18,4), que es el que
+    --      se persiste. La suma interna es FLOAT (cada termino es
+    --      CAST(cat AS FLOAT)/div * beta) y la columna de salida es
+    --      DECIMAL(18,4): ordenar por el FLOAT dejaria pares de filas que se
+    --      guardan con el MISMO score y distinto lugar, por una diferencia que
+    --      ya no existe en la tabla. El ranking tiene que ser funcion del valor
+    --      que se guarda, o no hay forma de verificarlo leyendo la salida.
     ROW_NUMBER() OVER (PARTITION BY id_buro_persona
-                       ORDER BY score DESC NULLS LAST, cod_dw_persona_ubic)
+                       ORDER BY CAST(score AS DECIMAL(18,4)) DESC NULLS LAST,
+                                cod_dw_persona_ubic)
   FROM scored;
 END;
 $$;
