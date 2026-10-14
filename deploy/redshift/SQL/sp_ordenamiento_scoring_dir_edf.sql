@@ -147,7 +147,27 @@ BEGIN
     id_buro_persona,
     'DIR' AS canal,
     CAST(score AS DECIMAL(18,4)),
-    ROW_NUMBER() OVER (PARTITION BY id_buro_persona ORDER BY score DESC) AS lugar
+    -- DESEMPATE EXPLICITO Y NULLS LAST. Dos divergencias deliberadas frente al
+    -- legado, las dos obligadas:
+    --
+    --   1) El legado ordena solo por 'score DESC' (Caracteristicas.txt:105, :79,
+    --      :72, :88), sin columna de desempate. Con dos scores iguales -- y los
+    --      empates son FRECUENTES, porque la categoria es un entero pequeno
+    --      sobre un divisor fijo y el espacio de scores es discreto -- el lugar
+    --      lo decide el orden fisico de los AMP. Eso NO es reproducible ni en el
+    --      propio Teradata: dos corridas del mismo lote pueden intercambiar el 1
+    --      y el 2. No hay comportamiento que copiar, asi que se fija uno:
+    --      cod_dw_persona_ubic ascendente, que es unico dentro del grupo.
+    --      Lo exigen RG-03 y CA-F04 (idempotencia).
+    --
+    --   2) Redshift pone NULLS FIRST por defecto en ORDER BY ... DESC; Teradata
+    --      hace lo contrario. Sin NULLS LAST, un score NULL se llevaria el
+    --      lugar 1 -- justo al reves que el legado. Y los NULL son posibles:
+    --      la suma del legado enlaza los terminos con LEFT JOIN y los suma con
+    --      '+' desnudo, sin COALESCE, de modo que un beta ausente anula el
+    --      score del canal entero.
+    ROW_NUMBER() OVER (PARTITION BY id_buro_persona
+                       ORDER BY score DESC NULLS LAST, cod_dw_persona_ubic) AS lugar
   FROM scored;
 END;
 $$;

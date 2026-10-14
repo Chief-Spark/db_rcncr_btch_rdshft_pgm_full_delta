@@ -249,34 +249,61 @@ BEGIN
            LEFT JOIN bdm_tempo.stg_cert_ord_base s
              ON s.cod_dw_persona_ubic = u.cod_dw_persona_ubic ) h;
 
-  -- F4-08. Idempotencia. Dos mitades independientes:
-  --   a) no hay scores duplicados para el mismo dato en el mismo canal;
-  --   b) no hay EMPATES de score dentro de un grupo (persona, canal).
-  -- La (b) no es cosmetica: el ranking es ROW_NUMBER sin columna de
-  -- desempate, de modo que con dos scores iguales el lugar lo decide el
-  -- orden fisico y dos corridas pueden intercambiarlos. Con empates, la
-  -- idempotencia NO esta garantizada aunque la corrida de hoy coincida.
+  -- F4-08. Idempotencia. Se verifica RECALCULANDO el ranking de forma
+  -- independiente y comparandolo con el que escribio el SP:
+  --
+  --     lugar  ==  ROW_NUMBER() OVER (PARTITION BY persona, canal
+  --                                   ORDER BY score DESC NULLS LAST,
+  --                                            cod_dw_persona_ubic)
+  --
+  -- POR QUE ASI Y NO "no hay empates": porque los empates son legitimos y
+  -- frecuentes -- la categoria es un entero pequeno sobre un divisor fijo, de
+  -- modo que el espacio de scores es discreto. Lo que rompia la idempotencia
+  -- no era el empate sino el ROW_NUMBER sin columna de desempate, que dejaba
+  -- el lugar al azar del orden fisico. Con el desempate explicito ya aplicado
+  -- en los cuatro SP de scoring, esta comparacion lo DEMUESTRA en una sola
+  -- corrida: si alguien quitara el desempate, un grupo empatado dejaria de
+  -- coincidir y el criterio caeria.
+  --
+  -- El numero de grupos con empate viaja en el detalle porque es la medida de
+  -- cuanto trabajo esta haciendo el desempate: con cero empates el criterio
+  -- pasaria aunque el desempate no existiera.
   INSERT INTO bdm_datos.cert_resultado_ord
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
   SELECT p_lote, p_fase, 'F4-08',
-         CASE WHEN COUNT(*) = 0                                   THEN 'SIN_DATO'
-              WHEN COALESCE(SUM(g.duplicados), 0) > 0             THEN 'FAILED'
-              WHEN COALESCE(SUM(g.empatados), 0)  > 0             THEN 'FAILED'
+         CASE WHEN COUNT(*) = 0                                             THEN 'SIN_DATO'
+              WHEN COALESCE(SUM(v.lugar_discrepa), 0) > 0                   THEN 'FAILED'
+              WHEN COALESCE(SUM(v.duplicado), 0)     > 0                    THEN 'FAILED'
               ELSE 'PASSED' END,
-         'grupos (persona, canal)=' || CAST(COUNT(*) AS VARCHAR)
-           || ', con el mismo dato puntuado dos veces='
-           || CAST(COALESCE(SUM(g.duplicados), 0) AS VARCHAR)
-           || ', con EMPATE de score (ranking no determinista: ROW_NUMBER sin desempate)='
-           || CAST(COALESCE(SUM(g.empatados), 0) AS VARCHAR)
-           || ' (ambos esperados 0)',
+         'filas evaluadas=' || CAST(COUNT(*) AS VARCHAR)
+           || ', con el lugar distinto del ranking determinista='
+           || CAST(COALESCE(SUM(v.lugar_discrepa), 0) AS VARCHAR)
+           || ', con el mismo dato puntuado dos veces en el canal='
+           || CAST(COALESCE(SUM(v.duplicado), 0) AS VARCHAR)
+           || ' (ambos esperados 0). Filas que viven en un grupo (persona, canal) CON empate='
+           || CAST(COALESCE(MAX(v.filas_empatadas), 0) AS VARCHAR)
+           || ': el empate es legitimo, lo que se exige es que el desempate por '
+           || 'cod_dw_persona_ubic lo resuelva siempre igual',
          GETDATE(), CURRENT_USER
-  FROM ( SELECT s.id_buro_persona, s.canal,
-                CASE WHEN COUNT(*) > COUNT(DISTINCT s.cod_dw_persona_ubic)
-                     THEN 1 ELSE 0 END AS duplicados,
-                CASE WHEN COUNT(*) > COUNT(DISTINCT s.score)
-                     THEN 1 ELSE 0 END AS empatados
-           FROM bdm_tempo.stg_cert_ord_base s
-          GROUP BY 1, 2 ) g;
+  FROM ( SELECT CASE WHEN s.lugar <> ROW_NUMBER() OVER (
+                              PARTITION BY s.id_buro_persona, s.canal
+                              ORDER BY s.score DESC NULLS LAST, s.cod_dw_persona_ubic)
+                     THEN 1 ELSE 0 END                                  AS lugar_discrepa,
+                CASE WHEN COUNT(*) OVER (
+                              PARTITION BY s.id_buro_persona, s.canal,
+                                           s.cod_dw_persona_ubic) > 1
+                     THEN 1 ELSE 0 END                                  AS duplicado,
+                -- Cuenta FILAS, no grupos: g viaja unido a cada fila. Sirve
+                -- igual como medida de cuanto trabaja el desempate.
+                SUM(CASE WHEN g.empatado = 1 THEN 1 ELSE 0 END) OVER () AS filas_empatadas
+           FROM      bdm_tempo.stg_cert_ord_base s
+           LEFT JOIN ( SELECT id_buro_persona, canal,
+                              CASE WHEN COUNT(*) > COUNT(DISTINCT score)
+                                   THEN 1 ELSE 0 END AS empatado
+                         FROM bdm_tempo.stg_cert_ord_base
+                        GROUP BY 1, 2 ) g
+                  ON g.id_buro_persona = s.id_buro_persona
+                 AND g.canal           = s.canal ) v;
 
   -- F4-09. Los betas parametrizados: los cuatro canales presentes con el
   -- reparto del modelo (DIR 12, TEL 11, CEL 11, EMA 13).
