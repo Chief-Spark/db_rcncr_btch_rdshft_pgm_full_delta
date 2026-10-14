@@ -254,18 +254,41 @@ filas comparten: la fecha, el catalogo financiero, el numero de reportes y el
 de direcciones. Un score absoluto depende de las cuatro cosas y el criterio se
 caeria solo.
 
-### El colapso de TEL ya NO es un defecto de codigo: hoy es de siembra
+### El grano de TEL: la llave del legado es el TELEFONO, no la direccion
 
-**Esta seccion decia que el colapso era un defecto vivo de produccion. Era
-cierto y dejo de serlo; el documento se quedo atras (SLCOPRBA-1355).**
+**Esta seccion se ha corregido dos veces y la segunda tambien estaba mal.
+Primero dijo que el colapso era un defecto vivo de produccion; luego que ya
+estaba arreglado y solo quedaba siembra. Lo correcto es lo de abajo
+(SLCOPRBA-1355).**
 
-El arreglo esta puesto y razonado en el propio SP: `stg_insumo_telefono` no
-lee `stg_persona_dir_ref` (agregado **por persona**) sino
-`stg_rpu_dir_ref` (**por RPU**), que existe exactamente para esto
--- `sp_ordenamiento_preparar_insumos_edf.sql:137-156` lo explica, y el uso
-esta en `:294` y `:311`. Paridad confirmada en el mock
-(`sp_ordenamiento_preparar_insumos_mock.sql:336` y `:353`).
-`stg_persona_dir_ref` se conserva, pero ya solo alimenta a CEL (`:341`).
+En el canal TEL del legado, la columna `Direccion_Fisica` **no contiene una
+direccion: contiene el numero de telefono.** La prueba que no admite lectura
+alternativa es el nombre del divisor: `REC_STAGE.Calculo_Meses2`
+(`Caracteristicas.txt:2252-2262`) agrupa por
+`(Cod_Pin_Persona, Id_Buro_Persona, Direccion_Fisica)` y llama al resultado
+**`Total_Reportes_Telefono`**. El canal EMA lo hace explicito con un alias:
+`TML.Direccion_Fisica as Email` (`:2764`). Es el nombre de columna de la vista
+de origen reutilizado para el dato de contacto de cada canal.
+
+**Nosotros agrupamos por la direccion** (`sp_ordenamiento_scoring_tel_edf.sql:58`,
+sobre el `direccion_fisica` que arma `preparar_insumos_edf.sql:294` como
+`COALESCE(rref.dir_ref, texto_ubicacion_vinculo, valor_contacto)`). El numero
+de telefono ni siquiera viaja como columna del insumo: solo se usa para
+derivar `descripcion_gestion`.
+
+`stg_rpu_dir_ref` (`:137-156`) arreglo un problema real -- antes el
+`dir_ref` era un agregado **por persona** y colapsaba todos los telefonos de
+alguien en un grupo -- pero lo arreglo hacia la llave equivocada. La llave
+correcta nunca fue la direccion, ni por persona ni por RPU: es
+`valor_contacto`. El razonamiento escrito en esas lineas del SP parte de leer
+`Direccion_Fisica` como una direccion, y hay que rehacerlo.
+
+**Y encima la siembra tampoco ayuda:** las tres semillas cuelgan los contactos
+de **una sola RPU por persona** (`seed_mock_matriz.sql:329`,
+`seed_mock_matriz_r2.sql:948`, `seed_mock_matriz_r3.sql:356`, las tres con
+`AND rpu.cod_dw_persona_ubic % 10 = 1`) y siembran **un solo telefono** por
+persona (`contact_type = '4'`). Asi que ni con la llave corregida habria mas
+de un grupo: hacen falta las dos cosas, el grano y la siembra.
 
 **Lo que queda es de siembra.** Las tres semillas cuelgan los contactos de
 **una sola RPU por persona** -- `seed_mock_matriz.sql:329`,
