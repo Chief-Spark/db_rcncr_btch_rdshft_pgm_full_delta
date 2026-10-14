@@ -434,18 +434,92 @@ BEGIN
                 WHERE lote = p_lote AND n_id = 'A6' ) cen;
 
   -- R2-07. Escenario 6 del legado son TRES subcasos, con sellos A8, D9 y F1
-  -- (lineas 4016-5847). A8 y D9 crean direcciones nuevas. Nuestro esc6 lleva
-  -- sello E6 -- que no existe en el legado -- y solo aproxima F1.
+  -- (lineas 4016-5847). A8 (sub1, linea 4016) y D9 (sub2, linea 4715) son los
+  -- dos sitios que CREAN direcciones nuevas y los dos estan portados: el
+  -- criterio los afirma aqui, cada uno con su arquetipo.
+  --
+  -- F1 (sub3, linea 5453) resuelve por frecuencia del diccionario y NO crea
+  -- direcciones; nuestro esc6 hace esa misma eleccion y por tanto lo aproxima,
+  -- aunque lo selle como 'E6' -- un sello propio que no existe en el legado.
+  -- La diferencia es de etiqueta, no de resultado, y queda anotada como
+  -- divergencia para GOB-03.
+  --
+  -- Se afirman las mismas tres mitades que en R2-06, para los dos sitios:
+  --   a) las DOS originales quedan como hijas de la misma direccion;
+  --   b) ese padre existe como direccion GENERADA, no como una de las
+  --      originales;
+  --   c) el complemento generado combina ambas sin repetir nomenclatura
+  --      ('BL 2 ED 7' para el sitio 3, 'BR 5 AP 301' para el sitio 4).
+  -- Y una cuarta, propia de este criterio: que los DOS sitios produjeron. Sin
+  -- ella bastaria con que uno de los dos funcionara.
+  --
+  -- La rama COUNT(*) = 0 no es decorativa: sin ella un arquetipo que no
+  -- produjo nada daria SUM(...) = NULL y el CASE caeria al ELSE 'PASSED'.
   INSERT INTO bdm_datos.cert_resultado
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
-  SELECT p_lote, p_fase, 'R2-07', 'NO_IMPLEMENTADO',
-         'faltan los sellos A8 (esc6 sub1) y D9 (esc6 sub2), ambos sitios de '
-         || 'creacion. F1 (esc6 sub3, diccionario) esta aproximado por E6, '
-         || 'sello propio que no existe en el legado. Direcciones marcadas E6='
-         || CAST(COALESCE(( SELECT SUM(direcciones)
-                              FROM bdm_datos.unif_escenario_censo_mock
-                             WHERE lote = p_lote AND n_id = 'E6' ), 0) AS VARCHAR),
-         GETDATE(), CURRENT_USER;
+  SELECT p_lote, p_fase, 'R2-07',
+         CASE WHEN COUNT(*) = 0
+                   THEN CASE WHEN p_fase IN ('FULL', 'FULL2') THEN 'FAILED' ELSE 'SIN_DATO' END
+              WHEN COUNT(DISTINCT a.sitio) < 2                                            THEN 'FAILED'
+              WHEN COALESCE(SUM(CASE WHEN a.hijas <> 2         THEN 1 ELSE 0 END), 0) > 0 THEN 'FAILED'
+              WHEN COALESCE(SUM(CASE WHEN a.padre_generado = 0 THEN 1 ELSE 0 END), 0) > 0 THEN 'FAILED'
+              WHEN COALESCE(SUM(CASE WHEN a.complemento_ok = 0 THEN 1 ELSE 0 END), 0) > 0 THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'direcciones nuevas del sitio 3 (A8, ARQ 72)='
+           || CAST(COALESCE(SUM(CASE WHEN a.sitio = 3 THEN 1 ELSE 0 END), 0) AS VARCHAR)
+           || ', del sitio 4 (D9, ARQ 73)='
+           || CAST(COALESCE(SUM(CASE WHEN a.sitio = 4 THEN 1 ELSE 0 END), 0) AS VARCHAR)
+           || '; con las DOS originales como hijas='
+           || CAST(COALESCE(SUM(CASE WHEN a.hijas = 2 THEN 1 ELSE 0 END), 0) AS VARCHAR)
+           || ', con el padre en rpu_generada_mock='
+           || CAST(COALESCE(SUM(a.padre_generado), 0) AS VARCHAR)
+           || ', con el complemento esperado='
+           || CAST(COALESCE(SUM(a.complemento_ok), 0) AS VARCHAR)
+           || '. Censo de esta corrida: A8='
+           || CAST(COALESCE(MAX(cen.a8_dir), 0) AS VARCHAR)
+           || ' direcciones, D9='
+           || CAST(COALESCE(MAX(cen.d9_dir), 0) AS VARCHAR)
+           || ', E6=' || CAST(COALESCE(MAX(cen.e6_dir), 0) AS VARCHAR)
+           || ' (E6 aproxima F1, sub3)',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT 3                                                     AS sitio,
+                u.cod_dw_direccion_unificada                          AS padre,
+                COUNT(DISTINCT u.cod_dw_persona_ubic)                 AS hijas,
+                MAX(CASE WHEN g.cod_dw_persona_ubic IS NOT NULL
+                         THEN 1 ELSE 0 END)                           AS padre_generado,
+                MAX(CASE WHEN TRIM(COALESCE(d.complemento, '')) = 'BL 2 ED 7'
+                         THEN 1 ELSE 0 END)                           AS complemento_ok
+           FROM bdm_datos.unificacion_direccion_mock u
+           LEFT JOIN bdm_datos.rpu_generada_mock g
+             ON g.cod_dw_persona_ubic = u.cod_dw_direccion_unificada
+           LEFT JOIN bdm_datos.direccion_fisica_generada_mock d
+             ON d.cod_dw_direccion_fisica = g.cod_dw_direccion_fisica
+          WHERE u.cod_dw_persona_ubic BETWEEN 97200000 AND 97209999
+            AND u.unifica_atributos = 2
+          GROUP BY 1, 2
+         UNION ALL
+         SELECT 4,
+                u.cod_dw_direccion_unificada,
+                COUNT(DISTINCT u.cod_dw_persona_ubic),
+                MAX(CASE WHEN g.cod_dw_persona_ubic IS NOT NULL
+                         THEN 1 ELSE 0 END),
+                MAX(CASE WHEN TRIM(COALESCE(d.complemento, '')) = 'BR 5 AP 301'
+                         THEN 1 ELSE 0 END)
+           FROM bdm_datos.unificacion_direccion_mock u
+           LEFT JOIN bdm_datos.rpu_generada_mock g
+             ON g.cod_dw_persona_ubic = u.cod_dw_direccion_unificada
+           LEFT JOIN bdm_datos.direccion_fisica_generada_mock d
+             ON d.cod_dw_direccion_fisica = g.cod_dw_direccion_fisica
+          WHERE u.cod_dw_persona_ubic BETWEEN 97300000 AND 97309999
+            AND u.unifica_atributos = 2
+          GROUP BY 1, 2 ) a
+  -- CROSS JOIN y no subconsulta escalar en la proyeccion: Redshift no la
+  -- resuelve de forma fiable dentro de una agregacion.
+  CROSS JOIN ( SELECT COALESCE(SUM(CASE WHEN n_id = 'A8' THEN direcciones END), 0) AS a8_dir,
+                      COALESCE(SUM(CASE WHEN n_id = 'D9' THEN direcciones END), 0) AS d9_dir,
+                      COALESCE(SUM(CASE WHEN n_id = 'E6' THEN direcciones END), 0) AS e6_dir
+                 FROM bdm_datos.unif_escenario_censo_mock
+                WHERE lote = p_lote ) cen;
 
   -- R2-08. Las direcciones que crea el motor quedan marcadas como generadas.
   INSERT INTO bdm_datos.cert_resultado

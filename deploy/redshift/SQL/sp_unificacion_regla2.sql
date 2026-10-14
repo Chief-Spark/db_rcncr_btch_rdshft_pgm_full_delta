@@ -41,10 +41,10 @@ BEGIN
   -- Orden del legado: cada etapa marca sus filas en stg_regla2_e2 para que
   -- las POSTERIORES no las vuelvan a procesar.
   --   esc1/esc2 -> esc3 'L3' -> motor NIT 'X4' -> esc4 'B5'
-  --             -> motor NIVEL 'A6' -> esc5 'C7'
-  --             -> motor CRUCE 'A8' -> esc6
-  -- Los sitios que crean direcciones (PRO_UnificacionR2.sql:1602, :3423 y
-  -- :4016) van INTERCALADOS, no al final: por eso el motor son tres
+  --             -> motor NIVEL 'A6' -> motor DIF 'D9' -> esc5 'C7'
+  --             -> motor CRUCE 'A8' -> esc6 'E6'
+  -- Los sitios que crean direcciones (PRO_UnificacionR2.sql:1602, :3423,
+  -- :4016 y :4715) van INTERCALADOS, no al final: por eso el motor son cuatro
   -- llamadas y no una.
   CALL bdm_datos.sp_unificacion_r2_esc3_sin_nit_misma_nomenclatura(p_modo, p_lote);
   CALL bdm_datos.sp_unificacion_r2_motor_nit_empates_nuevas_direcciones(p_modo, p_lote);
@@ -56,6 +56,26 @@ BEGIN
   -- 2 toma los pares cuyos VALORES difieren y esc5 aquellos cuyos valores son
   -- iguales. No hay starvation entre ellos.
   CALL bdm_datos.sp_unificacion_r2_motor_nivel_nueva_direccion(p_modo, p_lote);
+  -- SITIO 4 ('D9', etapa 6.2 del legado, PRO_UnificacionR2.sql:4715-5448).
+  -- El ultimo de los cuatro sitios que crean direcciones, y el que cierra
+  -- R2-07. Toma los pares donde NINGUNA nomenclatura coincide en ninguna
+  -- combinacion y los niveles difieren.
+  --
+  -- POR QUE VA ANTES DE esc5 Y NO DESPUES (divergencia de ORDEN, para GOB-03).
+  -- En el legado esta etapa corre despues de esc5, y puede permitirselo porque
+  -- el esc5 del legado es ESTRECHO: Tmp_Unificacion_E05_C (linea 3844) exige
+  -- que una nomenclatura coincida EN LA MISMA POSICION y que las colas SE
+  -- CONTENGAN, de modo que deja pasar intactos justo los pares que 'D9' recoge.
+  -- Nuestro esc5 es MAS ANCHO -- le basta con que las dos nomenclaturas
+  -- iniciales existan, difieran y esten a distinto nivel -- y por tanto todo
+  -- par de 'D9' es tambien un par suyo. Colocado despues, este SP correria
+  -- siempre contra cero filas.
+  -- Se porta el REPARTO del legado y no el orden de sus lineas. El orden
+  -- respecto del sitio 3 ('A8', etapa 6.1) es indiferente: los dos subcasos son
+  -- disjuntos por construccion, porque el cruzado cumple
+  -- A.NOMENCLATURA = B.NOMENCLATURA1 y eso es exactamente lo que la tercera
+  -- condicion de 'D9' excluye. El sello lo fija el legado en la linea 5415.
+  CALL bdm_datos.sp_unificacion_r2_motor_dif_nueva_direccion(p_modo, p_lote);
   CALL bdm_datos.sp_unificacion_r2_esc5_nomenclatura_menor_nivel_pierde(p_modo, p_lote);
   -- SITIO 3 ('A8', etapa 6.1 del legado, PRO_UnificacionR2.sql:4016-4708).
   -- El tercero de los cuatro sitios que crean direcciones, y el primero de los
@@ -159,6 +179,8 @@ BEGIN
                        'PRO_UnificacionR2.sql linea 3423'                   UNION ALL
     SELECT 'A8', 'A8', 'sitio 3 (etapa 6.1) - direccion nueva por nomenclatura cruzada',
                        'PRO_UnificacionR2.sql linea 4016'                   UNION ALL
+    SELECT 'D9', 'D9', 'sitio 4 (etapa 6.2) - direccion nueva, ninguna nomenclatura coincide',
+                       'PRO_UnificacionR2.sql linea 4715'                   UNION ALL
     SELECT 'PADRE', NULL, 'PADRE de una unificacion de esta corrida (no es brecha)',
                        'ninguno: el escenario sella solo a la hija'         UNION ALL
     SELECT 'SIN_RESOLVER', NULL, 'sin resolver, tenia pareja posible <- BRECHA',
@@ -222,6 +244,17 @@ BEGIN
   DROP TABLE IF EXISTS bdm_tempo.stg_motor_crz_insumo;
   DROP TABLE IF EXISTS bdm_tempo.stg_motor_crz_miembros;
   DROP TABLE IF EXISTS bdm_tempo.stg_motor_crz_persist;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_dif_base;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_dif_cand;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_dif_conteo;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_dif_orden;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_dif_fusion;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_dif_componentes;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_dif_nueva_nomen;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_dif_cabeza;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_dif_insumo;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_dif_miembros;
+  DROP TABLE IF EXISTS bdm_tempo.stg_motor_dif_persist;
 
 EXCEPTION WHEN OTHERS THEN
   RAISE EXCEPTION 'sp_unificacion_regla2 failed: %', SQLERRM;
