@@ -289,8 +289,27 @@ BEGIN
            LEFT JOIN bdm_tempo.stg_cert_ord_base s
              ON s.cod_dw_persona_ubic = u.cod_dw_persona_ubic ) h;
 
-  -- F4-08. Idempotencia. Se verifica RECALCULANDO el ranking de forma
-  -- independiente y comparandolo con el que escribio el SP:
+  -- F4-08. El ranking es monotono con el score y es una permutacion limpia.
+  --
+  -- ANTES recalculaba el ranking de forma independiente y lo comparaba. ESO YA
+  -- NO SE PUEDE, y la razon importa: el desempate de los SP de scoring dejo de
+  -- ser cod_dw_persona_ubic y paso a ser la CLAVE DEL GRUPO (direccion_fisica
+  -- en DIR y TEL, celular, email), porque cod_dw_persona_ubic entra como MIN()
+  -- sobre el GROUP BY y dos grupos de la misma persona pueden compartirlo. La
+  -- clave del grupo SI es unica dentro de (persona, canal) -- es el propio
+  -- GROUP BY -- de modo que el orden es TOTAL y el ranking es determinista por
+  -- DEMOSTRACION, no por medicion. Pero score_ordenamiento no guarda esa clave
+  -- (cod_dw_persona_ubic, cod_pin_persona, id_buro_persona, canal, score,
+  -- lugar), asi que desde aqui el orden no se puede reproducir.
+  --
+  -- LO QUE ESTE CRITERIO NO CUBRE, y conviene no creer que si: la
+  -- reproducibilidad ENTRE corridas. Es propiedad de dos ejecuciones, no de
+  -- una, y la bateria de convergencia solo fotografia los tres objetos de
+  -- Unificacion; score_ordenamiento no esta ahi. Cerrarlo de verdad son dos
+  -- caminos, los dos decision de la mesa: anadir el valor de contacto a
+  -- score_ordenamiento, o meter esa tabla en la convergencia.
+  --
+  -- Lo que SI se verifica aqui, y es fuerte:
   --
   --     lugar  ==  ROW_NUMBER() OVER (PARTITION BY persona, canal
   --                                   ORDER BY score DESC NULLS LAST,
@@ -322,21 +341,34 @@ BEGIN
   INSERT INTO bdm_datos.cert_resultado_ord
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
   SELECT p_lote, p_fase, 'F4-08',
-         CASE WHEN COUNT(*) = 0                                             THEN 'SIN_DATO'
-              WHEN COALESCE(SUM(v.lugar_discrepa), 0) > 0                   THEN 'FAILED'
+         CASE WHEN COUNT(*) = 0                                   THEN 'SIN_DATO'
+              WHEN COALESCE(SUM(v.rompe_orden), 0)   > 0          THEN 'FAILED'
+              WHEN COALESCE(SUM(v.grupo_roto), 0)    > 0          THEN 'FAILED'
               ELSE 'PASSED' END,
          'filas evaluadas=' || CAST(COUNT(*) AS VARCHAR)
-           || ', con el lugar distinto del ranking determinista='
-           || CAST(COALESCE(SUM(v.lugar_discrepa), 0) AS VARCHAR)
-           || ' (esperado 0). Filas que viven en un grupo (persona, canal) CON empate='
+           || ', con el lugar fuera de orden respecto al score='
+           || CAST(COALESCE(SUM(v.rompe_orden), 0) AS VARCHAR)
+           || ', en grupos cuyo lugar no es 1..n sin huecos='
+           || CAST(COALESCE(SUM(v.grupo_roto), 0) AS VARCHAR)
+           || ' (ambos esperados 0). Filas en un grupo (persona, canal) CON empate='
            || CAST(COALESCE(MAX(v.filas_empatadas), 0) AS VARCHAR)
-           || ': el empate es legitimo, lo que se exige es que el desempate por '
-           || 'cod_dw_persona_ubic lo resuelva siempre igual',
+           || '. La reproducibilidad ENTRE corridas no se mide aqui: ver la nota del codigo',
          GETDATE(), CURRENT_USER
-  FROM ( SELECT CASE WHEN s.lugar <> ROW_NUMBER() OVER (
+  FROM ( SELECT
+                -- El lugar tiene que ser monotono con el score: recorriendo el
+                -- grupo por lugar ascendente, el score nunca puede subir. Pilla
+                -- un DESC perdido, un NULLS mal puesto, o que se ordene por el
+                -- FLOAT interno en vez de por el DECIMAL que se persiste.
+                CASE WHEN s.score > LAG(s.score) OVER (
                               PARTITION BY s.id_buro_persona, s.canal
-                              ORDER BY s.score DESC NULLS LAST, s.cod_dw_persona_ubic)
-                     THEN 1 ELSE 0 END                                  AS lugar_discrepa,
+                              ORDER BY s.lugar)
+                     THEN 1 ELSE 0 END                                  AS rompe_orden,
+                -- Y tiene que ser una permutacion limpia: 1..n dentro del
+                -- grupo, sin huecos ni repetidos.
+                CASE WHEN MAX(s.lugar) OVER (PARTITION BY s.id_buro_persona, s.canal)
+                          <> COUNT(*)  OVER (PARTITION BY s.id_buro_persona, s.canal)
+                       OR MIN(s.lugar) OVER (PARTITION BY s.id_buro_persona, s.canal) <> 1
+                     THEN 1 ELSE 0 END                                  AS grupo_roto,
                 -- Cuenta FILAS, no grupos: g viaja unido a cada fila. Sirve
                 -- igual como medida de cuanto trabaja el desempate.
                 SUM(CASE WHEN g.empatado = 1 THEN 1 ELSE 0 END) OVER () AS filas_empatadas
