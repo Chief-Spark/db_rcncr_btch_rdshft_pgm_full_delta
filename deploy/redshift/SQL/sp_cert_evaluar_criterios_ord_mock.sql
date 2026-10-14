@@ -305,6 +305,17 @@ BEGIN
   -- corrida: si alguien quitara el desempate, un grupo empatado dejaria de
   -- coincidir y el criterio caeria.
   --
+  -- SLCOPRBA-1355: SE RETIRO el termino que contaba "el mismo dato puntuado dos
+  -- veces en el canal". Media la RPU, no el dato: particionaba por
+  -- (persona, canal, cod_dw_persona_ubic) y marcaba >1. Pero dos correos
+  -- distintos en la misma RPU son dos filas LEGITIMAS, y el mock las siembra a
+  -- proposito (2000 RPU con dos celulares, 1000 con dos correos). El `dato` de
+  -- verdad es el valor de contacto, y score_ordenamiento NO lo guarda: sus
+  -- columnas son cod_dw_persona_ubic, cod_pin_persona, id_buro_persona, canal,
+  -- score y lugar. Asi que el invariante no era comprobable desde aqui, y lo
+  -- que si lo es -- que el lugar coincida con un recalculo cuyo ORDER BY
+  -- determina -- ya lo asierta el termino que queda.
+  --
   -- El numero de grupos con empate viaja en el detalle porque es la medida de
   -- cuanto trabajo esta haciendo el desempate: con cero empates el criterio
   -- pasaria aunque el desempate no existiera.
@@ -313,14 +324,11 @@ BEGIN
   SELECT p_lote, p_fase, 'F4-08',
          CASE WHEN COUNT(*) = 0                                             THEN 'SIN_DATO'
               WHEN COALESCE(SUM(v.lugar_discrepa), 0) > 0                   THEN 'FAILED'
-              WHEN COALESCE(SUM(v.duplicado), 0)     > 0                    THEN 'FAILED'
               ELSE 'PASSED' END,
          'filas evaluadas=' || CAST(COUNT(*) AS VARCHAR)
            || ', con el lugar distinto del ranking determinista='
            || CAST(COALESCE(SUM(v.lugar_discrepa), 0) AS VARCHAR)
-           || ', con el mismo dato puntuado dos veces en el canal='
-           || CAST(COALESCE(SUM(v.duplicado), 0) AS VARCHAR)
-           || ' (ambos esperados 0). Filas que viven en un grupo (persona, canal) CON empate='
+           || ' (esperado 0). Filas que viven en un grupo (persona, canal) CON empate='
            || CAST(COALESCE(MAX(v.filas_empatadas), 0) AS VARCHAR)
            || ': el empate es legitimo, lo que se exige es que el desempate por '
            || 'cod_dw_persona_ubic lo resuelva siempre igual',
@@ -329,10 +337,6 @@ BEGIN
                               PARTITION BY s.id_buro_persona, s.canal
                               ORDER BY s.score DESC NULLS LAST, s.cod_dw_persona_ubic)
                      THEN 1 ELSE 0 END                                  AS lugar_discrepa,
-                CASE WHEN COUNT(*) OVER (
-                              PARTITION BY s.id_buro_persona, s.canal,
-                                           s.cod_dw_persona_ubic) > 1
-                     THEN 1 ELSE 0 END                                  AS duplicado,
                 -- Cuenta FILAS, no grupos: g viaja unido a cada fila. Sirve
                 -- igual como medida de cuanto trabaja el desempate.
                 SUM(CASE WHEN g.empatado = 1 THEN 1 ELSE 0 END) OVER () AS filas_empatadas
@@ -461,16 +465,26 @@ BEGIN
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
   SELECT p_lote, p_fase, 'CA-F04',
          CASE WHEN COALESCE(MAX(d.filas), 0) = 0 THEN 'SIN_DATO'
-              WHEN COALESCE(MAX(d.filas), 0) <> COALESCE(MAX(d.pares), 0) THEN 'FAILED'
+              WHEN COALESCE(MAX(d.filas), 0) <> COALESCE(MAX(d.posiciones), 0) THEN 'FAILED'
               ELSE 'PASSED' END,
          'filas en score_ordenamiento (universo mock)='
            || CAST(COALESCE(MAX(d.filas), 0) AS VARCHAR)
-           || ', pares (dato, canal) distintos='
-           || CAST(COALESCE(MAX(d.pares), 0) AS VARCHAR)
-           || ' (deben coincidir)',
+           || ', ternas (persona, canal, lugar) distintas='
+           || CAST(COALESCE(MAX(d.posiciones), 0) AS VARCHAR)
+           || ' (deben coincidir: ninguna posicion del ranking se repite).'
+           || ' El RF pide 0 duplicados por DATO de contacto; score_ordenamiento no guarda el valor del contacto, asi que se asierta el invariante equivalente y comprobable.',
          GETDATE(), CURRENT_USER
+  -- SLCOPRBA-1355: antes contaba pares (cod_dw_persona_ubic, canal) y los
+  -- llamaba "(dato, canal)". No es el dato: la RPU se repite de forma legitima
+  -- cuando una persona tiene dos celulares o dos correos en la misma RPU, y el
+  -- scoring emite -- correctamente -- una fila por valor de contacto. Con lo
+  -- que la tabla guarda, el invariante fuerte y comprobable es que el RANKING
+  -- NO REPITA POSICIONES: una terna (persona, canal, lugar) por fila. Es
+  -- exactamente lo que garantiza el desempate por la clave del grupo, y cae si
+  -- alguien lo quita.
   FROM ( SELECT COUNT(*) AS filas,
-                COUNT(DISTINCT CAST(cod_dw_persona_ubic AS VARCHAR) || '|' || canal) AS pares
+                COUNT(DISTINCT CAST(id_buro_persona AS VARCHAR) || '|' || canal
+                               || '|' || CAST(lugar AS VARCHAR)) AS posiciones
            FROM bdm_tempo.stg_cert_ord_base ) d;
 
   -- CA-F05. Mismo invariante que RG-02; se evalua aqui por separado para que
