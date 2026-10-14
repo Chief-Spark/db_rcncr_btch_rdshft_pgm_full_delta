@@ -37,7 +37,10 @@ BEGIN
            SUM(CASE WHEN meses_reporte <=  6 THEN 1 ELSE 0 END) AS tr_6,
            SUM(CASE WHEN meses_reporte <= 12 THEN 1 ELSE 0 END) AS tr_12,
            SUM(CASE WHEN meses_reporte <= 24 THEN 1 ELSE 0 END) AS tr_24,
-           SUM(CASE WHEN meses_reporte >  24 THEN 1 ELSE 0 END) AS tr_24m
+           SUM(CASE WHEN meses_reporte >  24 THEN 1 ELSE 0 END) AS tr_24m,
+           -- Divisor de EMA023 (Caracteristicas.txt:2029-2036): la recencia
+           -- MAS VIEJA entre TODOS los correos de la persona.
+           MAX(meses_reporte) AS max_meses_persona
       FROM bdm_tempo.stg_insumo_email
      GROUP BY id_buro_persona
   ),
@@ -63,25 +66,77 @@ BEGIN
                             THEN 1.0 / GREATEST(v.tr_12 - v.tr_6, 1) ELSE 0 END) AS DECIMAL(18,2)) AS ema016,
       CAST(100.0 * SUM(CASE WHEN e.meses_reporte > 12 AND e.meses_reporte <= 24
                             THEN 1.0 / GREATEST(v.tr_24 - v.tr_12, 1) ELSE 0 END) AS DECIMAL(18,2)) AS ema017,
-      MAX(CASE WHEN e.meses_reporte <= 3 THEN 1 ELSE 0 END) AS ema018,
+      -- EMA018 (:1090-1094): el dominio es de proveedor masivo. Antes era una
+      -- bandera de recencia <= 3 meses, que no se parece en nada. El legado
+      -- compara la parte anterior al primer punto, no el dominio entero.
+      -- FUERA DE LA SUMA en el legado (:2936, literal 0) y aqui: se corrige
+      -- por fidelidad, no cambia ningun score.
+      MAX(CASE WHEN SPLIT_PART(e.dominio, '.', 1)
+                    IN ('hotmail','gmail','yahoo','live','outlook')
+               THEN 1 ELSE 0 END) * 100 AS ema018,
+      -- EMA020 (:2703-2706): BLOQUEADA. El legado la lee de
+      -- REC_VISTA.V_Ind_Efectiv_Orden_Peso_Email cruzando
+      -- Gestion_Contactabilidad (:2713-2714). No tenemos ni la vista ni la
+      -- columna. Lo que hay aqui es una invencion nuestra y su categoria
+      -- tampoco es la del legado, que usa una cubeta NEGATIVA (-1) y deja un
+      -- hueco entre 0 y 9 (:686-696). Portar la categoria sin el valor daria
+      -- un score peor, no mejor. Espera al datashare.
       COUNT(*) AS ema020_raw,
+      -- EMA021 (:2746-2761): BLOQUEADA. Suma de puntos 50/25/12/8/5 por
+      -- Cod_Tipo_Cta_Fte, que viene de CTA_TOTALES_PERSONAS_TMP3
+      -- (:2768-2769) y no es columna de la vista de correos. Espera al
+      -- datashare. (Detalle para cuando llegue: la rama '23' es la unica sin
+      -- CAST a INTEGER, compara la cadena cruda.)
       COUNT(*) AS ema021_raw,
-      MAX(CASE WHEN e.sector_financiero = 1 THEN 1 ELSE 0 END) AS ema023_raw,
-      MAX(CASE WHEN e.dominio NOT IN ('gmail.com','hotmail.com','yahoo.com','outlook.com') THEN 1 ELSE 0 END) AS ema024,
-      CAST(100.0 * MIN(e.meses_reporte) / NULLIF(MAX(e.meses_reporte), 0) AS DECIMAL(18,2)) AS ema025
+      -- EMA024 (:1406-1433): suscriptores distintos de ESTE correo. El
+      -- divisor sale en persona_ema. Antes era una bandera de dominio
+      -- corporativo, que es la logica de EMA018 mal colocada.
+      COUNT(DISTINCT e.id_buro_suscriptor) AS locals_024,
+      -- EMA025 (:1060-1071): escalon sobre el LARGO del buzon, no una razon
+      -- de recencias. Ojo: la escala NO es monotona (5, 20, 34, 30, 10, 3) y
+      -- se porta literal. FUERA DE LA SUMA en ambos (:2938).
+      --   DIVERGENCIA ANOTADA: el legado toma Buzon de
+      --   REC_VISTA.V_DIRECCION_ELECTRONICA (:2101-2102); aqui se deriva del
+      --   propio correo, que es el mismo dato sin la vista.
+      MAX(CASE
+            WHEN LENGTH(TRIM(SPLIT_PART(e.email, '@', 1))) <  7 THEN  5
+            WHEN LENGTH(TRIM(SPLIT_PART(e.email, '@', 1))) <  9 THEN 20
+            WHEN LENGTH(TRIM(SPLIT_PART(e.email, '@', 1))) < 12 THEN 34
+            WHEN LENGTH(TRIM(SPLIT_PART(e.email, '@', 1))) < 16 THEN 30
+            WHEN LENGTH(TRIM(SPLIT_PART(e.email, '@', 1))) < 20 THEN 10
+            ELSE 3
+          END) AS ema025
     FROM bdm_tempo.stg_insumo_email e
     INNER JOIN ventanas v ON v.id_buro_persona = e.id_buro_persona
     GROUP BY e.id_buro_persona, e.email
   ),
   persona_ema AS (
-    SELECT id_buro_persona, SUM(ema020_raw) AS total_rep FROM base_agg GROUP BY 1
+    SELECT id_buro_persona,
+      SUM(ema020_raw) AS total_rep,
+      -- Divisor de EMA024 (:1424-1432): el MAYOR conteo de suscriptores
+      -- entre los correos de la persona. No es la suma; el "mejor" correo
+      -- saca 100 por construccion.
+      MAX(locals_024) AS total_024
+    FROM base_agg GROUP BY 1
   ),
   base AS (
     SELECT a.*,
       CAST(100.0 * a.ema020_raw / NULLIF(p.total_rep, 0) AS DECIMAL(18,2)) AS ema020,
       a.ema021_raw AS ema021,
-      CAST(100.0 * a.ema023_raw AS DECIMAL(18,2)) AS ema023
-    FROM base_agg a JOIN persona_ema p ON a.id_buro_persona = p.id_buro_persona
+      -- EMA023 (:2007-2008): (recencia mas vieja de la PERSONA - la de ESTE
+      -- correo) / la de la persona. Premia al correo mas reciente, y es la
+      -- misma forma que TEL025. Antes miraba sector_financiero, que el legado
+      -- no toca en esta caracteristica.
+      CAST(100.0 * (CAST(v.max_meses_persona AS DECIMAL(18,6)) - a.ema003)
+           / NULLIF(v.max_meses_persona, 0) AS DECIMAL(18,2)) AS ema023,
+      -- EMA024: ver base_agg. Misma forma que TEL023.
+      --   DIVERGENCIA ANOTADA: el legado cuenta Codigo_Suscriptor
+      --   (:842, columna de la propia vista de correos); aqui va
+      --   id_buro_suscriptor, la cubeta de hash documentada como ruido.
+      CAST(100.0 * a.locals_024 / NULLIF(p.total_024, 0) AS DECIMAL(18,2)) AS ema024
+    FROM base_agg a
+    JOIN persona_ema p ON a.id_buro_persona = p.id_buro_persona
+    JOIN ventanas v ON v.id_buro_persona = a.id_buro_persona
   ),
   categorized AS (
     SELECT cod_dw_persona_ubic, cod_pin_persona, id_buro_persona, email,
@@ -92,11 +147,13 @@ BEGIN
       CASE WHEN ema015 < 20 THEN 1 WHEN ema015 < 50 THEN 2 WHEN ema015 < 70 THEN 3 WHEN ema015 >= 70 THEN 4 ELSE 0 END AS c15,
       CASE WHEN ema016 < 1 THEN 1 WHEN ema016 < 63 THEN 2 WHEN ema016 < 95 THEN 3 WHEN ema016 >= 95 THEN 4 ELSE 0 END AS c16,
       CASE WHEN ema017 < 20 THEN 1 WHEN ema017 < 50 THEN 2 WHEN ema017 < 80 THEN 3 WHEN ema017 >= 80 THEN 4 ELSE 0 END AS c17,
-      CASE WHEN ema018 <= 0 THEN 1 ELSE 3 END AS c18,
+      CASE WHEN ema018 <= 0 THEN 1 ELSE 4 END AS c18,   -- :1342-1349 (era ELSE 3)
       CASE WHEN ema020 <= 0 THEN 1 WHEN ema020 <= 50 THEN 2 WHEN ema020 > 50 THEN 3 ELSE 0 END AS c20,
       CASE WHEN ema021 <= 5 THEN 1 WHEN ema021 <= 45 THEN 2 WHEN ema021 <= 50 THEN 3 WHEN ema021 > 50 THEN 4 ELSE 0 END AS c21,
       CASE WHEN ema023 <= 0 THEN 1 WHEN ema023 <= 44 THEN 2 WHEN ema023 > 44 THEN 3 ELSE 0 END AS c23,
-      CASE WHEN ema024 <= 0 THEN 1 ELSE 1 END AS c24,
+      -- :2234-2241. Las dos ramas devolvian 1: la caracteristica entraba en
+      -- la suma con su beta y aportaba la MISMA constante a todas las filas.
+      CASE WHEN ema024 <= 50 THEN 1 ELSE 4 END AS c24,
       CASE WHEN ema025 <= 20 THEN 1 WHEN ema025 <= 30 THEN 2 WHEN ema025 > 30 THEN 3 ELSE 0 END AS c25
     FROM base
   ),
