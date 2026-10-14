@@ -23,6 +23,7 @@ BEGIN
   DROP TABLE IF EXISTS bdm_tempo.stg_reporte_rpu;
   DROP TABLE IF EXISTS bdm_tempo.stg_contacto_direccion_rpu;
   DROP TABLE IF EXISTS bdm_tempo.stg_persona_dir_ref;
+  DROP TABLE IF EXISTS bdm_tempo.stg_rpu_dir_ref;
   DROP TABLE IF EXISTS bdm_tempo.stg_dir_conteo_persona;
   DROP TABLE IF EXISTS bdm_tempo.stg_persona_dir_ganadora;
   DROP TABLE IF EXISTS bdm_tempo.stg_rpu_post_unificacion;
@@ -133,6 +134,44 @@ BEGIN
 
   ANALYZE bdm_tempo.stg_persona_dir_ref;
 
+  -- 4b) Referencia de direccion POR RPU, no por persona.
+  --
+  -- POR QUE EXISTE ESTA TABLA Y NO BASTA stg_persona_dir_ref:
+  --   el canal TEL agrupa por direccion_fisica
+  --   (sp_ordenamiento_scoring_tel_edf.sql:58), y si esa columna sale de un
+  --   agregado POR PERSONA entonces todos los telefonos de una persona caen
+  --   en el MISMO grupo: una sola fila de score, lugar = 1 siempre, y nada
+  --   que ordenar. El canal pierde su funcion, que es elegir entre los
+  --   telefonos de una persona cual es mas contactable.
+  --
+  --   El legado agrupa por la direccion fisica DE CADA FILA DE REPORTE
+  --   (Caracteristicas.txt, GROUP BY Cod_Pin_Persona, Id_Buro_Persona,
+  --   Direccion_Fisica), de modo que una persona con N direcciones produce N
+  --   grupos. Esta tabla restaura ese grano.
+  --
+  --   Arrastraba ademas cinco caracteristicas: TEL001, TEL006, TEL010,
+  --   TEL023 y TEL025 son en el legado cuotas del grupo contra el total de
+  --   la persona, y con grupo = persona valen trivialmente 100 o 0.
+  --
+  -- stg_persona_dir_ref se CONSERVA: la sigue usando el insumo de CEL, donde
+  -- alimenta una bandera de nivel persona (CEL023). Esa caracteristica tiene
+  -- su propia divergencia con el legado y se trata aparte.
+  CREATE TABLE bdm_tempo.stg_rpu_dir_ref
+  DISTSTYLE KEY
+  DISTKEY (cod_dw_persona_ubic)
+  SORTKEY (cod_dw_persona_ubic)
+  AS
+  SELECT
+    r.cod_dw_persona_ubic,
+    MIN(u.texto_ubicacion) AS dir_ref
+  FROM bdm_tempo.stg_rpu_post_unificacion r
+  INNER JOIN bdm_tempo.v_xpm_ubicacion_estandarizada u
+    ON r.cod_dw_ubic = u.cod_dw_ubic
+  WHERE COALESCE(r.ind_unificacion, 0) <> 1
+  GROUP BY 1;
+
+  ANALYZE bdm_tempo.stg_rpu_dir_ref;
+
   -- 5) Contacto dirección solo RPUs ganadoras (1 pasada datashare)
   CREATE TABLE bdm_tempo.stg_contacto_direccion_rpu
   DISTSTYLE KEY
@@ -222,7 +261,7 @@ BEGIN
     c.cod_dw_persona_ubic,
     c.cod_pin_persona,
     c.id_buro_persona,
-    COALESCE(ref.dir_ref, c.texto_ubicacion_vinculo, c.valor_contacto) AS direccion_fisica,
+    COALESCE(rref.dir_ref, c.texto_ubicacion_vinculo, c.valor_contacto) AS direccion_fisica,
     c.cod_dane_ciudad,
     CASE
       WHEN c.valor_contacto ~ '^[0-9]+$' AND LENGTH(TRIM(c.valor_contacto)) >= 7 THEN 'VALIDA'
@@ -239,8 +278,8 @@ BEGIN
     ON sf.id_buro_suscriptor = c.id_buro_suscriptor
   LEFT JOIN bdm_datos.catalogo_tipo_cuenta_tel tcat
     ON tcat.prefijo_operador = LEFT(LTRIM(c.valor_contacto, '0'), 3)
-  LEFT JOIN bdm_tempo.stg_persona_dir_ref ref
-    ON ref.id_buro_persona = c.id_buro_persona
+  LEFT JOIN bdm_tempo.stg_rpu_dir_ref rref
+    ON rref.cod_dw_persona_ubic = c.cod_dw_persona_ubic
   WHERE c.contact_type IN ('4', '5', '8')
     AND c.valor_contacto IS NOT NULL;
 

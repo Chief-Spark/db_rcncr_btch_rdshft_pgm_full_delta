@@ -13,6 +13,7 @@ BEGIN
   DROP TABLE IF EXISTS bdm_tempo.stg_reporte_rpu;
   DROP TABLE IF EXISTS bdm_tempo.stg_contacto_direccion_rpu;
   DROP TABLE IF EXISTS bdm_tempo.stg_persona_dir_ref;
+  DROP TABLE IF EXISTS bdm_tempo.stg_rpu_dir_ref;
   DROP TABLE IF EXISTS bdm_tempo.stg_dir_conteo_persona;
   DROP TABLE IF EXISTS bdm_tempo.stg_persona_dir_ganadora;
   DROP TABLE IF EXISTS bdm_tempo.stg_rpu_post_unificacion;
