@@ -199,24 +199,35 @@ en SIN_DATO, y conviene no volver a investigarlos.
 
 | Limite | Causa | Consecuencia |
 |---|---|---|
-| `sector_financiero` vale **0 siempre** | su catalogo se carga de la vista REAL del datashare (`02_catalogos_ordenamiento.sql:16`) y no tiene variante mock | `DIR010FI`, `TEL017` y `EMA016` quedan clavadas en la categoria minima |
-| `coincidencia_geo` esta **fijado al literal 0** | `preparar_insumos_edf.sql:234` | `TEL010` aporta una constante y `TEL020` no entra en la suma: ninguno discrimina |
+| `sector_financiero` vale **0 siempre** | su catalogo se carga de la vista REAL del datashare (`02_catalogos_ordenamiento.sql:16`) y no tiene variante mock | `DIR010FI` y `EMA016` quedan clavadas en la categoria minima |
+| `coincidencia_geo` esta **fijado al literal 0** | `preparar_insumos_edf.sql:303` | solo afecta a `TEL020`, que **no entra en la suma del score** ni en el legado (`Caracteristicas.txt:2830-2834`) ni en nuestro port: sin impacto en el ranking |
 | No existe `'POSPAGO'` | `catalogo_tipo_cuenta_tel` solo trae `PREPAGO` y `FIJA` (`02_catalogos_ordenamiento.sql:27-32`) | `CEL019` es constante: 186,72 puntos de beta inmovilizados |
 
-**Dos filas de esa tabla eran falsas y se corrigieron (SLCOPRBA-1355).** Decian
-que `CEL014` estaba clavada por `'POSPAGO'` y `CEL017` por `sector_financiero`.
-**El legado no mira ninguna de las dos cosas**: `CO01CEL014` es la cuota de la
-ventana `> 24` meses sobre `Total_Reportes_24m` (`Caracteristicas.txt:2450-2453`)
-y `CO01CEL017` la de la ventana `(12, 24]` sobre
-`Total_Reportes_24 - Total_Reportes_12` (`:2459-2463`). Eran invenciones
-nuestras, no limites del mock. Portarlas bien libero **165,97 puntos de beta**
-(124,48 + 41,49). `CEL019` si depende de verdad del tipo de cuenta
-(`:1285-1290`, `MAX(TCO.Valor)` sobre `V_Tipo_Cuenta_Ord`) y sigue bloqueada.
+**CUATRO caracteristicas salieron de esa tabla al leer el legado
+(SLCOPRBA-1355).** Ninguna estaba donde decia estar:
+
+| Decia | Dice el legado | Cita |
+|---|---|---|
+| `CEL014` clavada por `'POSPAGO'` | cuota de la ventana `> 24` sobre `Total_Reportes_24m` | `Caracteristicas.txt:2450-2453` |
+| `CEL017` clavada por `sector_financiero` | cuota de `(12, 24]` sobre `Total_Reportes_24 - _12` | `:2459-2463` |
+| `TEL017` clavada por `sector_financiero` | cuota de reportes `'RES'` sobre `Total_Reportes_Telefono` | `:2296-2299` |
+| `TEL010` constante por `coincidencia_geo` | cuota de la ventana `<= 12` sobre `Total_Reportes_12` | `:2972-2977` |
+
+Eran invenciones nuestras, no limites del mock, y las cuatro son portables hoy
+sin datashare. Las dos de CEL liberaron **165,97 puntos de beta** (124,48 +
+41,49). Lo que SI sigue bloqueado por F2 es `CEL019`, que depende de verdad del
+tipo de cuenta (`:1285-1290`, `MAX(TCO.Valor)` sobre `V_Tipo_Cuenta_Ord`).
+
+**Y TEL tiene sus propios contadores por ventana**, al contrario de lo que
+afirma el commit `630284f`: `REC_STAGE.calculo_total` (`:1674-1690`) define
+`Total_Reportes_3/6/12` por `(Cod_Pin_Persona, Id_Buro_Persona)`. No hay `_24`
+ni `_24m` y no se llaman `NUM_TOTAL_REPORTE*`, que es por lo que una busqueda
+por ese nombre no da con ellos.
 
 **Moraleja, que es la que importa:** una caracteristica que sale constante en el
 mock no prueba que le falte un catalogo. Antes de anotarla como limite
-estructural hay que leer su formula en el legado. Dos de las tres filas de esta
-tabla no sobrevivieron a esa lectura.
+estructural hay que leer su formula en el legado. De las tres filas de esta
+tabla, dos cayeron enteras y la tercera se quedo sin consecuencia.
 
 ### Dos trampas al sembrar arquetipos de Ordenamiento
 
@@ -243,22 +254,33 @@ filas comparten: la fecha, el catalogo financiero, el numero de reportes y el
 de direcciones. Un score absoluto depende de las cuatro cosas y el criterio se
 caeria solo.
 
-### El colapso de TEL NO es un limite del mock: es un defecto de produccion
+### El colapso de TEL ya NO es un defecto de codigo: hoy es de siembra
 
-`direccion_fisica` sale de `COALESCE(ref.dir_ref, ...)` y `dir_ref` es
-`MIN(texto_ubicacion)` agregado **por persona**
-(`sp_ordenamiento_preparar_insumos_edf.sql:127`) -- **en el SP REAL, no solo en
-el mock**. Si la persona tiene una sola ubicacion estandarizada, que es el caso
-normal, todos sus telefonos reciben el mismo valor y colapsan en un grupo:
-**una fila de score, `lugar = 1` siempre, nada que ordenar.**
+**Esta seccion decia que el colapso era un defecto vivo de produccion. Era
+cierto y dejo de serlo; el documento se quedo atras (SLCOPRBA-1355).**
+
+El arreglo esta puesto y razonado en el propio SP: `stg_insumo_telefono` no
+lee `stg_persona_dir_ref` (agregado **por persona**) sino
+`stg_rpu_dir_ref` (**por RPU**), que existe exactamente para esto
+-- `sp_ordenamiento_preparar_insumos_edf.sql:137-156` lo explica, y el uso
+esta en `:294` y `:311`. Paridad confirmada en el mock
+(`sp_ordenamiento_preparar_insumos_mock.sql:336` y `:353`).
+`stg_persona_dir_ref` se conserva, pero ya solo alimenta a CEL (`:341`).
+
+**Lo que queda es de siembra.** Las tres semillas cuelgan los contactos de
+**una sola RPU por persona** -- `seed_mock_matriz.sql:329`,
+`seed_mock_matriz_r2.sql:948` y `seed_mock_matriz_r3.sql:356`, las tres con
+`AND rpu.cod_dw_persona_ubic % 10 = 1`. Con una RPU hay un solo `dir_ref`, y
+por tanto un solo grupo: `lugar = 1` para todo el mundo y **un unico score en
+las 64 000 filas de TEL**, medido en el banco.
+
+Es la misma familia que el hallazgo de recencia
+(`docs/HALLAZGOS_RECENCIA_MOCK_ORDENAMIENTO.md`): el canal no puede ordenar
+porque la siembra no le da entre que elegir.
 
 El legado agrupa por la direccion fisica **de cada fila de reporte**, de modo
 que una persona con N direcciones produce N grupos y el ranking elige entre
-ellos. Ese es el proposito del canal.
-
-Arrastra cinco caracteristicas mas: `TEL001`, `TEL006`, `TEL010`, `TEL023` y
-`TEL025` son en el legado *cuotas del grupo contra el total de la persona*. Con
-grupo = persona valen trivialmente 100 o 0.
+ellos. Ese es el proposito del canal, y nuestro grano ya lo reproduce.
 
 Detalle completo en `docs/AUDITORIA_SEMANTICA_ORDENAMIENTO_F4.md`.
 
