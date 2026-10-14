@@ -162,3 +162,41 @@ Corto, claro y contundente. Quien lee necesita decidir, no leer.
 Y lo que mas importa en este proyecto: **si una afirmacion anterior resulta
 falsa, corregirla en cuanto se sepa, sin preambulo.** Ha pasado ya con el gate
 que se creia que tumbaba el build y no lo hacia.
+
+## Ordenamiento: lo que el mock NO puede ejercitar
+
+Cuatro limites estructurales, descubiertos auditando la cadena de siembra. No
+son defectos a corregir: son el motivo por el que ciertos criterios se quedan
+en SIN_DATO, y conviene no volver a investigarlos.
+
+| Limite | Causa | Consecuencia |
+|---|---|---|
+| `sector_financiero` vale **0 siempre** | su catalogo se carga de la vista REAL del datashare (`02_catalogos_ordenamiento.sql:16`) y no tiene variante mock | `DIR010FI`, `TEL017`, `CEL017` y `EMA016` quedan clavadas en la categoria minima |
+| `coincidencia_geo` esta **fijado al literal 0** | `preparar_insumos_edf.sql:234` | `TEL010` aporta una constante y `TEL020` no entra en la suma: ninguno discrimina |
+| No existe `'POSPAGO'` | `catalogo_tipo_cuenta_tel` solo trae `PREPAGO` y `FIJA` (`02_catalogos_ordenamiento.sql:27-32`) | `CEL014` y `CEL019` son constantes: 310 puntos de beta inmovilizados |
+| `TEL` da **una sola fila por persona** | `direccion_fisica` sale de `COALESCE(ref.dir_ref, ...)` y `dir_ref` es `MIN(texto_ubicacion)` agregado POR PERSONA (`preparar_insumos_edf.sql:127`) | todos los telefonos de una persona colapsan en un grupo. Para sembrar dos filas TEL hay que dejar a la persona SIN fila en `ubicacion_estandarizada` |
+
+### Dos trampas al sembrar arquetipos de Ordenamiento
+
+**Las fechas tienen que ser relativas, no literales.** El insumo calcula
+`meses_reporte` con `DATEDIFF(month, fecha, CURRENT_DATE)`, asi que un literal
+significa una cosa hoy y otra el mes que viene: **el score deriva con el
+calendario** y un criterio que hoy pasa falla solo. Usar
+`DATEADD(month, -N, CURRENT_DATE)` y elegir N lejos de los umbrales de ventana
+(3, 6, 12 y 24 meses).
+
+**`score_ordenamiento` no se trunca nunca.** Su unica limpieza es
+`DELETE ... WHERE id_buro_persona IN (stg_ord_personas_alcance)`. Un arquetipo
+sembrado fuera de la ventana del watermark conservaria para siempre el score de
+la primera corrida. Sembrar con `fecha_relacion_persona_ubicaci = '2026-03-01'`,
+que es el watermark y el predicado es inclusivo.
+
+### Criterios que miden deltas, no scores absolutos
+
+Los arquetipos del Ordenamiento (ARQ 80..84, banda `9800000..9849999`) se
+certifican por la **diferencia de score entre las dos filas de cada persona**,
+nunca por el valor absoluto. El delta es exactamente
+`(diferencia de categoria / divisor) * beta` y es inmune a todo lo que las dos
+filas comparten: la fecha, el catalogo financiero, el numero de reportes y el
+de direcciones. Un score absoluto depende de las cuatro cosas y el criterio se
+caeria solo.
