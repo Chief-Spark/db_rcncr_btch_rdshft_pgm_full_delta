@@ -64,11 +64,42 @@ for d, _, fs in os.walk(root):
 sqls.sort()
 
 def strip_noise(s):
-    """Quita comentarios y literales para contar simbolos de verdad."""
-    s = re.sub(r'/\*.*?\*/', ' ', s, flags=re.S)
-    s = re.sub(r'--[^\n]*', ' ', s)
-    s = re.sub(r"'(?:''|[^'])*'", "''", s)
-    return s
+    """Quita comentarios y literales para contar simbolos de verdad.
+
+    Escaner de caracteres, no regex. La version con regex tachaba los
+    comentarios ANTES que los literales, de modo que un ' -- ' dentro de una
+    cadena se tomaba por comentario y se comia el resto de la linea: dio un
+    falso desbalance de parentesis. El orden correcto no se puede expresar con
+    dos sustituciones independientes, porque cada construccion puede contener
+    la marca de la otra."""
+    out = []
+    i, n = 0, len(s)
+    while i < n:
+        c = s[i]
+        if c == "'":                                   # literal
+            i += 1
+            while i < n:
+                if s[i] == "'":
+                    if i + 1 < n and s[i+1] == "'":    # comilla escapada
+                        i += 2; continue
+                    i += 1; break
+                i += 1
+            out.append("''")
+            continue
+        if c == '-' and i + 1 < n and s[i+1] == '-':   # comentario de linea
+            j = s.find('\n', i)
+            if j < 0:
+                break
+            i = j
+            continue
+        if c == '/' and i + 1 < n and s[i+1] == '*':   # comentario de bloque
+            j = s.find('*/', i + 2)
+            i = n if j < 0 else j + 2
+            out.append(' ')
+            continue
+        out.append(c)
+        i += 1
+    return ''.join(out)
 
 GREEN, RED, YEL, OFF = '\033[32m', '\033[31m', '\033[33m', '\033[0m'
 fail = warn = False

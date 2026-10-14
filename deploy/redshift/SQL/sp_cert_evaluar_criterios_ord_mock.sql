@@ -60,6 +60,7 @@ BEGIN
 
   DROP TABLE IF EXISTS bdm_tempo.stg_cert_ord_base;
   DROP TABLE IF EXISTS bdm_tempo.stg_cert_ord_beta;
+  DROP TABLE IF EXISTS bdm_tempo.stg_cert_ord_arq;
 
   -- ------------------------------------------------------------
   -- Apoyo 1: los scores del universo mock, con la marca de hija.
@@ -97,6 +98,45 @@ BEGIN
          SUM(CASE WHEN b.valor_beta < 0 THEN b.valor_beta ELSE 0 END)  AS lim_inf
   FROM bdm_datos.beta_ordenamiento b
   GROUP BY 1;
+
+  -- ------------------------------------------------------------
+  -- Apoyo 3: los arquetipos del Ordenamiento (ARQ 80..84), agregados por
+  -- banda y canal.
+  --
+  -- SE MIDE EL DELTA ENTRE LAS DOS FILAS DE CADA PERSONA, no el score
+  -- absoluto. El delta solo depende de la diferencia de categoria por el
+  -- beta, de modo que es inmune a todo lo que las dos filas COMPARTEN: la
+  -- fecha (y por tanto el calendario), el catalogo de sector financiero -- que
+  -- en mock vale 0 siempre porque se carga de la vista real del datashare --,
+  -- el numero de reportes y el de direcciones. Un score absoluto dependeria de
+  -- las tres cosas y el criterio se caeria solo al mes siguiente.
+  --
+  -- Se guardan el minimo y el maximo del delta por banda para poder afirmar
+  -- ademas que las 1000 replicas se comportan IGUAL: si una sola se desviara,
+  -- delta_min y delta_max dejarian de coincidir.
+  -- ------------------------------------------------------------
+  CREATE TABLE bdm_tempo.stg_cert_ord_arq
+  DISTSTYLE ALL
+  AS
+  SELECT g.banda,
+         g.canal,
+         COUNT(*)            AS personas,
+         MIN(g.n_filas)      AS filas_min,
+         MAX(g.n_filas)      AS filas_max,
+         MIN(g.delta)        AS delta_min,
+         MAX(g.delta)        AS delta_max,
+         SUM(g.cabeza_ok)    AS cabeza_ok
+  FROM ( SELECT CAST(s.id_buro_persona / 10000 AS INTEGER) * 10000 AS banda,
+                s.id_buro_persona,
+                s.canal,
+                COUNT(*)                        AS n_filas,
+                MAX(s.score) - MIN(s.score)     AS delta,
+                CASE WHEN MAX(CASE WHEN s.lugar = 1 THEN s.score END) = MAX(s.score)
+                     THEN 1 ELSE 0 END          AS cabeza_ok
+           FROM bdm_tempo.stg_cert_ord_base s
+          WHERE s.id_buro_persona BETWEEN 9800000 AND 9849999
+          GROUP BY 1, 2, 3 ) g
+  GROUP BY 1, 2;
 
   -- ============================================================
   -- FASE 4 -- GENERALES
@@ -554,6 +594,136 @@ BEGIN
            FROM bdm_stage.mock_ord_control ) c;
 
   -- ============================================================
+  -- LOS ARQUETIPOS DEL ORDENAMIENTO (ARQ 80..84)
+  -- ============================================================
+
+  -- CA-F03. El recalculo independiente de la formula. Cada arquetipo tiene
+  -- DOS filas que difieren en UNA sola caracteristica, de modo que su delta
+  -- de score es exactamente (diferencia de categoria / divisor) * beta -- un
+  -- numero que se puede calcular a mano desde el catalogo de betas y que no
+  -- depende de ningun otro insumo. Si la formula, un umbral, un divisor o un
+  -- beta cambian, el delta deja de cuadrar.
+  --
+  -- La tolerancia de 0.0002 existe porque el score se persiste redondeado a
+  -- DECIMAL(18,4): el delta de dos valores redondeados puede separarse del
+  -- delta exacto hasta en una diezmilesima por cada lado.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'CA-F03',
+         CASE WHEN COALESCE(SUM(x.hay), 0) = 0                       THEN 'SIN_DATO'
+              WHEN COALESCE(SUM(x.falla), 0) > 0                     THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'arquetipos esperados=' || CAST(COUNT(*) AS VARCHAR)
+           || ', presentes=' || CAST(COALESCE(SUM(x.hay), 0) AS VARCHAR)
+           || ', con el delta de score esperado='
+           || CAST(COALESCE(SUM(CASE WHEN x.falla = 0 AND x.hay = 1 THEN 1 ELSE 0 END), 0) AS VARCHAR)
+           || '. Detalle: '
+           || COALESCE(LISTAGG('ARQ ' || CAST(x.banda / 10000 - 900 AS VARCHAR)
+                               || '/' || x.canal
+                               || ' esperado ' || CAST(x.delta_esperado AS VARCHAR)
+                               || ' obtenido ' || COALESCE(CAST(x.delta_min AS VARCHAR), 'sin filas')
+                               || CASE WHEN x.delta_min <> x.delta_max
+                                       THEN '..' || CAST(x.delta_max AS VARCHAR)
+                                            || ' (LAS REPLICAS NO COINCIDEN)'
+                                       ELSE '' END, ' | ')
+                       WITHIN GROUP (ORDER BY x.banda), 'nada que medir')
+           || ' -- ' || x2.nota,
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT m.banda, m.canal, m.delta_esperado,
+                a.delta_min, a.delta_max,
+                CASE WHEN a.banda IS NULL THEN 0 ELSE 1 END AS hay,
+                CASE WHEN a.banda IS NULL                                  THEN 0
+                     WHEN ABS(a.delta_min - m.delta_esperado) > 0.0002     THEN 1
+                     WHEN ABS(a.delta_max - m.delta_esperado) > 0.0002     THEN 1
+                     WHEN a.filas_min <> 2 OR a.filas_max <> 2             THEN 1
+                     ELSE 0 END                                            AS falla
+           FROM ( SELECT CAST(9800000 AS INTEGER) AS banda,
+                         CAST('DIR' AS VARCHAR(10)) AS canal,
+                         CAST(0.0000 AS DECIMAL(18,4)) AS delta_esperado UNION ALL
+                  SELECT 9810000, 'DIR',   9.6774 UNION ALL
+                  SELECT 9820000, 'CEL',   0.0000 UNION ALL
+                  SELECT 9830000, 'CEL', 170.1245 UNION ALL
+                  SELECT 9840000, 'EMA', 121.0207 ) m
+           LEFT JOIN bdm_tempo.stg_cert_ord_arq a
+                  ON a.banda = m.banda AND a.canal = m.canal ) x
+  CROSS JOIN ( SELECT CAST('ARQ 80 y 82 son empates a proposito (delta 0); '
+                        || 'ARQ 81 mueve DIR017 de categoria 2 a 3 (29.03225806/3); '
+                        || 'ARQ 83 mueve CEL013 de 1 a 4 y CEL018 de 1 a 3; '
+                        || 'ARQ 84 mueve EMA014 y EMA017 de 1 a 4, las dos con beta negativa'
+                        AS VARCHAR(400)) AS nota ) x2
+  GROUP BY x2.nota;
+
+  -- F4-DIR-05. Los umbrales de categorizacion se aplican. El ARQ 81 tiene dos
+  -- direcciones identicas salvo el tipo de ubicacion (RES contra LAB), que es
+  -- la UNICA columna que mueve una sola caracteristica. Si el CASE de DIR017
+  -- (scoring_dir_edf.sql:93) no partiera en 2 y 3, el delta no seria 9.6774.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F4-DIR-05',
+         CASE WHEN COUNT(*) = 0                                        THEN 'SIN_DATO'
+              WHEN ABS(MAX(a.delta_min) - 9.6774) > 0.0002             THEN 'FAILED'
+              WHEN MAX(a.delta_min) <> MAX(a.delta_max)                THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'ARQ 81 (DIR, RES contra LAB): delta de score observado='
+           || COALESCE(CAST(MAX(a.delta_min) AS VARCHAR), 'sin filas')
+           || CASE WHEN MAX(a.delta_min) <> MAX(a.delta_max)
+                   THEN '..' || CAST(MAX(a.delta_max) AS VARCHAR) || ' (replicas distintas)'
+                   ELSE '' END
+           || ', esperado 9.6774 = (3-2)/3 * 29.03225806. Es el salto mas '
+           || 'pequeno que admite el canal DIR, de modo que ademas mide la resolucion',
+         GETDATE(), CURRENT_USER
+  FROM  bdm_tempo.stg_cert_ord_arq a
+  WHERE a.banda = 9810000 AND a.canal = 'DIR';
+
+  -- F4-CEL-02. CEL013 reconoce los prefijos 310-314. El ARQ 83 enfrenta un
+  -- 310 (en la lista) contra un 322 (fuera). Dos mitades: que el 310 gane el
+  -- lugar 1, y que el delta cubra las dos caracteristicas que cambian.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F4-CEL-02',
+         CASE WHEN COUNT(*) = 0                                   THEN 'SIN_DATO'
+              WHEN MAX(a.cabeza_ok) <> MAX(a.personas)            THEN 'FAILED'
+              WHEN ABS(MAX(a.delta_min) - 170.1245) > 0.0002      THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'ARQ 83 (CEL, prefijo 310 contra 322): personas='
+           || CAST(COALESCE(MAX(a.personas), 0) AS VARCHAR)
+           || ', con el 310 en el lugar 1='
+           || CAST(COALESCE(MAX(a.cabeza_ok), 0) AS VARCHAR)
+           || ', delta observado='
+           || COALESCE(CAST(MAX(a.delta_min) AS VARCHAR), 'sin filas')
+           || ' (esperado 170.1245 = CEL013 de 1 a 4 mas CEL018 de 1 a 3)',
+         GETDATE(), CURRENT_USER
+  FROM  bdm_tempo.stg_cert_ord_arq a
+  WHERE a.banda = 9830000 AND a.canal = 'CEL';
+
+  -- F4-CEL-04. CEL018 toma el valor del catalogo de operador, y el prefijo no
+  -- catalogado cae al valor por defecto.
+  --
+  -- LA MITAD QUE IMPORTA ES LA SEGUNDA: que el celular con prefijo FUERA del
+  -- catalogo SIGA TENIENDO FILA. En el legado no la tiene -- el ranking filtra
+  -- con WHERE CO01CEL018 <> 0 (Caracteristicas.txt:79) y el celular
+  -- DESAPARECE del resultado. En Redshift el join es LEFT y el COALESCE le da
+  -- 0.22, de modo que la fila sobrevive penalizada. Este criterio no juzga
+  -- cual de las dos conductas es la correcta: AFIRMA LA NUESTRA para que la
+  -- diferencia sea visible y medible cuando negocio decida (bitacora G-03).
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F4-CEL-04',
+         CASE WHEN COUNT(*) = 0                                 THEN 'SIN_DATO'
+              WHEN MAX(a.filas_min) <> 2 OR MAX(a.filas_max) <> 2 THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'ARQ 83: filas de score por persona (min..max)='
+           || COALESCE(CAST(MAX(a.filas_min) AS VARCHAR), '0') || '..'
+           || COALESCE(CAST(MAX(a.filas_max) AS VARCHAR), '0')
+           || ', esperado 2..2. El prefijo 322 NO esta en '
+           || 'catalogo_operador_ord_cel y aun asi puntua, con CEL018 en el '
+           || 'default 0.22 -> categoria 1. DIVERGENCIA CONOCIDA: el legado lo '
+           || 'excluiria del ranking. Para la bitacora de G-03',
+         GETDATE(), CURRENT_USER
+  FROM  bdm_tempo.stg_cert_ord_arq a
+  WHERE a.banda = 9830000 AND a.canal = 'CEL';
+
+  -- ============================================================
   -- ESTADOS FIJOS: lo que no se afirma con una consulta
   -- Tabla de mapeo literal, patron del tablero de Unificacion. El FROM es
   -- la propia tabla de mapeo, asi que SIEMPRE devuelve fila y ningun
@@ -589,22 +759,14 @@ BEGIN
            'DIR001IN = meses desde el primer reporte. Falta el arquetipo de la matriz mock de Ordenamiento que lo ejercite con un valor conocido.' UNION ALL
     SELECT 'F4-DIR-03', 'SIN_DATO',
            'DIR009 = entidades distintas reportando. Falta el arquetipo con un numero conocido de entidades.' UNION ALL
-    SELECT 'F4-DIR-05', 'SIN_DATO',
-           'Umbrales de categorizacion. Falta el arquetipo que caiga a proposito en cada tramo de un CASE WHEN.' UNION ALL
     SELECT 'F4-TEL-02', 'SIN_DATO',
            'TEL010 = porcentaje con coincidencia geografica. HOY NO ES EJERCITABLE: coincidencia_geo esta fijada a 0 en preparar_insumos_edf.sql:234, de modo que TEL010 es una constante para todas las filas. Es un cableado pendiente, sin TODO que lo marque.' UNION ALL
     SELECT 'F4-TEL-03', 'SIN_DATO',
            'TEL020 binario 1/4. Comparte origen con TEL010 y por tanto tampoco discrimina hoy. En el legado esta fuera de la suma (Caracteristicas.txt:238) y nuestro codigo lo respeta (scoring_tel_edf.sql:81): la paridad es deliberada.' UNION ALL
     SELECT 'F4-TEL-04', 'SIN_DATO',
            'Reportes NO VALIDA. El legado los EXCLUYE (Caracteristicas.txt:46); nuestro codigo no excluye, solo degrada el numerador (scoring_tel_edf.sql:30-38). Falta el arquetipo con un reporte no valido para medir la diferencia.' UNION ALL
-    SELECT 'F4-CEL-02', 'SIN_DATO',
-           'CEL013 por prefijos 310-314. Falta el arquetipo. Nota: los prefijos estan HARDCODEADOS en scoring_cel_edf.sql:32 y duplican catalogo_tipo_cuenta_tel, que marca esos mismos prefijos como PREPAGO.' UNION ALL
     SELECT 'F4-CEL-03', 'SIN_DATO',
            'CEL014 = indicador de cuenta POSPAGO. Falta el arquetipo.' UNION ALL
-    SELECT 'F4-CEL-04', 'SIN_DATO',
-           'CEL018 por catalogo de operador. Falta el arquetipo con prefijo catalogado y con prefijo ausente. Nota: catalogo_operador_ord_cel es interim DEV (02_catalogos_ordenamiento.sql:34).' UNION ALL
-    SELECT 'CA-F03', 'SIN_DATO',
-           'Recalculo independiente del score. Falta el arquetipo de valores controlados contra el que recomputar la formula termino a termino.' UNION ALL
 
     -- --- fases no portadas ---
     SELECT 'RG-01', 'NO_IMPLEMENTADO',
@@ -656,7 +818,7 @@ BEGIN
 
   DROP TABLE IF EXISTS bdm_tempo.stg_cert_ord_base;
   DROP TABLE IF EXISTS bdm_tempo.stg_cert_ord_beta;
-
+  DROP TABLE IF EXISTS bdm_tempo.stg_cert_ord_arq;
 
 END;
 $$;
