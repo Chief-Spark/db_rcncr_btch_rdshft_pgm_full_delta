@@ -20,45 +20,112 @@ BEGIN
     cod_dw_persona_ubic, cod_pin_persona, id_buro_persona, canal, score, lugar
   )
   WITH
+  -- SLCOPRBA-1355: TRES GRANOS DE DIVISOR CONVIVEN EN ESTE CANAL.
+  --   persona            -> TEL001 (total_reporte), TEL006 (tr_3), TEL010 (tr_12)
+  --   telefono           -> TEL017 y TEL019 (total_reportes_telefono)
+  --   maximo entre los
+  --   telefonos de la
+  --   persona            -> TEL023 y TEL025
+  -- Confundirlos es lo que tenia a nueve de las once caracteristicas mal.
+
+  -- Totales por PERSONA. Portado de REC_STAGE.Calculo_Meses1
+  -- (Caracteristicas.txt:2676-2684) y del subselect de REC_STAGE.calculo_total
+  -- (:1680-1686). Ojo: total_reporte SI filtra por gestion valida y los
+  -- tr_* NO -- es asi en el legado, y la diferencia se nota.
+  persona_tel AS (
+    SELECT t.id_buro_persona,
+      SUM(CASE WHEN (t.descripcion_gestion <> 'NO VALIDA' OR t.descripcion_gestion IS NULL) THEN 1 ELSE 0 END) AS total_reporte,
+      SUM(CASE WHEN t.meses_reporte <=  3 THEN 1 ELSE 0 END) AS tr_3,
+      SUM(CASE WHEN t.meses_reporte <=  6 THEN 1 ELSE 0 END) AS tr_6,
+      SUM(CASE WHEN t.meses_reporte <= 12 THEN 1 ELSE 0 END) AS tr_12,
+      MAX(CASE WHEN (t.descripcion_gestion <> 'NO VALIDA' OR t.descripcion_gestion IS NULL) THEN t.meses_reporte ELSE NULL END) AS max_meses_persona
+    FROM bdm_tempo.stg_insumo_telefono t
+    GROUP BY t.id_buro_persona
+  ),
+
+  -- Agregado por PERSONA + TELEFONO, que es la llave del legado
+  -- (REC_STAGE.Calculo_Meses2, :2252-2262: agrupa por Direccion_Fisica y al
+  -- resultado lo llama Total_Reportes_Telefono).
   base_agg AS (
     SELECT
-      MIN(cod_dw_persona_ubic) AS cod_dw_persona_ubic,
-      MIN(cod_pin_persona) AS cod_pin_persona,
-      id_buro_persona,
-      direccion_fisica,
-      -- TEL001: % meses con reporte (meses_reporte / total_meses * 100)
-      CAST(100.0 * COUNT(CASE WHEN descripcion_gestion <> 'NO VALIDA' OR descripcion_gestion IS NULL THEN 1 END)
-        / NULLIF(COUNT(*), 0) AS DECIMAL(18,2)) AS tel001,
-      -- TEL002: total reportes válidos
-      COUNT(CASE WHEN descripcion_gestion <> 'NO VALIDA' OR descripcion_gestion IS NULL THEN 1 END) AS tel002,
-      -- TEL003: meses desde primer reporte
-      MAX(meses_reporte) AS tel003,
-      -- TEL006: % reportes últimos 12 meses
-      CAST(100.0 * SUM(CASE WHEN meses_reporte <= 12 AND (descripcion_gestion <> 'NO VALIDA' OR descripcion_gestion IS NULL) THEN 1 ELSE 0 END)
-        / NULLIF(COUNT(CASE WHEN descripcion_gestion <> 'NO VALIDA' OR descripcion_gestion IS NULL THEN 1 END), 0) AS DECIMAL(18,2)) AS tel006,
-      -- TEL007: reportes últimos 6 meses
-      SUM(CASE WHEN meses_reporte <= 6 THEN 1 ELSE 0 END) AS tel007,
-      -- TEL010: % reportes con coincidencia geo
-      CAST(100.0 * SUM(CASE WHEN coincidencia_geo = 1 THEN 1 ELSE 0 END)
-        / NULLIF(COUNT(*), 0) AS DECIMAL(18,2)) AS tel010,
-      -- TEL017: % reportes sector financiero
-      CAST(100.0 * SUM(CASE WHEN sector_financiero = 1 THEN 1 ELSE 0 END)
-        / NULLIF(COUNT(*), 0) AS DECIMAL(18,2)) AS tel017,
-      -- TEL019: % reportes tipo cuenta
-      CAST(100.0 * SUM(CASE WHEN tipo_cuenta = 'FIJA' THEN 1 ELSE 0 END)
-        / NULLIF(COUNT(*), 0) AS DECIMAL(18,2)) AS tel019,
-      -- TEL020: tiene coincidencia geo (binario)
-      MAX(coincidencia_geo) AS tel020,
-      -- TEL023: % reportes locales (ciudad DANE)
-      CAST(100.0 * COUNT(DISTINCT CASE WHEN cod_dane_ciudad IS NOT NULL THEN id_buro_suscriptor END)
-        / NULLIF(COUNT(DISTINCT id_buro_suscriptor), 0) AS DECIMAL(18,2)) AS tel023,
-      -- TEL025: % meses último reporte
-      CAST(100.0 * MIN(meses_reporte) / NULLIF(MAX(meses_reporte), 0) AS DECIMAL(18,2)) AS tel025
-    FROM bdm_tempo.stg_insumo_telefono
-    GROUP BY id_buro_persona, direccion_fisica
+      MIN(t.cod_dw_persona_ubic) AS cod_dw_persona_ubic,
+      MIN(t.cod_pin_persona) AS cod_pin_persona,
+      t.id_buro_persona,
+      t.telefono,
+      MIN(t.direccion_fisica) AS direccion_fisica,
+      COUNT(*) AS n_reportes,
+      SUM(CASE WHEN (t.descripcion_gestion <> 'NO VALIDA' OR t.descripcion_gestion IS NULL) THEN 1 ELSE 0 END) AS total_reportes_telefono,
+      -- TEL002 (:1441): MIN de meses_reporte. Antes era un conteo de validos.
+      MIN(t.meses_reporte) AS tel002,
+      -- TEL003 (:554): MAX de meses_reporte. Ya estaba bien.
+      MAX(t.meses_reporte) AS tel003,
+      SUM(CASE WHEN t.meses_reporte <=  3 THEN 1 ELSE 0 END) AS cnt_3,
+      -- TEL007 (:249): conteo pelado <= 6 meses. Ya estaba bien.
+      SUM(CASE WHEN t.meses_reporte <=  6 THEN 1 ELSE 0 END) AS tel007,
+      SUM(CASE WHEN t.meses_reporte <= 12 THEN 1 ELSE 0 END) AS cnt_12,
+      SUM(CASE WHEN TRIM(t.tipo_ubicacion) = 'RES' THEN 1 ELSE 0 END) AS cnt_res,
+      SUM(CASE WHEN TRIM(t.tipo_ubicacion) = 'LAB' THEN 1 ELSE 0 END) AS cnt_lab,
+      -- TEL020 (:2137): bandera por 100. No entra en el score, ni aqui ni en
+      -- el legado (:2830-2834); se calcula porque el tablero la mira.
+      CASE WHEN SUM(t.coincidencia_geo) > 0 THEN 1 ELSE 0 END AS geo_flag,
+      -- TEL023 (:220 y :924-932): suscriptores distintos de ESTE telefono.
+      COUNT(DISTINCT CASE WHEN (t.descripcion_gestion <> 'NO VALIDA' OR t.descripcion_gestion IS NULL) THEN t.id_buro_suscriptor END) AS locals_023,
+      -- TEL025 (:714 y :2054-2068): la recencia mas vieja de ESTE telefono.
+      MAX(CASE WHEN (t.descripcion_gestion <> 'NO VALIDA' OR t.descripcion_gestion IS NULL) THEN t.meses_reporte ELSE NULL END) AS max_meses_tel
+    FROM bdm_tempo.stg_insumo_telefono t
+    GROUP BY t.id_buro_persona, t.telefono
   ),
+
+  -- El divisor de TEL023 es el MAXIMO de locals entre los telefonos de la
+  -- persona (REC_STAGE.CO01TEL023_3, :1466-1478), no la suma.
+  persona_max AS (
+    SELECT id_buro_persona, MAX(locals_023) AS total_023
+    FROM base_agg
+    GROUP BY id_buro_persona
+  ),
+
+  base AS (
+    SELECT
+      a.cod_dw_persona_ubic, a.cod_pin_persona, a.id_buro_persona,
+      a.telefono, a.direccion_fisica,
+      a.tel002, a.tel003, a.tel007,
+      -- TEL001 (:588): el legado escribe SUM(1/total_reporte) sobre las filas
+      -- del grupo; como el divisor es constante dentro de la persona, es
+      -- COUNT(*)/total_reporte. Divisor de PERSONA, y SIN filtro de validez en
+      -- el numerador -- lo que teniamos dividia el grupo por si mismo.
+      CAST(100.0 * a.n_reportes / NULLIF(p.total_reporte, 0) AS DECIMAL(18,2)) AS tel001,
+      -- TEL006 (:940-945): ventana <= 3 (no 12) sobre tr_3 de PERSONA.
+      CAST(100.0 * a.cnt_3  / GREATEST(p.tr_3,  1) AS DECIMAL(18,2)) AS tel006,
+      -- TEL010 (:2972-2977): ventana <= 12 sobre tr_12 de PERSONA. No tiene
+      -- nada que ver con coincidencia_geo, que es lo que miraba antes.
+      CAST(100.0 * a.cnt_12 / GREATEST(p.tr_12, 1) AS DECIMAL(18,2)) AS tel010,
+      -- TEL017 (:2296-2298): cuota de reportes 'RES' sobre el total de ESTE
+      -- telefono. Antes miraba sector_financiero.
+      CAST(100.0 * a.cnt_res / NULLIF(a.total_reportes_telefono, 0) AS DECIMAL(18,2)) AS tel017,
+      -- TEL019 (:2300-2302): idem con 'LAB'. Antes miraba tipo_cuenta.
+      CAST(100.0 * a.cnt_lab / NULLIF(a.total_reportes_telefono, 0) AS DECIMAL(18,2)) AS tel019,
+      100 * a.geo_flag AS tel020,
+      -- TEL023 (:220): suscriptores de este telefono contra el maximo de la
+      -- persona. DIVERGENCIA ANOTADA: el legado usa Cod_Suscriptor de
+      -- CTA_TOTALES_PERSONAS_TMP3 (:1979), que es datashare; aqui va
+      -- id_buro_suscriptor, que es la cubeta de hash ya documentada como
+      -- ruido. La FORMA queda portada; el dato espera a F2.
+      CAST(100.0 * a.locals_023 / NULLIF(m.total_023, 0) AS DECIMAL(18,2)) AS tel023,
+      -- TEL025 (:714): (max de la persona - max de este telefono) / max de la
+      -- persona. Premia al telefono MAS RECIENTE. Antes era MIN/MAX dentro del
+      -- grupo, que no compara con nada.
+      CAST(100.0 * (CAST(p.max_meses_persona AS DECIMAL(18,6)) - a.max_meses_tel)
+           / NULLIF(p.max_meses_persona, 0) AS DECIMAL(18,2)) AS tel025
+    FROM base_agg a
+    JOIN persona_tel p ON p.id_buro_persona = a.id_buro_persona
+    JOIN persona_max m ON m.id_buro_persona = a.id_buro_persona
+  ),
+  -- Umbrales de categoria: ya coincidian con el legado uno a uno y NO se
+  -- tocan (:57-70, :1313-1325, :1773-1785, :2205-2217, :121-133, :856-868,
+  -- :765-778, :1482-1494, :413-421, :2402-2414, :168-180). Lo que estaba mal
+  -- eran los valores que entraban aqui.
   categorized AS (
-    SELECT cod_dw_persona_ubic, cod_pin_persona, id_buro_persona, direccion_fisica,
+    SELECT cod_dw_persona_ubic, cod_pin_persona, id_buro_persona, telefono, direccion_fisica,
       CASE WHEN tel001 < 8.33 THEN 1 WHEN tel001 < 18.18 THEN 2 WHEN tel001 < 40 THEN 3 WHEN tel001 >= 40 THEN 4 ELSE 0 END AS c01,
       CASE WHEN tel002 < 3 THEN 1 WHEN tel002 < 6 THEN 2 WHEN tel002 < 74 THEN 3 WHEN tel002 >= 74 THEN 4 ELSE 0 END AS c02,
       CASE WHEN tel003 < 39 THEN 1 WHEN tel003 < 65 THEN 2 WHEN tel003 < 119 THEN 3 WHEN tel003 >= 119 THEN 4 ELSE 0 END AS c03,
@@ -70,10 +137,10 @@ BEGIN
       CASE WHEN tel020 <= 0 THEN 1 WHEN tel020 > 0 THEN 4 ELSE 0 END AS c20,
       CASE WHEN tel023 < 33.33 THEN 1 WHEN tel023 < 50 THEN 2 WHEN tel023 < 75 THEN 3 WHEN tel023 >= 75 THEN 4 ELSE 0 END AS c23,
       CASE WHEN tel025 < 17.5 THEN 1 WHEN tel025 < 45.75 THEN 2 WHEN tel025 < 76.65 THEN 3 WHEN tel025 >= 76.65 THEN 4 ELSE 0 END AS c25
-    FROM base_agg
+    FROM base
   ),
   scored AS (
-    SELECT c.cod_dw_persona_ubic, c.cod_pin_persona, c.id_buro_persona, c.direccion_fisica,
+    SELECT c.cod_dw_persona_ubic, c.cod_pin_persona, c.id_buro_persona, c.telefono, c.direccion_fisica,
       COALESCE((CAST(c.c01 AS FLOAT)/4)*b01.valor_beta,0) + COALESCE((CAST(c.c02 AS FLOAT)/4)*b02.valor_beta,0)
       + COALESCE((CAST(c.c03 AS FLOAT)/4)*b03.valor_beta,0) + COALESCE((CAST(c.c06 AS FLOAT)/4)*b06.valor_beta,0)
       + COALESCE((CAST(c.c07 AS FLOAT)/4)*b07.valor_beta,0) + COALESCE((CAST(c.c10 AS FLOAT)/4)*b10.valor_beta,0)
@@ -139,7 +206,7 @@ BEGIN
     --      conserva el comportamiento donde la clave ya desempataba.
     ROW_NUMBER() OVER (PARTITION BY id_buro_persona
                        ORDER BY CAST(score AS DECIMAL(18,4)) DESC NULLS LAST,
-                                direccion_fisica,
+                                telefono,
                                 cod_dw_persona_ubic)
   FROM scored;
 END;

@@ -292,6 +292,30 @@ BEGIN
     c.cod_pin_persona,
     c.id_buro_persona,
     COALESCE(rref.dir_ref, c.texto_ubicacion_vinculo, c.valor_contacto) AS direccion_fisica,
+    -- SLCOPRBA-1355: EL TELEFONO ES LA LLAVE DEL CANAL, NO LA DIRECCION.
+    --
+    --   En el legado la columna se llama Direccion_Fisica pero contiene el
+    --   numero: REC_STAGE.Calculo_Meses2 (Caracteristicas.txt:2252-2262)
+    --   agrupa por (Cod_Pin_Persona, Id_Buro_Persona, Direccion_Fisica) y al
+    --   resultado lo llama Total_Reportes_Telefono. EMA lo hace explicito con
+    --   un alias, "TML.Direccion_Fisica as Email" (:2764): es el nombre de
+    --   columna de la vista de origen reutilizado para el dato de contacto de
+    --   cada canal.
+    --
+    --   direccion_fisica se CONSERVA: la sigue usando el desempate del
+    --   ranking, y sacarla cambiaria el orden sin motivo.
+    c.valor_contacto AS telefono,
+    -- Tipo de ubicacion del reporte, para CO01TEL017 ('RES') y CO01TEL019
+    -- ('LAB'), que el legado toma de TMP_DIRECCIONES_TEMP_TF (:2085-2091).
+    --
+    --   DIVERGENCIA ANOTADA: el legado une por
+    --   (Cod_DW_Reporte_Persona_Ubic, Cod_DW_TIpo_Ubicacion_Dir), es decir el
+    --   tipo DE CADA FILA DE REPORTE. Nuestras filas de contacto no llevan
+    --   tipo propio -- v_xpm_contacto_canal sale de
+    --   location.val.contactinformations y no lo expone -- asi que se toma el
+    --   de la RPU de la que cuelga el contacto. El GROUP BY del subselect
+    --   garantiza que no haya fan-out si una RPU trae varias filas.
+    COALESCE(tud.descripcion_tipo_ubicacion_dir, '') AS tipo_ubicacion,
     c.cod_dane_ciudad,
     CASE
       WHEN c.valor_contacto ~ '^[0-9]+$' AND LENGTH(TRIM(c.valor_contacto)) >= 7 THEN 'VALIDA'
@@ -310,6 +334,15 @@ BEGIN
     ON tcat.prefijo_operador = LEFT(LTRIM(c.valor_contacto, '0'), 3)
   LEFT JOIN bdm_tempo.stg_rpu_dir_ref rref
     ON rref.cod_dw_persona_ubic = c.cod_dw_persona_ubic
+  LEFT JOIN (
+    SELECT cd.cod_dw_persona_ubic,
+           MAX(cd.cod_dw_tipo_ubicacion_dir) AS cod_dw_tipo_ubicacion_dir
+    FROM bdm_tempo.stg_contacto_direccion_rpu cd
+    GROUP BY 1
+  ) ctu
+    ON ctu.cod_dw_persona_ubic = c.cod_dw_persona_ubic
+  LEFT JOIN bdm_datos.tipo_ubicacion_dir tud
+    ON tud.cod_dw_tipo_ubicacion_dir = ctu.cod_dw_tipo_ubicacion_dir
   WHERE c.contact_type IN ('4', '5', '8')
     AND c.valor_contacto IS NOT NULL;
 
