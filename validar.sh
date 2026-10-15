@@ -15,7 +15,7 @@ set -uo pipefail
 cd "$(dirname "$0")" || exit 1
 
 BASE="${1:-HEAD}"
-ROOT="deploy/redshift"
+ROOT="deploy/redshift/SLCOPRBA-1353"
 FAIL=0
 WARN=0
 
