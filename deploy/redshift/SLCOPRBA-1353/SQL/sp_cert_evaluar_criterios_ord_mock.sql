@@ -139,7 +139,7 @@ BEGIN
                 CASE WHEN MAX(CASE WHEN s.lugar = 1 THEN s.score END) = MAX(s.score)
                      THEN 1 ELSE 0 END          AS cabeza_ok
            FROM bdm_tempo.stg_cert_ord_base s
-          WHERE s.id_buro_persona BETWEEN 9800000 AND 9909999
+          WHERE s.id_buro_persona BETWEEN 9800000 AND 9999999
           GROUP BY 1, 2, 3 ) g
   GROUP BY 1, 2;
 
@@ -700,7 +700,17 @@ BEGIN
                   SELECT 9860000, 'EMA',  56.5375 UNION ALL
                   SELECT 9870000, 'DIR',  45.1613 UNION ALL
                   SELECT 9890000, 'TEL', 259.1687 UNION ALL
-                  SELECT 9900000, 'TEL', 323.5534 ) m
+                  SELECT 9900000, 'TEL', 323.5534 UNION ALL
+                  -- SLCOPRBA-1355, segunda tanda. Los cinco medidos con
+                  -- delta_min = delta_max en las 1000 replicas y VERIFICADOS
+                  -- A MANO contra el movimiento de categorias, que es lo que
+                  -- distingue una prueba de una foto: medir y aceptar lo que
+                  -- salga no probaria nada.
+                  SELECT 9910000, 'EMA', 240.9718 UNION ALL
+                  SELECT 9920000, 'EMA',  85.5702 UNION ALL
+                  SELECT 9930000, 'EMA', 158.1521 UNION ALL
+                  SELECT 9940000, 'CEL',  50.8299 UNION ALL
+                  SELECT 9950000, 'CEL', 125.5186 ) m
            LEFT JOIN bdm_tempo.stg_cert_ord_arq a
                   ON a.banda = m.banda AND a.canal = m.canal ) x
   CROSS JOIN ( SELECT CAST('ARQ 80 y 82 son empates a proposito (delta 0); '
@@ -715,8 +725,16 @@ BEGIN
                         || 'da portafolio IN y este colapsa a Sector FI: 80.64516129/3 mas '
                         || '54.83870968/3; ARQ 89 y 90 son deltas compuestos del canal TEL. '
                         || 'ARQ 88 NO aparece aqui: DIR009 es por persona y su delta dentro '
-                        || 'de la persona es cero por definicion'
-                        AS VARCHAR(400)) AS nota ) x2
+                        || 'de la persona es cero por definicion. '
+                        || 'ARQ 91 mueve EMA014 de 1 a 4 (bandas 8.33/41.18/85) y arrastra '
+                        || 'EMA010 y EMA023; ARQ 92 mueve EMA015 y EMA016, las dos binarias, '
+                        || 'en sentidos opuestos; ARQ 93 mueve EMA017, que TOPA EN 3 y divide '
+                        || 'entre 4; ARQ 94 mueve CEL020 de 2 a 3 (203.31950210/4) y es el '
+                        || 'unico NO compuesto: con la formula vieja, de filas de reporte, '
+                        || 'su delta seria CERO; ARQ 95 mueve CEL023 por el filtro de gestion '
+                        || 'y arrastra CEL003, CEL013 y CEL014, porque la validez viaja '
+                        || 'pegada a la fecha'
+                        AS VARCHAR(900)) AS nota ) x2
   GROUP BY x2.nota;
 
   -- F4-DIR-05. Los umbrales de categorizacion se aplican. El ARQ 81 tiene dos
