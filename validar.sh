@@ -192,6 +192,29 @@ else
   fi
 fi
 
+# ------------------------------------------------------------
+# 8. Palabras reservadas de Redshift usadas como identificador
+#
+# EL PUNTO CIEGO DEL BANCO. PostgreSQL acepta varias palabras que Redshift
+# reserva, de modo que una corrida local verde no dice nada sobre esto.
+# Lo pago el job DEV/DATABASE #366: un alias "AS delta" en el CTAS de
+# bdm_tempo.stg_cert_ord_arq tumbo el deploy de pgm en el archivo 73 de 74.
+#   42601: syntax error at or near "delta" in context "(g.delta"
+# DELTA viene de los codificados DELTA / DELTA32K.
+# ------------------------------------------------------------
+echo "8) palabras reservadas de Redshift como identificador  [REDSHIFT:112]"
+RESERVADAS='delta|delta32k|raw|encode|top|tag|percent|parallel|offline|recover|sysdate|distkey|sortkey|credentials|lzo|lzop|bytedict|runlength|text255|text32k|aes128|aes256|mostly13|mostly16|mostly32'
+RES_HIT=$(grep -rniE "\\bAS[[:space:]]+($RESERVADAS)[[:space:]]*(,|$)" "$ROOT/SQL" "$ROOT/RevSQL" 2>/dev/null \
+          | grep -viE 'AS[[:space:]]+(varchar|integer|decimal|date|bigint|float|timestamp)' || true)
+RES_COL=$(grep -rniE "^[[:space:]]+($RESERVADAS)[[:space:]]+(VARCHAR|INTEGER|BIGINT|DECIMAL|DATE|FLOAT|SMALLINT|TIMESTAMP)" \
+          "$ROOT/SQL" "$ROOT/RevSQL" 2>/dev/null || true)
+if [ -n "$RES_HIT$RES_COL" ]; then
+  bad "reservadas de Redshift usadas como identificador:"
+  printf '%s\n%s\n' "$RES_HIT" "$RES_COL" | grep -v '^$' | head -10 | sed 's|^|        |'
+else
+  ok "ninguna reservada usada como alias ni como columna"
+fi
+
 echo
 if [ $FAIL -ne 0 ]; then echo "RESULTADO: FALLA"; exit 1; fi
 [ $WARN -ne 0 ] && echo "RESULTADO: OK (con avisos)" || echo "RESULTADO: OK"

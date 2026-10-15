@@ -138,8 +138,20 @@ conserva su nombre en `RevSQL/`.
 - El `CAST` de la primera rama de un `UNION ALL` fija el tipo del nodo.
 - **`ORDER BY ... DESC` pone `NULLS FIRST` por defecto** (Teradata hace lo
   contrario). Escribir `NULLS LAST` explicito.
-- `CREATE OR REPLACE PROCEDURE` **no compila el cuerpo**: los errores salen en
-  la primera invocacion.
+- **`DELTA` es palabra reservada en Redshift** -- viene de los codificados
+  `DELTA` / `DELTA32K` -- **y en PostgreSQL no lo es**. Un `AS delta` pasa el
+  banco entero sin una queja y Redshift lo rechaza al desplegar:
+  `42601: syntax error at or near "delta" in context "(g.delta"`. Tumbo el job
+  DEV/DATABASE #366 en el archivo 73 de 74. Es el punto ciego del banco en
+  estado puro, y por eso `validar.sh` lleva ahora el chequeo 8, que barre la
+  familia entera (`RAW`, `ENCODE`, `TOP`, `TAG`, `PERCENT`, `SYSDATE`,
+  `DISTKEY`, `SORTKEY`, `LZO`, `BYTEDICT`, `MOSTLY13`...).
+- `CREATE OR REPLACE PROCEDURE` **difiere la SEMANTICA, no la SINTAXIS.**
+  *(Esta linea decia antes, en redondo, que "no compila el cuerpo: los errores
+  salen en la primera invocacion". El job #366 lo desmiente a medias.)*
+  Una tabla o columna que no existe si espera a la primera invocacion; un
+  error de sintaxis salta en el propio `CREATE`. La consecuencia buena: un
+  deploy verde de `pgm` SI garantiza que los 74 cuerpos parsean en Redshift.
 - **Un literal mas largo que su columna es un `[REDSHIFT:112]`**, y
   `CREATE TABLE IF NOT EXISTS` lo esconde: si la tabla ya existe con la columna
   ancha de una version anterior, el `INSERT` pasa en DEV y falla en el primer

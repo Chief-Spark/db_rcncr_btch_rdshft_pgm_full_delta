@@ -123,14 +123,19 @@ BEGIN
          COUNT(*)            AS personas,
          MIN(g.n_filas)      AS filas_min,
          MAX(g.n_filas)      AS filas_max,
-         MIN(g.delta)        AS delta_min,
-         MAX(g.delta)        AS delta_max,
+         MIN(g.delta_score)  AS delta_min,
+         MAX(g.delta_score)  AS delta_max,
          SUM(g.cabeza_ok)    AS cabeza_ok
   FROM ( SELECT CAST(s.id_buro_persona / 10000 AS INTEGER) * 10000 AS banda,
                 s.id_buro_persona,
                 s.canal,
                 COUNT(*)                        AS n_filas,
-                MAX(s.score) - MIN(s.score)     AS delta,
+                -- delta_score y no 'delta': DELTA ES PALABRA RESERVADA EN
+                -- REDSHIFT (viene de los codificados DELTA / DELTA32K) y en
+                -- PostgreSQL no lo es, de modo que el banco lo acepto toda
+                -- la sesion y Redshift lo rechazo en el deploy del job #366:
+                --   42601: syntax error at or near "delta" in context "(g.delta"
+                MAX(s.score) - MIN(s.score)     AS delta_score,
                 CASE WHEN MAX(CASE WHEN s.lugar = 1 THEN s.score END) = MAX(s.score)
                      THEN 1 ELSE 0 END          AS cabeza_ok
            FROM bdm_tempo.stg_cert_ord_base s
