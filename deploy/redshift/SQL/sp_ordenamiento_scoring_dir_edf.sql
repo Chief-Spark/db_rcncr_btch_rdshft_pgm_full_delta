@@ -35,12 +35,17 @@ BEGIN
       id_buro_persona,
       direccion_fisica,
       MAX(tipo_ubicacion) AS tipo_ubicacion,
-      -- DIR001IN (:2118): BLOQUEADA. El legado restringe el MIN a los
-      -- reportes con Portafolio_Nuevo = 'IN' (:2123), columna que viene de
-      -- CTA_TOTALES_PERSONAS_TMP3 (:2647, :2653-2654) y no tenemos. Sin ese
-      -- filtro esto es el MIN de todos los reportes: la forma correcta pero
-      -- sobre el universo equivocado.
-      MIN(meses_reporte) AS dir001in,
+      -- DIR001IN (Caracteristicas.txt:172, flat 2112-2127): DESBLOQUEADA.
+      -- El legado lo construye con un WHERE duro sobre todo el statement,
+      -- "WHERE PIDR.portafolio_nuevo = 'IN'", y luego lo vuelve a unir por
+      -- LEFT JOIN (:241), de modo que una direccion sin ningun reporte 'IN'
+      -- queda en NULL -> categoria 1. El MIN(CASE...) de aqui da exactamente
+      -- eso: NULL cuando ningun reporte del grupo cumple.
+      --   OJO CON EL NOMBRE: Meses_Reporte cuenta hacia atras, asi que el
+      --   MIN es el reporte MAS RECIENTE, no el primero. El enunciado del RF
+      --   dice "primer reporte" y se equivoca; el MAX es DIR002TO.
+      MIN(CASE WHEN portafolio_nuevo = 'IN' AND direccion_fisica <> ''
+               THEN meses_reporte ELSE NULL END) AS dir001in,
       -- DIR002TO (Caracteristicas.txt:2916): MAX de meses_reporte de ESTA
       -- direccion, con guarda de texto vacio. Antes era COUNT(*), que es otra
       -- magnitud: un conteo, no una recencia. No estaba en la lista de las
@@ -58,7 +63,17 @@ BEGIN
       -- categoria. Sin Portafolio_Nuevo no se puede filtrar; la ventana de
       -- 12 que hay aqui tampoco es la del legado, pero cambiarla sola
       -- empeoraria el numero en vez de arreglarlo.
-      SUM(CASE WHEN meses_reporte <= 12 THEN 1 ELSE 0 END) AS dir004ro,
+      -- DIR004RO (Caracteristicas.txt:244, flat 2911-2925): DOS defectos a
+      -- la vez, no uno. Le faltaba el predicado Portafolio_Nuevo = 'RO' y
+      -- ademas su ventana era <= 12 meses cuando el legado usa <= 3:
+      --   SUM(CASE WHEN Direccion_Fisica <> '' AND Portafolio_Nuevo = 'RO'
+      --            THEN CASE WHEN Meses_Reporte <= 3 THEN 1 ELSE 0 END
+      --            ELSE NULL END)
+      -- El ELSE NULL es del legado y no es cosmetico: hace que una direccion
+      -- sin ningun reporte 'RO' de NULL, no 0, y caiga a la categoria 1.
+      CAST(SUM(CASE WHEN direccion_fisica <> '' AND portafolio_nuevo = 'RO'
+                    THEN (CASE WHEN meses_reporte <= 3 THEN 1 ELSE 0 END)
+                    ELSE NULL END) AS DECIMAL(18,2)) AS dir004ro,
       -- DIR007TO (:2919): ventana de 24 meses, no de 6, y con guarda de texto
       -- vacio que devuelve NULL (no 0) a la direccion vacia -- la categoria
       -- distingue NULL de 0 (:2664-2665), asi que la diferencia puntua.
@@ -77,10 +92,13 @@ BEGIN
       --   datashare. Nuestra bandera 0/1 no distingue 'FI' de 'OT' ni de las
       --   otras tres ('CO','CC','RE'). La FORMA queda portada; cuando llegue
       --   el Sector solo cambia el predicado.
-      SUM(CASE WHEN sector_financiero = 1 AND direccion_fisica <> ''
+      -- El predicado ya es el Sector real del legado {CO,CC,RE,FI,OT}
+      -- (:391-396), no la bandera 0/1 que no distinguia 'FI' de 'OT' y que
+      -- ademas colgaba de una cubeta de hash.
+      SUM(CASE WHEN sector = 'FI' AND direccion_fisica <> ''
                THEN (CASE WHEN meses_reporte <= 6 THEN 1 ELSE 0 END)
                ELSE NULL END) AS cnt_fi_6,
-      SUM(CASE WHEN sector_financiero = 0 AND direccion_fisica <> ''
+      SUM(CASE WHEN sector = 'OT' AND direccion_fisica <> ''
                THEN (CASE WHEN meses_reporte > 24 THEN 1 ELSE 0 END)
                ELSE NULL END) AS cnt_ot_24,
       -- DIR017 (:1795): conteo de reportes de tipo 'LAB' de esta direccion.
@@ -100,10 +118,13 @@ BEGIN
       -- DIR034FI (:2589-2590): BLOQUEADA, y no es una cuota. El legado suma
       -- el IMPORTE CO00END005 de Insumo_Caracteristica (:2594-2595) para las
       -- cuentas con Sector = 'FI', excluyendo los centinelas
-      -- ('-1','-2','-3','-4','-88','-99'). No tenemos ni el importe ni el
-      -- Sector. Lo de abajo es una invencion nuestra que se deja intacta
-      -- para no mover el tablero sin motivo; se cambia cuando llegue F2.
-      CAST(100.0 * SUM(CASE WHEN sector_financiero = 1 AND meses_reporte <= 12 THEN 1 ELSE 0 END)
+      -- ('-1','-2','-3','-4','-88','-99'). El Sector YA lo tenemos y el
+      -- predicado de abajo ya es el real; lo que sigue faltando es el
+      -- IMPORTE, que no es un conteo. Insumo_Caracteristica no es una
+      -- peticion a nadie: se genera dentro del proceso y depende de migrar
+      -- la Fase 2. Hasta entonces el numerador sigue siendo invencion
+      -- nuestra y se deja intacto para no mover el tablero sin motivo.
+      CAST(100.0 * SUM(CASE WHEN sector = 'FI' AND meses_reporte <= 12 THEN 1 ELSE 0 END)
         / NULLIF(SUM(CASE WHEN meses_reporte <= 12 THEN 1 ELSE 0 END), 0) AS DECIMAL(18,2)) AS dir034fi,
       -- DIR057 (:485-487): conteo de reportes no vacios de ESTA direccion.
       -- Estaba a grano de persona (numero de direcciones distintas), que es

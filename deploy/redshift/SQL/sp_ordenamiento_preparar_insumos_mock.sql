@@ -237,6 +237,7 @@ BEGIN
   SELECT
     rep.cod_dw_persona_ubic,
     rep.id_buro_suscriptor,
+    rep.cod_suscriptor,
     rep.fecha_reporte,
     rpu.id_buro_persona
   FROM bdm_tempo.v_mock_reporte_relacion_persona_ubica rep
@@ -307,6 +308,31 @@ BEGIN
     rep.fecha_reporte,
     GREATEST(DATEDIFF(month, rep.fecha_reporte, CURRENT_DATE), 0) AS meses_reporte,
     COALESCE(sf.sector_financiero, 0) AS sector_financiero,
+    -- SLCOPRBA-1355: Portafolio_Nuevo y Sector del legado
+    -- (PRO_ORD_CTA_TOTALES_PERSONAS_2.sql:378-396).
+    --   El ORDEN de las ramas es parte de la definicion: RO e IN por prefijo
+    --   van ANTES de la lista VE, y el resto de prefijos despues. Por eso el
+    --   codigo 050058, que esta en la lista VE del legado, clasifica 'IN':
+    --   es un condicional muerto del legado y se porta tal cual.
+    --   La comparacion es NUMERICA, no de texto: en el legado los literales
+    --   van sin comillas y Teradata coacciona, de modo que los ceros a la
+    --   izquierda son irrelevantes. Un codigo no numerico cae a 'OT'.
+    --   La rama 'CO' no se construye: exige las banderas de comportamiento
+    --   de cuenta de la Fase 2. Una cuenta que seria 'CO' cae a su prefijo.
+    CASE
+      WHEN pp_ro.portafolio IS NOT NULL THEN pp_ro.portafolio
+      WHEN pve.cod_suscriptor IS NOT NULL THEN 'VE'
+      WHEN pp.portafolio IS NOT NULL THEN pp.portafolio
+      ELSE 'OT'
+    END AS portafolio_nuevo,
+    CASE
+      WHEN pp_ro.portafolio IS NOT NULL AND pp_ro.portafolio IN ('RO','IN') THEN 'FI'
+      WHEN pve.cod_suscriptor IS NOT NULL THEN 'FI'
+      WHEN pp.portafolio IN ('CC')                THEN 'CC'
+      WHEN pp.portafolio IN ('RC','RS')           THEN 'RE'
+      WHEN pp.portafolio IN ('HP','CP','FR')      THEN 'FI'
+      ELSE 'OT'
+    END AS sector,
     dir_cnt.conteo_direcciones
   FROM bdm_tempo.stg_rpu_post_unificacion rpu
   INNER JOIN bdm_tempo.stg_contacto_direccion_rpu cd
@@ -319,6 +345,22 @@ BEGIN
     ON sf.id_buro_suscriptor = rep.id_buro_suscriptor
   INNER JOIN bdm_tempo.stg_dir_conteo_persona dir_cnt
     ON dir_cnt.id_buro_persona = rpu.id_buro_persona
+  LEFT JOIN bdm_datos.catalogo_portafolio_prefijo pp_ro
+    ON pp_ro.prefijo = LEFT(LPAD(TRIM(rep.cod_suscriptor), 6, '0'), 2)
+   AND pp_ro.portafolio IN ('RO','IN')
+  -- La comparacion es numerica porque en el legado los literales del CASE
+  -- van sin comillas y Teradata coacciona: '040003' y 40003 son el mismo
+  -- codigo. Se normaliza con LPAD a seis en vez de castear, que es lo que
+  -- evita el desbordamiento del job #293 -- un codigo de mas de 18 digitos
+  -- reventaria un CAST a BIGINT y aqui simplemente no casa.
+  LEFT JOIN bdm_datos.catalogo_portafolio_ve pve
+    ON LPAD(TRIM(rep.cod_suscriptor), 6, '0') = LPAD(TRIM(pve.cod_suscriptor), 6, '0')
+   AND TRIM(rep.cod_suscriptor) ~ '^[0-9]+$'
+   AND LENGTH(TRIM(rep.cod_suscriptor)) <= 6
+  LEFT JOIN bdm_datos.catalogo_portafolio_prefijo pp
+    ON pp.prefijo = LEFT(LPAD(TRIM(rep.cod_suscriptor), 6, '0'), 2)
+   AND pp.portafolio NOT IN ('RO','IN')
+
   WHERE COALESCE(rpu.ind_unificacion, 0) <> 1;
 
   ANALYZE bdm_tempo.stg_insumo_direccion;
