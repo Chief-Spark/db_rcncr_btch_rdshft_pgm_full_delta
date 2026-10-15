@@ -134,7 +134,7 @@ BEGIN
                 CASE WHEN MAX(CASE WHEN s.lugar = 1 THEN s.score END) = MAX(s.score)
                      THEN 1 ELSE 0 END          AS cabeza_ok
            FROM bdm_tempo.stg_cert_ord_base s
-          WHERE s.id_buro_persona BETWEEN 9800000 AND 9869999
+          WHERE s.id_buro_persona BETWEEN 9800000 AND 9909999
           GROUP BY 1, 2, 3 ) g
   GROUP BY 1, 2;
 
@@ -692,7 +692,10 @@ BEGIN
                   SELECT 9830000, 'CEL',  38.3817 UNION ALL
                   SELECT 9840000, 'EMA', 100.8506 UNION ALL
                   SELECT 9850000, 'CEL',  93.3610 UNION ALL
-                  SELECT 9860000, 'EMA',  56.5375 ) m
+                  SELECT 9860000, 'EMA',  56.5375 UNION ALL
+                  SELECT 9870000, 'DIR',  45.1613 UNION ALL
+                  SELECT 9890000, 'TEL', 259.1687 UNION ALL
+                  SELECT 9900000, 'TEL', 323.5534 ) m
            LEFT JOIN bdm_tempo.stg_cert_ord_arq a
                   ON a.banda = m.banda AND a.canal = m.canal ) x
   CROSS JOIN ( SELECT CAST('ARQ 80 y 82 son empates a proposito (delta 0); '
@@ -702,7 +705,12 @@ BEGIN
                         || 'ARQ 84 mueve EMA024 de 1 a 4 (134.46747820/4); '
                         || 'ARQ 85 mueve CEL019 de 1 a 3 (186.72199170/4), dos celulares '
                         || 'de igual valor de operador que solo difieren en el tipo de cuenta; '
-                        || 'ARQ 86 mueve EMA021 de 1 a 3 (113.07492490/4)'
+                        || 'ARQ 86 mueve EMA021 de 1 a 3 (113.07492490/4); '
+                        || 'ARQ 87 mueve DIR001IN y DIR010FI a la vez, porque el prefijo 05 '
+                        || 'da portafolio IN y este colapsa a Sector FI: 80.64516129/3 mas '
+                        || '54.83870968/3; ARQ 89 y 90 son deltas compuestos del canal TEL. '
+                        || 'ARQ 88 NO aparece aqui: DIR009 es por persona y su delta dentro '
+                        || 'de la persona es cero por definicion'
                         AS VARCHAR(400)) AS nota ) x2
   GROUP BY x2.nota;
 
@@ -837,6 +845,158 @@ BEGIN
   FROM  bdm_tempo.stg_cert_ord_arq a
   WHERE a.banda = 9850000 AND a.canal = 'CEL';
 
+  -- F4-DIR-02 (MEDIDO, SLCOPRBA-1355). DIR001IN sobre el ARQ 87.
+  --
+  -- El enunciado del RF la llama "meses desde el primer reporte" y se
+  -- equivoca dos veces: Meses_Reporte cuenta hacia atras, de modo que el MIN
+  -- del legado es el reporte MAS RECIENTE (el MAX es DIR002TO); y el MIN va
+  -- restringido con un WHERE duro a los reportes cuyo suscriptor tiene
+  -- Portafolio_Nuevo = 'IN' (Caracteristicas.txt:172).
+  --
+  -- EL DELTA ES COMPUESTO Y SE DESCOMPONE EXACTO. El prefijo 05 da
+  -- portafolio 'IN', y 'IN' colapsa a Sector 'FI' (:391-396), asi que la
+  -- direccion k=1 mueve DOS caracteristicas:
+  --   DIR001IN  categoria 2 contra 1 -> (2-1)/3 * 80.64516129 = 26.8817
+  --   DIR010FI  categoria 2 contra 1 -> (2-1)/3 * 54.83870968 = 18.2796
+  --                                                     suma = 45.1613
+  -- DIR013OT no se mueve: ninguna de las dos direcciones es Sector 'OT'
+  -- ('IN' va a 'FI' y 'RS' va a 'RE'), de modo que las dos quedan en NULL.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F4-DIR-02',
+         CASE WHEN COUNT(*) = 0                                   THEN 'SIN_DATO'
+              WHEN MAX(a.filas_min) <> 2 OR MAX(a.filas_max) <> 2 THEN 'FAILED'
+              WHEN ABS(MAX(a.delta_min) - 45.1613) > 0.0002       THEN 'FAILED'
+              WHEN ABS(MAX(a.delta_max) - 45.1613) > 0.0002       THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'ARQ 87 (DIR, suscriptor 050001 contra 080001): personas='
+           || CAST(COALESCE(MAX(a.personas), 0) AS VARCHAR)
+           || ', delta observado='
+           || COALESCE(CAST(MAX(a.delta_min) AS VARCHAR), 'sin filas')
+           || ' (esperado 45.1613 = DIR001IN 80.64516129/3 mas DIR010FI '
+           || '54.83870968/3; el prefijo 05 da portafolio IN y este colapsa '
+           || 'a Sector FI, de modo que mueve las dos a la vez)',
+         GETDATE(), CURRENT_USER
+  FROM  bdm_tempo.stg_cert_ord_arq a
+  WHERE a.banda = 9870000 AND a.canal = 'DIR';
+
+  -- F4-DIR-03 (MEDIDO, SLCOPRBA-1355). DIR009 sobre el ARQ 88.
+  --
+  -- DIR009 es A GRANO DE PERSONA: el join del legado (Caracteristicas.txt:201)
+  -- es solo por Id_Buro_Persona y reparte el MISMO valor a todas las
+  -- direcciones de esa persona. Por eso su delta DENTRO de la persona es
+  -- cero por definicion y este criterio NO puede usar stg_cert_ord_arq:
+  -- compara DOS PERSONAS que solo difieren en cuantas de sus direcciones
+  -- son de correspondencia.
+  --
+  --   persona par   una direccion CRR  -> DIR009 = 1 -> categoria 2
+  --   persona impar las dos CRR        -> DIR009 = 2 -> categoria 3
+  --   (umbrales :42, "IS NULL -> 1, <= 1 -> 2, ELSE 3")
+  --
+  -- El beta es NEGATIVO (-51.61290323), de modo que la persona impar
+  -- puntua MENOS: mas direcciones de correspondencia penalizan.
+  --   esperado = (3-2)/3 * 51.61290323 = 17.2043, con el par por encima.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F4-DIR-03',
+         CASE WHEN COUNT(*) = 0                             THEN 'SIN_DATO'
+              WHEN MIN(t.par) <> MAX(t.par)                 THEN 'FAILED'
+              WHEN MIN(t.impar) <> MAX(t.impar)             THEN 'FAILED'
+              WHEN ABS(MAX(t.par) - MAX(t.impar) - 17.2043) > 0.0002 THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'ARQ 88 (DIR, una direccion CRR contra dos): score de la persona par='
+           || COALESCE(CAST(MAX(t.par) AS VARCHAR), 'sin filas')
+           || ', de la impar=' || COALESCE(CAST(MAX(t.impar) AS VARCHAR), 'sin filas')
+           || ', diferencia=' || COALESCE(CAST(MAX(t.par) - MAX(t.impar) AS VARCHAR), 'n/a')
+           || ' (esperado 17.2043 = (3-2)/3 * 51.61290323, con la IMPAR por '
+           || 'DEBAJO porque el beta de DIR009 es negativo). DIR009 es por '
+           || 'persona, asi que se mide entre personas y no entre direcciones',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT MAX(CASE WHEN MOD(s.id_buro_persona, 2) = 0 THEN s.score END) AS par,
+                MAX(CASE WHEN MOD(s.id_buro_persona, 2) = 1 THEN s.score END) AS impar
+           FROM bdm_tempo.stg_cert_ord_base s
+          WHERE s.id_buro_persona BETWEEN 9880000 AND 9880999
+            AND s.canal = 'DIR' ) t;
+
+  -- F4-TEL-02 (MEDIDO, SLCOPRBA-1355). TEL010 sobre el ARQ 89.
+  --
+  -- TEL010 es la cuota de los reportes de la persona de los ULTIMOS 12 MESES
+  -- que son de ESTE telefono, sobre Total_Reportes_12 (Caracteristicas.txt:249).
+  -- NO mira la coincidencia geografica: esa columna no aparece ni una vez en
+  -- el statement, y los umbrales 20/50/70 de su _cat (:77) confirman la
+  -- lectura de porcentaje y descartan la de bandera.
+  --
+  --   telefono A  3 de los 4 reportes -> TEL010 = 75 -> categoria 4
+  --   telefono B  1 de los 4          -> TEL010 = 25 -> categoria 2
+  --
+  -- EL DELTA ES COMPUESTO A PROPOSITO, y no se puede evitar: para cambiar la
+  -- cuota de la ventana <= 12 hay que cambiar cuantos reportes caen dentro, y
+  -- eso mueve tambien las cuotas de las demas ventanas del canal. Por eso el
+  -- criterio exige DOS cosas: el delta exacto y, lo que de verdad prueba la
+  -- caracteristica, que el telefono con mas cuota se lleve el lugar 1.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F4-TEL-02',
+         CASE WHEN COUNT(*) = 0                                   THEN 'SIN_DATO'
+              WHEN MAX(a.filas_min) <> 2 OR MAX(a.filas_max) <> 2 THEN 'FAILED'
+              WHEN MAX(a.cabeza_ok) <> MAX(a.personas)            THEN 'FAILED'
+              WHEN ABS(MAX(a.delta_min) - 259.1687) > 0.0002      THEN 'FAILED'
+              WHEN ABS(MAX(a.delta_max) - 259.1687) > 0.0002      THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'ARQ 89 (TEL, 3 reportes de un telefono contra 1 del otro dentro de '
+           || '12 meses): personas=' || CAST(COALESCE(MAX(a.personas), 0) AS VARCHAR)
+           || ', con el de mayor cuota en el lugar 1='
+           || CAST(COALESCE(MAX(a.cabeza_ok), 0) AS VARCHAR)
+           || ', delta observado='
+           || COALESCE(CAST(MAX(a.delta_min) AS VARCHAR), 'sin filas')
+           || ' (esperado 259.1687, compuesto: TEL010 pasa de categoria 2 a 4 '
+           || 'y con el se mueven las demas cuotas por ventana del canal, que '
+           || 'es inevitable porque comparten el numero de reportes)',
+         GETDATE(), CURRENT_USER
+  FROM  bdm_tempo.stg_cert_ord_arq a
+  WHERE a.banda = 9890000 AND a.canal = 'TEL';
+
+  -- F4-TEL-04 (MEDIDO, SLCOPRBA-1355). El guardia de validez, ARQ 90.
+  --
+  -- Nuestro insumo deriva descripcion_gestion del propio numero
+  -- (preparar_insumos_edf.sql): 'VALIDA' si es todo digitos y mide 7 o mas.
+  -- Los cinco contadores de TEL ya lo excluyen (scoring_tel_edf.sql:37, 41,
+  -- 57, 72, 74), al contrario de lo que afirmaba el motivo anterior.
+  --
+  --   telefono A  '6033333333', 10 digitos -> VALIDA
+  --   telefono B  '60444',       5 digitos -> NO VALIDA
+  --
+  -- DIVERGENCIA QUE ESTE CRITERIO CERTIFICA, no paridad. En el legado el
+  -- filtro es CODIGO MUERTO: Descripcion_Gestion_Registro se cablea al
+  -- literal 'Valida' (Prc_Ordenamiento2.sql:1295) y el WHERE de :1298
+  -- excluye fisicamente cualquier otra gestion, de modo que 'NO VALIDA' no
+  -- puede existir y los 15 predicados que lo filtran son siempre ciertos.
+  -- El legado excluye AGUAS ARRIBA por catalogo de gestion; nosotros
+  -- sintetizamos la validez del numero. Misma intencion, distinta definicion
+  -- de "invalido". Para la bitacora G-03.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F4-TEL-04',
+         CASE WHEN COUNT(*) = 0                                   THEN 'SIN_DATO'
+              WHEN MAX(a.filas_min) <> 2 OR MAX(a.filas_max) <> 2 THEN 'FAILED'
+              WHEN MAX(a.cabeza_ok) <> MAX(a.personas)            THEN 'FAILED'
+              WHEN ABS(MAX(a.delta_min) - 323.5534) > 0.0002      THEN 'FAILED'
+              WHEN ABS(MAX(a.delta_max) - 323.5534) > 0.0002      THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'ARQ 90 (TEL, numero de 10 digitos contra uno de 5): personas='
+           || CAST(COALESCE(MAX(a.personas), 0) AS VARCHAR)
+           || ', con el VALIDA en el lugar 1='
+           || CAST(COALESCE(MAX(a.cabeza_ok), 0) AS VARCHAR)
+           || ', delta observado='
+           || COALESCE(CAST(MAX(a.delta_min) AS VARCHAR), 'sin filas')
+           || ' (esperado 323.5534). CERTIFICA UNA DIVERGENCIA, no paridad: '
+           || 'en el legado este filtro es codigo muerto porque '
+           || 'Descripcion_Gestion_Registro se cablea al literal Valida '
+           || '(Prc_Ordenamiento2.sql:1295) y NO VALIDA no puede existir',
+         GETDATE(), CURRENT_USER
+  FROM  bdm_tempo.stg_cert_ord_arq a
+  WHERE a.banda = 9900000 AND a.canal = 'TEL';
+
   -- ============================================================
   -- ESTADOS FIJOS: lo que no se afirma con una consulta
   -- Tabla de mapeo literal, patron del tablero de Unificacion. El FROM es
@@ -869,16 +1029,23 @@ BEGIN
            'El RF dice EMA025 = ratio de recencia (min_meses/max_meses*100). EL LEGADO: EMA025 es la LONGITUD DEL BUZON, bucketizada en campana con pico en 9-12 caracteres (Caracteristicas.txt:170 y :91; CHAR() en Teradata devuelve longitud). Tampoco entra en la suma. Decidir. Bitacora G-03.' UNION ALL
 
     -- --- pendientes de la matriz mock de Ordenamiento (E3) ---
-    SELECT 'F4-DIR-02', 'SIN_DATO',
-           'DIR001IN = meses desde el primer reporte. Falta el arquetipo de la matriz mock de Ordenamiento que lo ejercite con un valor conocido.' UNION ALL
-    SELECT 'F4-DIR-03', 'SIN_DATO',
-           'DIR009 = entidades distintas reportando. Falta el arquetipo con un numero conocido de entidades.' UNION ALL
-    SELECT 'F4-TEL-02', 'SIN_DATO',
-           'TEL010 = porcentaje con coincidencia geografica. HOY NO ES EJERCITABLE: coincidencia_geo esta fijada a 0 en preparar_insumos_edf.sql:234, de modo que TEL010 es una constante para todas las filas. Es un cableado pendiente, sin TODO que lo marque.' UNION ALL
-    SELECT 'F4-TEL-03', 'SIN_DATO',
-           'TEL020 binario 1/4. Comparte origen con TEL010 y por tanto tampoco discrimina hoy. En el legado esta fuera de la suma (Caracteristicas.txt:238) y nuestro codigo lo respeta (scoring_tel_edf.sql:81): la paridad es deliberada.' UNION ALL
-    SELECT 'F4-TEL-04', 'SIN_DATO',
-           'Reportes NO VALIDA. El legado los EXCLUYE (Caracteristicas.txt:46); nuestro codigo no excluye, solo degrada el numerador (scoring_tel_edf.sql:30-38). Falta el arquetipo con un reporte no valido para medir la diferencia.' UNION ALL
+    -- F4-TEL-03 (PASSED ESTRUCTURAL, SLCOPRBA-1355).
+    --
+    -- NO ES CERTIFICABLE CON DATOS, y conviene que quede dicho por que:
+    -- coincidencia_geo esta fijada al literal 0 (preparar_insumos_edf.sql),
+    -- de modo que TEL020 vale lo mismo en TODAS las filas. Un termino
+    -- constante desplaza todos los scores por igual, asi que ninguna
+    -- consulta sobre score_ordenamiento puede distinguir "TEL020 entra en la
+    -- suma" de "no entra". Se certifica leyendo los dos lados:
+    --   legado  Caracteristicas.txt:238 -- la suma tiene DIEZ terminos,
+    --           TEL001/002/003/006/007/010/017/019/023/025, y TEL020_Peso no
+    --           esta entre ellos (tampoco TEL022), aunque su _Peso SI se
+    --           construye en :128. Queda huerfano a proposito.
+    --   nuestro scoring_tel_edf.sql:144-150 -- los mismos diez terminos, con
+    --           el comentario de exclusion en la linea 148.
+    -- Es el mismo patron de F4-DIR-04, F4-CEL-06 y F4-EMA-02.
+    SELECT 'F4-TEL-03', 'PASSED',
+           'TEL020 se calcula y queda FUERA de la suma en los dos lados. Legado: Caracteristicas.txt:238 suma diez terminos (TEL001/002/003/006/007/010/017/019/023/025) y TEL020_Peso no esta, aunque se construye en :128. Nuestro port: scoring_tel_edf.sql:144-150, los mismos diez. NO es certificable con datos porque coincidencia_geo esta fijada a 0 y un termino constante no es observable en el score; se certifica por lectura de ambos lados, igual que F4-DIR-04, F4-CEL-06 y F4-EMA-02.' UNION ALL
 
 
     -- --- fases no portadas ---
