@@ -215,6 +215,36 @@ else
   ok "ninguna reservada usada como alias ni como columna"
 fi
 
+echo "9) argumentos de RAISE con expresiones  [REDSHIFT:112]"
+# El RAISE de Redshift admite VARIABLES, no expresiones:
+#   RAISE level 'format' [, variable [, ...]];
+# Una funcion en la lista es error de SINTAXIS en el propio CREATE. PostgreSQL
+# si las admite, asi que el banco local no lo ve. Tumbo el job #367.
+# Se une cada sentencia hasta su ';', se BORRA la cadena de formato (que lleva
+# parentesis propios: "criterio(s)") y se mira si queda un '(' en la cola.
+RAISE_HIT=$(find "$ROOT/SQL" "$ROOT/RevSQL" -name '*.sql' 2>/dev/null | sort | while read -r f; do
+  awk -v q="'" -v ARCH="$f" '
+    { linea = $0 }
+    buf == "" && linea ~ /^[[:space:]]*--/ { next }
+    buf != "" || linea ~ /[Rr][Aa][Ii][Ss][Ee][[:space:]]/ {
+      if (buf == "") ini = FNR
+      buf = buf " " linea
+      if (linea ~ /;/) {
+        cola = buf
+        sub("^[^" q "]*" q "([^" q "]|" q q ")*" q, "", cola)
+        if (index(cola, "(") > 0) printf "%s:%d: %s\n", ARCH, ini, substr(buf, 1, 120)
+        buf = ""
+      }
+    }
+  ' "$f"
+done)
+if [ -n "$RAISE_HIT" ]; then
+  bad "RAISE con expresiones en los argumentos (Redshift solo admite variables):"
+  printf '%s\n' "$RAISE_HIT" | head -10 | sed 's|^|        |'
+else
+  ok "ningun RAISE pasa una expresion como argumento"
+fi
+
 echo
 if [ $FAIL -ne 0 ]; then echo "RESULTADO: FALLA"; exit 1; fi
 [ $WARN -ne 0 ] && echo "RESULTADO: OK (con avisos)" || echo "RESULTADO: OK"

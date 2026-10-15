@@ -146,9 +146,22 @@ conserva su nombre en `RevSQL/`.
   estado puro, y por eso `validar.sh` lleva ahora el chequeo 8, que barre la
   familia entera (`RAW`, `ENCODE`, `TOP`, `TAG`, `PERCENT`, `SYSDATE`,
   `DISTKEY`, `SORTKEY`, `LZO`, `BYTEDICT`, `MOSTLY13`...).
+- **El `RAISE` de Redshift admite VARIABLES, no expresiones.** La gramatica
+  es `RAISE level 'format' [, variable [, ...]];` y una funcion en la lista
+  de argumentos es un error de **sintaxis** en el propio `CREATE`:
+  `42601: syntax error at or near "NULLIF"`. PostgreSQL si admite cualquier
+  expresion ahi, de modo que el banco la ejecuta sin una queja: **segundo
+  punto ciego del banco**, hermano de `DELTA`, y en el mismo sitio -- tumbo
+  el job DEV/DATABASE #367 en el archivo 74 de 74, el siguiente al que mato
+  al #366. La salida es mover la expresion al `SELECT` que alimenta la
+  variable, que es SQL normal. `validar.sh` lleva el chequeo 9, que une cada
+  sentencia `RAISE` hasta su `;`, descarta la cadena de formato (lleva
+  parentesis propios) y falla si queda un `(` en la cola.
 - `CREATE OR REPLACE PROCEDURE` **difiere la SEMANTICA, no la SINTAXIS.**
   *(Esta linea decia antes, en redondo, que "no compila el cuerpo: los errores
-  salen en la primera invocacion". El job #366 lo desmiente a medias.)*
+  salen en la primera invocacion". El job #366 lo desmiente a medias, y el
+  #367 lo confirma: su error de sintaxis salto en el `CREATE` sin que el
+  procedimiento llegara a invocarse nunca.)*
   Una tabla o columna que no existe si espera a la primera invocacion; un
   error de sintaxis salta en el propio `CREATE`. La consecuencia buena: un
   deploy verde de `pgm` SI garantiza que los 74 cuerpos parsean en Redshift.

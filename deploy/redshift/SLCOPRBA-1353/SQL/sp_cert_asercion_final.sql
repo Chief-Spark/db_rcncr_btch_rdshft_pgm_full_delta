@@ -49,11 +49,11 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
     v_unif_n     INTEGER := 0;
-    v_unif_lista VARCHAR(2000) := '';
+    v_unif_lista VARCHAR(2000) := 'ninguno';
     v_ord_n      INTEGER := 0;
-    v_ord_lista  VARCHAR(2000) := '';
+    v_ord_lista  VARCHAR(2000) := 'ninguno';
     v_gate_n     INTEGER := 0;
-    v_gate_lista VARCHAR(2000) := '';
+    v_gate_lista VARCHAR(2000) := 'ninguno';
 BEGIN
 
     -- --------------------------------------------------------
@@ -62,7 +62,7 @@ BEGIN
     -- --------------------------------------------------------
     IF p_alcance IN ('UNIFICACION', 'TODO') THEN
         SELECT COUNT(*),
-               COALESCE(LISTAGG(c.criterio, ', ') WITHIN GROUP (ORDER BY c.criterio), '')
+               COALESCE(NULLIF(LISTAGG(c.criterio, ', ') WITHIN GROUP (ORDER BY c.criterio), ''), 'ninguno')
           INTO v_unif_n, v_unif_lista
           FROM      bdm_datos.cert_criterio c
           JOIN      bdm_datos.v_cert_ultimo r ON r.criterio = c.criterio
@@ -73,7 +73,7 @@ BEGIN
         -- El gate por arquetipo: sus FAILED son aserciones duras sobre la
         -- matriz mock y no siempre se reflejan en un criterio del documento.
         SELECT COUNT(*),
-               COALESCE(LISTAGG(g.criterio_ca, ', ') WITHIN GROUP (ORDER BY g.criterio_ca), '')
+               COALESCE(NULLIF(LISTAGG(g.criterio_ca, ', ') WITHIN GROUP (ORDER BY g.criterio_ca), ''), 'ninguno')
           INTO v_gate_n, v_gate_lista
           FROM bdm_stage.mock_unif_ca_result g
          WHERE g.estado = 'FAILED';
@@ -84,7 +84,7 @@ BEGIN
     -- --------------------------------------------------------
     IF p_alcance IN ('ORDENAMIENTO', 'TODO') THEN
         SELECT COUNT(*),
-               COALESCE(LISTAGG(c.criterio, ', ') WITHIN GROUP (ORDER BY c.criterio), '')
+               COALESCE(NULLIF(LISTAGG(c.criterio, ', ') WITHIN GROUP (ORDER BY c.criterio), ''), 'ninguno')
           INTO v_ord_n, v_ord_lista
           FROM      bdm_datos.cert_criterio_ord c
           JOIN      bdm_datos.v_cert_ord_ultimo r ON r.criterio = c.criterio
@@ -94,14 +94,25 @@ BEGIN
     -- --------------------------------------------------------
     -- El veredicto. Un solo RAISE con todo lo que fallo, para que el log de
     -- Jenkins diga QUE hay que mirar sin tener que abrir la base.
+    --
+    -- SIETE ARGUMENTOS Y NI UN PARENTESIS: el RAISE de Redshift admite
+    -- VARIABLES, no expresiones. La gramatica es
+    --   RAISE level 'format' [, variable [, ...]];
+    -- y una funcion en la lista es un error de SINTAXIS en el propio CREATE:
+    --   42601: syntax error at or near "NULLIF"
+    -- Tumbo el job DEV/DATABASE #367 en el archivo 74 de 74. PostgreSQL si
+    -- admite expresiones ahi, de modo que el banco local no puede verlo: es
+    -- el segundo punto ciego del banco, hermano de DELTA.
+    -- Por eso el NULLIF que evitaba imprimir '[]' vive ahora en los SELECT
+    -- de arriba, que son SQL normal, y no aqui.
     -- --------------------------------------------------------
     IF (v_unif_n + v_ord_n + v_gate_n) > 0 THEN
         RAISE EXCEPTION
           'CERTIFICACION EN ROJO (alcance %). Unificacion: % criterio(s) FAILED [%]. Gate por arquetipo: % FAILED [%]. Ordenamiento: % criterio(s) FAILED [%]. Revisar el detalle en cert_resultado / cert_resultado_ord / mock_unif_ca_result.',
           p_alcance,
-          v_unif_n, NULLIF(v_unif_lista, ''),
-          v_gate_n, NULLIF(v_gate_lista, ''),
-          v_ord_n,  NULLIF(v_ord_lista, '');
+          v_unif_n, v_unif_lista,
+          v_gate_n, v_gate_lista,
+          v_ord_n,  v_ord_lista;
     END IF;
 
     RAISE INFO 'CERTIFICACION OK (alcance %): ningun criterio en FAILED.', p_alcance;
