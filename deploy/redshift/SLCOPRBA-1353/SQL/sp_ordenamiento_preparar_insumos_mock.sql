@@ -109,7 +109,7 @@ BEGIN
 
   ANALYZE bdm_tempo.stg_ord_personas_alcance;
 
-  -- 1) RPU post-unificación (sin join orden_prioridad — evita fan-out en staging)
+  -- 1) RPU post-unificacion (sin join orden_prioridad -- evita fan-out en staging)
   CREATE TABLE bdm_tempo.stg_rpu_post_unificacion
   DISTSTYLE KEY
   DISTKEY (id_buro_persona)
@@ -131,7 +131,7 @@ BEGIN
 
   ANALYZE bdm_tempo.stg_rpu_post_unificacion;
 
-  -- 2) Personas ganadoras (broadcast pequeño)
+  -- 2) Personas ganadoras (broadcast pequeno)
   CREATE TABLE bdm_tempo.stg_persona_dir_ganadora
   DISTSTYLE ALL
   SORTKEY (id_buro_persona)
@@ -159,7 +159,7 @@ BEGIN
 
   ANALYZE bdm_tempo.stg_dir_conteo_persona;
 
-  -- 4) Referencia dirección por persona (TEL/CEL)
+  -- 4) Referencia direccion por persona (TEL/CEL)
   CREATE TABLE bdm_tempo.stg_persona_dir_ref
   DISTSTYLE KEY
   DISTKEY (id_buro_persona)
@@ -214,7 +214,7 @@ BEGIN
 
   ANALYZE bdm_tempo.stg_rpu_dir_ref;
 
-  -- 5) Contacto dirección solo RPUs ganadoras (1 pasada datashare)
+  -- 5) Contacto direccion solo RPUs ganadoras (1 pasada datashare)
   CREATE TABLE bdm_tempo.stg_contacto_direccion_rpu
   DISTSTYLE KEY
   DISTKEY (id_buro_persona)
@@ -247,7 +247,7 @@ BEGIN
 
   ANALYZE bdm_tempo.stg_reporte_rpu;
 
-  -- 7) Contactos canal TEL/CEL/EMA — solo personas ganadoras
+  -- 7) Contactos canal TEL/CEL/EMA -- solo personas ganadoras
   -- SLCOPRBA-1355: filtro de hijas a grano de RPU, no de PERSONA.
   --
   -- EL DEFECTO. El unico filtro de unificacion de esta rama era el INNER JOIN
@@ -442,12 +442,23 @@ BEGIN
     c.cod_dw_persona_ubic,
     c.cod_pin_persona,
     c.id_buro_persona,
-    LTRIM(c.valor_contacto, '0') AS celular,
+    -- SLCOPRBA-1355: el LTRIM de ceros era invencion nuestra. El legado
+    -- agrupa por Texto_Ubicacion EN CRUDO y saca el prefijo de operador con
+    -- SUBSTR(Texto_Ubicacion, 1, 3) (Caracteristicas.txt:912), sin
+    -- normalizar: un grep de 'ltrim' sobre el volcado entero da cero.
+    c.valor_contacto AS celular,
     COALESCE(ref.dir_ref, c.texto_ubicacion_vinculo) AS texto_ubicacion,
     c.id_buro_suscriptor,
+    -- SLCOPRBA-1355: CEL023 filtra por gestion en el numerador Y en el
+    -- divisor (Caracteristicas.txt:1566-1568 y :3133-3135) y hasta ahora no
+    -- viajaba al canal. Paridad exacta con el SP real.
+    CASE
+      WHEN c.valor_contacto ~ '^[0-9]+$' AND LENGTH(TRIM(c.valor_contacto)) >= 7 THEN 'VALIDA'
+      ELSE 'NO VALIDA'
+    END AS descripcion_gestion,
     COALESCE(c.fecha_contacto, CURRENT_DATE) AS fecha_reporte,
     GREATEST(DATEDIFF(month, COALESCE(c.fecha_contacto, CURRENT_DATE), CURRENT_DATE), 0) AS meses_reporte,
-    LEFT(LTRIM(c.valor_contacto, '0'), 3) AS operador,
+    LEFT(c.valor_contacto, 3) AS operador,
     COALESCE(sf.sector_financiero, 0) AS sector_financiero,
     COALESCE(tcat.tipo_cuenta, 'PREPAGO') AS tipo_cuenta,
     -- SLCOPRBA-1355: tipo de cuenta que reporto el celular. Lo consume
@@ -459,7 +470,7 @@ BEGIN
   LEFT JOIN bdm_datos.catalogo_sector_financiero sf
     ON sf.id_buro_suscriptor = c.id_buro_suscriptor
   LEFT JOIN bdm_datos.catalogo_tipo_cuenta_tel tcat
-    ON tcat.prefijo_operador = LEFT(LTRIM(c.valor_contacto, '0'), 3)
+    ON tcat.prefijo_operador = LEFT(c.valor_contacto, 3)
   LEFT JOIN bdm_tempo.stg_persona_dir_ref ref
     ON ref.id_buro_persona = c.id_buro_persona
   WHERE c.contact_type = '9'

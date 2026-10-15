@@ -72,6 +72,15 @@ cd dt/banco && ./banco.sh init nueva && ./banco.sh fase strct
 ./banco.sh foto tras_pgm      # y ./banco.sh desde tras_pgm para re-correr en 2 s
 ```
 
+**EL BANCO YA NO ES EL GATE.** Desde que el pipeline de Jenkins despliega y
+corre la bateria **en Redshift real** (job DEV/DATABASE #370: e2e completo,
+tablero y asercion final), la prueba que manda es esa. El banco se queda como
+**chequeo previo de dos minutos** -- `./banco.sh fase pgm`, que compila los 74
+archivos y verifica los 80 objetos -- y ahi es donde sigue siendo rentable:
+caza en dos minutos lo que en Jenkins cuesta commit, push, traslado y job, y
+sin dejar DEV a medias. La bateria larga de 45 minutos se corre cuando
+interesa una hipotesis barata, no para certificar.
+
 **Un verde del banco NO certifica.** Degrada un `[REDSHIFT:112]` de
 "desconocido" a "especifico de Redshift". Postgres es mas permisivo que Redshift
 en cinco formas y mas estricto en tres; `banco/README.md` las lista una por una,
@@ -113,6 +122,14 @@ conserva su nombre en `RevSQL/`.
 - Tablas pequenas en `DISTSTYLE ALL`, con la justificacion escrita.
 - **Paridad real <-> mock** en todo SP que se toque. El mock se genera por
   sustitucion de fuentes y debe regenerarse identico.
+  **CUALES TIENEN ESPEJO Y CUALES NO, que es donde se falla:**
+  `sp_ordenamiento_preparar_insumos_edf` **SI** tiene su `_mock`; los cuatro
+  `sp_ordenamiento_scoring_*_edf` y `sp_ordenamiento_consolidacion_edf`
+  **NO** -- el mock reutiliza los reales. Anadir una columna al insumo real
+  y no al espejo tumba la bateria entera en el primer ciclo con
+  `column "..." does not exist`, y pasa `validar.sh` sin una queja porque es
+  un error semantico, no de sintaxis. Ya se pago (SLCOPRBA-1355). El
+  `diff` de la rama tocada entre los dos archivos tiene que salir vacio.
 
 ## Trampas de Redshift ya pagadas
 
@@ -315,12 +332,53 @@ filas comparten: la fecha, el catalogo financiero, el numero de reportes y el
 de direcciones. Un score absoluto depende de las cuatro cosas y el criterio se
 caeria solo.
 
-### El grano de TEL: la llave del legado es el TELEFONO, no la direccion
+### La auditoria de los 42 buckets: que quedo bloqueado y por que
 
-**Esta seccion se ha corregido dos veces y la segunda tambien estaba mal.
-Primero dijo que el colapso era un defecto vivo de produccion; luego que ya
-estaba arreglado y solo quedaba siembra. Lo correcto es lo de abajo
-(SLCOPRBA-1355).**
+Auditados los cuatro canales contra `Caracteristicas.txt` (SLCOPRBA-1355).
+**Los 42 umbrales y los 42 divisores COINCIDEN**, rama por rama y operador
+por operador, incluido el `/3` singular de `TEL019` y los heterogeneos de DIR
+(2, 3, 4, 5 y 6). Lo que divergia eran formulas, y en EMA las cuatro
+categorizaciones. Corregidos 618 puntos de beta. Lo que **no** se puede
+tocar, para no volver a investigarlo:
+
+| Bloqueado | Por que | Puntos |
+|---|---|---|
+| `DIR034FI` | el legado suma un **importe**, `CO00END005` (`:2589`); es de la Fase 2 | 90,32 |
+| `DIR050TO` | grano por direccion y medida `CO00MOR037/038 > 0` (`:3119-3125`): Fase 2 | 75,48 |
+| `DIR010FI` y `DIR013OT` | el divisor del legado excluye `'NO VALIDA'` (`:1950-1954`) | 137,21 |
+| `TEL023` y `CEL020` | el legado usa `Cod_Suscriptor`; nosotros `id_buro_suscriptor`, que es cubeta de hash | ruido hasta F2 |
+
+**El divisor de DIR NO es portable hoy, aunque lo parezca.**
+`descripcion_gestion` no existe en el lado de direcciones: la unica que hay
+(`preparar_insumos_edf.sql:362-365`) se deriva del heuristico *"son >=7
+digitos numericos?"*, y `stg_insumo_direccion` ni siquiera sale de esa rama
+-- viene de `stg_rpu_post_unificacion` (`:252`). Aplicarla marcaria
+`'NO VALIDA'` a **todas** las direcciones, el divisor caeria a 0 y las dos
+caracteristicas irian a categoria 0 en el universo entero. Seria cambiar un
+error por uno peor.
+
+**Tres cosas estructurales que no son buckets y tambien estan bloqueadas:**
+
+1. **Falta el filtro `WHERE CO01TEL022_cat > 0` del ranking de TEL**
+   (`:1213`). No es "falta una linea": `TEL022` solo es no-NULL si hay una
+   ciudad con `COINCIDENCIA = 1`, y `coincidencia_geo` esta clavado al
+   literal 0 (`preparar_insumos_edf.sql:369`). **Portarlo hoy dejaria el
+   canal TEL vacio.** Espera a que GEO entregue coincidencia.
+2. **Falta la sobrescritura a `999999` por CONTACTABILIDAD en CEL**
+   (`:2907`): un celular verificado (`Severidad_ = 1 AND Severidad2_ = 1 AND
+   Descripcion_Fuente = 'CONTACTABILIDAD'`) va **siempre primero** en el
+   legado. No cambia puntos, cambia el ranking entero. Necesita
+   `VstgUbiContactabilidad`, que no esta en el datashare.
+3. **`descripcion_gestion` es una sintesis nuestra** y no el estado de
+   gestion por reporte del legado. Afecta a cinco de las diez de TEL que
+   suman. Es insumo, no scoring.
+
+### El grano de TEL: la llave es el TELEFONO, y YA ESTA PORTADA
+
+**Esta seccion se ha corregido TRES veces. Las dos primeras versiones decian
+cosas distintas y las dos estaban mal; la tercera decia que la llave correcta
+"hay que rehacerla", y para entonces ya estaba rehecha. Lo de abajo esta
+verificado en el codigo y en datos de Redshift real (job DEV/DATABASE #370).**
 
 En el canal TEL del legado, la columna `Direccion_Fisica` **no contiene una
 direccion: contiene el numero de telefono.** La prueba que no admite lectura
@@ -328,45 +386,26 @@ alternativa es el nombre del divisor: `REC_STAGE.Calculo_Meses2`
 (`Caracteristicas.txt:2252-2262`) agrupa por
 `(Cod_Pin_Persona, Id_Buro_Persona, Direccion_Fisica)` y llama al resultado
 **`Total_Reportes_Telefono`**. El canal EMA lo hace explicito con un alias:
-`TML.Direccion_Fisica as Email` (`:2764`). Es el nombre de columna de la vista
-de origen reutilizado para el dato de contacto de cada canal.
+`TML.Direccion_Fisica as Email` (`:2764`).
 
-**Nosotros agrupamos por la direccion** (`sp_ordenamiento_scoring_tel_edf.sql:58`,
-sobre el `direccion_fisica` que arma `preparar_insumos_edf.sql:294` como
-`COALESCE(rref.dir_ref, texto_ubicacion_vinculo, valor_contacto)`). El numero
-de telefono ni siquiera viaja como columna del insumo: solo se usa para
-derivar `descripcion_gestion`.
+**Y nosotros agrupamos por el telefono, que es lo correcto.**
+`sp_ordenamiento_scoring_tel_edf.sql:76` agrupa por
+`(id_buro_persona, t.telefono)`; la direccion entra como `MIN(...)` de
+arrastre. Lo confirman tres cosas independientes:
 
-`stg_rpu_dir_ref` (`:137-156`) arreglo un problema real -- antes el
-`dir_ref` era un agregado **por persona** y colapsaba todos los telefonos de
-alguien en un grupo -- pero lo arreglo hacia la llave equivocada. La llave
-correcta nunca fue la direccion, ni por persona ni por RPU: es
-`valor_contacto`. El razonamiento escrito en esas lineas del SP parte de leer
-`Direccion_Fisica` como una direccion, y hay que rehacerlo.
+- los datos de DEV: el canal da `lugar_max = 2`, o sea **rankea de verdad**;
+- los ARQ 89 y 90, que miden deltas **entre dos telefonos de la misma
+  persona** y estan en PASSED;
+- la auditoria de los 11 buckets del canal (SLCOPRBA-1355), que ademas
+  encontro los tres granos conviviendo bien: persona para TEL001/006/010,
+  telefono para TEL017/019, maximo-entre-telefonos para TEL023/025.
 
-**Y encima la siembra tampoco ayuda:** las tres semillas cuelgan los contactos
-de **una sola RPU por persona** (`seed_mock_matriz.sql:329`,
-`seed_mock_matriz_r2.sql:948`, `seed_mock_matriz_r3.sql:356`, las tres con
-`AND rpu.cod_dw_persona_ubic % 10 = 1`) y siembran **un solo telefono** por
-persona (`contact_type = '4'`). Asi que ni con la llave corregida habria mas
-de un grupo: hacen falta las dos cosas, el grano y la siembra.
+No queda nada que rehacer aqui. Detalle en
+`docs/AUDITORIA_SEMANTICA_ORDENAMIENTO_F4.md`.
 
-**Lo que queda es de siembra.** Las tres semillas cuelgan los contactos de
-**una sola RPU por persona** -- `seed_mock_matriz.sql:329`,
-`seed_mock_matriz_r2.sql:948` y `seed_mock_matriz_r3.sql:356`, las tres con
-`AND rpu.cod_dw_persona_ubic % 10 = 1`. Con una RPU hay un solo `dir_ref`, y
-por tanto un solo grupo: `lugar = 1` para todo el mundo y **un unico score en
-las 64 000 filas de TEL**, medido en el banco.
-
-Es la misma familia que el hallazgo de recencia
-(`docs/HALLAZGOS_RECENCIA_MOCK_ORDENAMIENTO.md`): el canal no puede ordenar
-porque la siembra no le da entre que elegir.
-
-El legado agrupa por la direccion fisica **de cada fila de reporte**, de modo
-que una persona con N direcciones produce N grupos y el ranking elige entre
-ellos. Ese es el proposito del canal, y nuestro grano ya lo reproduce.
-
-Detalle completo en `docs/AUDITORIA_SEMANTICA_ORDENAMIENTO_F4.md`.
+**Moraleja, que es la que vale para toda esta bitacora: una seccion que
+afirma que algo esta roto envejece peor que el codigo.** Antes de abrir
+trabajo a partir de una nota, leer el SP.
 
 ### `sector_financiero` no es un catalogo provisional: hoy es ruido
 

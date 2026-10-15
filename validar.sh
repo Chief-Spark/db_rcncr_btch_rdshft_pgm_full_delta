@@ -42,8 +42,12 @@ else ok "sin BOM"; fi
 #    (no en todo el repo: hay cabeceras generadas con acentos de antes)
 # ------------------------------------------------------------
 echo "2) ASCII en las lineas anadidas"
-ADDED=$( { git diff "$BASE" -- "$ROOT" 2>/dev/null | grep '^+' | grep -v '^+++'
-           git ls-files --others --exclude-standard "$ROOT" 2>/dev/null \
+# El alcance es EL REPO ENTERO, no solo el paquete: la convencion dice
+# "ASCII sin acentos en todo el repo" y hasta hoy este chequeo miraba solo
+# "$ROOT", de modo que un acento en CLAUDE.md, en docs/ o en el propio
+# validar.sh pasaba sin que nadie lo viera. Se colo uno asi (SLCOPRBA-1355).
+ADDED=$( { git diff "$BASE" -- . 2>/dev/null | grep '^+' | grep -v '^+++'
+           git ls-files --others --exclude-standard 2>/dev/null \
              | while read -r f; do sed 's/^/+/' "$f"; done
          } | grep -nP '[^\x00-\x7F]' )
 if [ -n "$ADDED" ]; then bad "lineas anadidas con no-ASCII:"; echo "$ADDED" | head -20 | sed 's/^/        /'
