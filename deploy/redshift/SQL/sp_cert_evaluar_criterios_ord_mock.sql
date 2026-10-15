@@ -134,7 +134,7 @@ BEGIN
                 CASE WHEN MAX(CASE WHEN s.lugar = 1 THEN s.score END) = MAX(s.score)
                      THEN 1 ELSE 0 END          AS cabeza_ok
            FROM bdm_tempo.stg_cert_ord_base s
-          WHERE s.id_buro_persona BETWEEN 9800000 AND 9849999
+          WHERE s.id_buro_persona BETWEEN 9800000 AND 9869999
           GROUP BY 1, 2, 3 ) g
   GROUP BY 1, 2;
 
@@ -690,14 +690,19 @@ BEGIN
                   SELECT 9810000, 'DIR',   9.6774 UNION ALL
                   SELECT 9820000, 'CEL',   0.0000 UNION ALL
                   SELECT 9830000, 'CEL',  38.3817 UNION ALL
-                  SELECT 9840000, 'EMA', 100.8506 ) m
+                  SELECT 9840000, 'EMA', 100.8506 UNION ALL
+                  SELECT 9850000, 'CEL',  93.3610 UNION ALL
+                  SELECT 9860000, 'EMA',  56.5375 ) m
            LEFT JOIN bdm_tempo.stg_cert_ord_arq a
                   ON a.banda = m.banda AND a.canal = m.canal ) x
   CROSS JOIN ( SELECT CAST('ARQ 80 y 82 son empates a proposito (delta 0); '
                         || 'ARQ 81 mueve DIR017 de categoria 1 a 2 (29.03225806/3); '
                         || 'ARQ 83 mueve CEL018 de 2 a 3 (153.52697100/4), con un tercer '
                         || 'celular que la compuerta excluye; '
-                        || 'ARQ 84 mueve EMA024 de 1 a 4 (134.46747820/4)'
+                        || 'ARQ 84 mueve EMA024 de 1 a 4 (134.46747820/4); '
+                        || 'ARQ 85 mueve CEL019 de 1 a 3 (186.72199170/4), dos celulares '
+                        || 'de igual valor de operador que solo difieren en el tipo de cuenta; '
+                        || 'ARQ 86 mueve EMA021 de 1 a 3 (113.07492490/4)'
                         AS VARCHAR(400)) AS nota ) x2
   GROUP BY x2.nota;
 
@@ -793,6 +798,45 @@ BEGIN
   FROM  bdm_tempo.stg_cert_ord_arq a
   WHERE a.banda = 9830000 AND a.canal = 'CEL';
 
+  -- F4-CEL-03 (REAPUNTADO Y MEDIDO, SLCOPRBA-1355).
+  --
+  -- El enunciado del RF dice "CEL014 = indicador de si la persona tiene
+  -- cuenta POSPAGO", y durante toda la vida del tablero salio SIN_DATO con
+  -- el motivo "falta el arquetipo". Las dos cosas eran falsas.
+  --
+  --   CEL014 no mira el tipo de cuenta: es la cuota de reportes de mas de
+  --   24 meses (Caracteristicas.txt:2450-2453), y esta portada asi.
+  --   La que depende del tipo de cuenta es CEL019 (:112), y lo que le
+  --   faltaba no era arquetipo sino el catalogo V_Tipo_Cuenta_Ord, que ya
+  --   esta cargado en bdm_datos.catalogo_tipo_cuenta_ord.
+  --
+  -- El ARQ 85 enfrenta dos celulares de la misma persona con el MISMO valor
+  -- de operador --300 y 301, los dos 0,55-- que solo difieren en el tipo de
+  -- cuenta: '2' da peso 100 (categoria 3) y '1' da peso 10 (categoria 1).
+  -- Es la forma del ARQ 82, que esta medido en 0.0000, de modo que todo lo
+  -- que no sea el tipo de cuenta ya esta probado que no mueve nada.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F4-CEL-03',
+         CASE WHEN COUNT(*) = 0                                     THEN 'SIN_DATO'
+              WHEN MAX(a.filas_min) <> 2 OR MAX(a.filas_max) <> 2   THEN 'FAILED'
+              WHEN ABS(MAX(a.delta_min) - 93.3610) > 0.0002         THEN 'FAILED'
+              WHEN ABS(MAX(a.delta_max) - 93.3610) > 0.0002         THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'ARQ 85 (CEL, tipo de cuenta 2 contra 1): personas='
+           || CAST(COALESCE(MAX(a.personas), 0) AS VARCHAR)
+           || ', filas por persona='
+           || COALESCE(CAST(MAX(a.filas_min) AS VARCHAR), '0') || '..'
+           || COALESCE(CAST(MAX(a.filas_max) AS VARCHAR), '0')
+           || ', delta observado='
+           || COALESCE(CAST(MAX(a.delta_min) AS VARCHAR), 'sin filas')
+           || ' (esperado 93.3610 = CEL019 de 1 a 3, (3-1)/4 * 186.72199170). '
+           || 'El enunciado del RF lo atribuye a CEL014, que no mira el tipo '
+           || 'de cuenta; se evalua sobre CEL019, que es quien lo hace',
+         GETDATE(), CURRENT_USER
+  FROM  bdm_tempo.stg_cert_ord_arq a
+  WHERE a.banda = 9850000 AND a.canal = 'CEL';
+
   -- ============================================================
   -- ESTADOS FIJOS: lo que no se afirma con una consulta
   -- Tabla de mapeo literal, patron del tablero de Unificacion. El FROM es
@@ -835,8 +879,7 @@ BEGIN
            'TEL020 binario 1/4. Comparte origen con TEL010 y por tanto tampoco discrimina hoy. En el legado esta fuera de la suma (Caracteristicas.txt:238) y nuestro codigo lo respeta (scoring_tel_edf.sql:81): la paridad es deliberada.' UNION ALL
     SELECT 'F4-TEL-04', 'SIN_DATO',
            'Reportes NO VALIDA. El legado los EXCLUYE (Caracteristicas.txt:46); nuestro codigo no excluye, solo degrada el numerador (scoring_tel_edf.sql:30-38). Falta el arquetipo con un reporte no valido para medir la diferencia.' UNION ALL
-    SELECT 'F4-CEL-03', 'SIN_DATO',
-           'CEL014 = indicador de cuenta POSPAGO. Falta el arquetipo.' UNION ALL
+
 
     -- --- fases no portadas ---
     SELECT 'RG-01', 'NO_IMPLEMENTADO',

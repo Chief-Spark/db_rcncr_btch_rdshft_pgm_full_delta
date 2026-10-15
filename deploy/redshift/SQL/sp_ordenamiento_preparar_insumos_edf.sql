@@ -365,7 +365,12 @@ BEGIN
     GREATEST(DATEDIFF(month, COALESCE(c.fecha_contacto, CURRENT_DATE), CURRENT_DATE), 0) AS meses_reporte,
     LEFT(LTRIM(c.valor_contacto, '0'), 3) AS operador,
     COALESCE(sf.sector_financiero, 0) AS sector_financiero,
-    COALESCE(tcat.tipo_cuenta, 'PREPAGO') AS tipo_cuenta
+    COALESCE(tcat.tipo_cuenta, 'PREPAGO') AS tipo_cuenta,
+    -- SLCOPRBA-1355: tipo de cuenta que reporto el celular. Lo consume
+    -- CEL019 contra bdm_datos.catalogo_tipo_cuenta_ord. Viaja en crudo:
+    -- el CAST a INTEGER se hace en el scoring, que es donde lo hace el
+    -- legado (Caracteristicas.txt:112).
+    c.cod_tipo_cta_fte
   FROM bdm_tempo.stg_contacto_canal c
   LEFT JOIN bdm_datos.catalogo_sector_financiero sf
     ON sf.id_buro_suscriptor = c.id_buro_suscriptor
@@ -395,7 +400,11 @@ BEGIN
     GREATEST(DATEDIFF(month, COALESCE(c.fecha_contacto, CURRENT_DATE), CURRENT_DATE), 0) AS meses_reporte,
     COALESCE(sf.sector_financiero, 0) AS sector_financiero,
     CASE WHEN LOWER(SPLIT_PART(TRIM(c.valor_contacto), '@', 2)) IN
-      ('gmail.com','hotmail.com','yahoo.com','outlook.com') THEN 'PERSONAL' ELSE 'CORPORATIVO' END AS tipo_cuenta
+      ('gmail.com','hotmail.com','yahoo.com','outlook.com') THEN 'PERSONAL' ELSE 'CORPORATIVO' END AS tipo_cuenta,
+    -- SLCOPRBA-1355: tipo de cuenta que reporto el correo. Lo consume
+    -- EMA021 (Caracteristicas.txt:235). En crudo, porque una de sus cinco
+    -- ramas compara en TEXTO y las otras cuatro castean: ver el scoring.
+    c.cod_tipo_cta_fte
   FROM bdm_tempo.stg_contacto_canal c
   LEFT JOIN bdm_datos.catalogo_sector_financiero sf
     ON sf.id_buro_suscriptor = c.id_buro_suscriptor

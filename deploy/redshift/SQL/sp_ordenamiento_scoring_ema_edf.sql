@@ -82,12 +82,23 @@ BEGIN
       -- hueco entre 0 y 9 (:686-696). Portar la categoria sin el valor daria
       -- un score peor, no mejor. Espera al datashare.
       COUNT(*) AS ema020_raw,
-      -- EMA021 (:2746-2761): BLOQUEADA. Suma de puntos 50/25/12/8/5 por
-      -- Cod_Tipo_Cta_Fte, que viene de CTA_TOTALES_PERSONAS_TMP3
-      -- (:2768-2769) y no es columna de la vista de correos. Espera al
-      -- datashare. (Detalle para cuando llegue: la rama '23' es la unica sin
-      -- CAST a INTEGER, compara la cadena cruda.)
-      COUNT(*) AS ema021_raw,
+      -- EMA021 (Caracteristicas.txt:235): suma de banderas por tipo de
+      -- cuenta, 50/25/12/8/5, maximo 100. Ya NO esta bloqueada: el tipo de
+      -- cuenta llega por location.val.accounttype. Lo que habia aqui era un
+      -- COUNT(*), que no es esta caracteristica ni ninguna otra.
+      --
+      -- LA ASIMETRIA DEL '23' ES DEL LEGADO Y SE PORTA LITERAL. Cuatro de
+      -- las cinco ramas hacen "cast(Cod_Tipo_Cta_Fte as integer) = '1'"; la
+      -- del 23 compara la cadena cruda, "Cod_Tipo_Cta_Fte = '23'". Con un
+      -- valor '023' las otras cuatro aciertan y esa falla. Manda el codigo.
+      --   El CAST va guardado por el mismo motivo que en CEL019: en Redshift
+      --   un valor sucio aborta la sentencia en vez de dar NULL (job #293).
+      CASE WHEN SUM(CASE WHEN e.tipo_cta_num = 1 THEN 1 ELSE 0 END) >= 1 THEN 50 ELSE 0 END
+      + CASE WHEN SUM(CASE WHEN e.tipo_cta_num = 2 THEN 1 ELSE 0 END) >= 1 THEN 25 ELSE 0 END
+      + CASE WHEN SUM(CASE WHEN e.tipo_cta_num = 6 THEN 1 ELSE 0 END) >= 1 THEN 12 ELSE 0 END
+      + CASE WHEN SUM(CASE WHEN e.cod_tipo_cta_fte = '23' THEN 1 ELSE 0 END) >= 1 THEN 8 ELSE 0 END
+      + CASE WHEN SUM(CASE WHEN e.tipo_cta_num = 5 THEN 1 ELSE 0 END) >= 1 THEN 5 ELSE 0 END
+        AS ema021_raw,
       -- EMA024 (:1406-1433): suscriptores distintos de ESTE correo. El
       -- divisor sale en persona_ema. Antes era una bandera de dominio
       -- corporativo, que es la logica de EMA018 mal colocada.
@@ -106,7 +117,16 @@ BEGIN
             WHEN LENGTH(TRIM(SPLIT_PART(e.email, '@', 1))) < 20 THEN 10
             ELSE 3
           END) AS ema025
-    FROM bdm_tempo.stg_insumo_email e
+    FROM (
+      SELECT i.*,
+             -- El CAST guardado que exige EMA021. Se hace aqui y no en el
+             -- SELECT de arriba para no repetirlo cinco veces.
+             CASE WHEN TRIM(i.cod_tipo_cta_fte) ~ '^[0-9]+$'
+                   AND LENGTH(TRIM(i.cod_tipo_cta_fte)) <= 9
+                  THEN CAST(TRIM(i.cod_tipo_cta_fte) AS INTEGER)
+                  ELSE NULL END AS tipo_cta_num
+      FROM bdm_tempo.stg_insumo_email i
+    ) e
     INNER JOIN ventanas v ON v.id_buro_persona = e.id_buro_persona
     GROUP BY e.id_buro_persona, e.email
   ),

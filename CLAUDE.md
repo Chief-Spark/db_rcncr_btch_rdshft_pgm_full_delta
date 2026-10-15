@@ -201,7 +201,7 @@ en SIN_DATO, y conviene no volver a investigarlos.
 |---|---|---|
 | `sector_financiero` vale **0 siempre** | su catalogo se carga de la vista REAL del datashare (`02_catalogos_ordenamiento.sql:16`) y no tiene variante mock | `DIR010FI` y `EMA016` quedan clavadas en la categoria minima |
 | `coincidencia_geo` esta **fijado al literal 0** | `preparar_insumos_edf.sql:303` | solo afecta a `TEL020`, que **no entra en la suma del score** ni en el legado (`Caracteristicas.txt:2830-2834`) ni en nuestro port: sin impacto en el ranking |
-| No existe `'POSPAGO'` | `catalogo_tipo_cuenta_tel` solo trae `PREPAGO` y `FIJA` (`02_catalogos_ordenamiento.sql:27-32`) | `CEL019` es constante: 186,72 puntos de beta inmovilizados |
+| ~~No existe `'POSPAGO'`~~ **CAIDA (SLCOPRBA-1355)** | no era un limite del mock: `CEL019` no mira `'POSPAGO'` en el legado, es `MAX(V_Tipo_Cuenta_Ord.Valor)` (`Caracteristicas.txt:112`). El catalogo de 44 pesos ya esta cargado | ninguna. `CEL019` esta portada y certificada por el ARQ 85 |
 
 **CUATRO caracteristicas salieron de esa tabla al leer el legado
 (SLCOPRBA-1355).** Ninguna estaba donde decia estar:
@@ -215,8 +215,44 @@ en SIN_DATO, y conviene no volver a investigarlos.
 
 Eran invenciones nuestras, no limites del mock, y las cuatro son portables hoy
 sin datashare. Las dos de CEL liberaron **165,97 puntos de beta** (124,48 +
-41,49). Lo que SI sigue bloqueado por F2 es `CEL019`, que depende de verdad del
-tipo de cuenta (`:1285-1290`, `MAX(TCO.Valor)` sobre `V_Tipo_Cuenta_Ord`).
+41,49).
+
+**Y luego cayeron DOS MAS, que es lo que cierra la familia.** `CEL019` y
+`EMA021` tampoco estaban bloqueadas: estaban **mal**. No les faltaba dato,
+calculaban otra cosa, y ese numero entraba en la suma con beta completa.
+
+| | Hacia | Dice el legado | Cita |
+|---|---|---|---|
+| `CEL019` | `% de filas con tipo_cuenta = 'POSPAGO'` | `MAX(V_Tipo_Cuenta_Ord.Valor)` sobre las cuentas del celular | `Caracteristicas.txt:112` |
+| `EMA021` | `COUNT(*)` | banderas 50/25/12/8/5 por tipo de cuenta, maximo 100 | `:235` |
+
+Las dos estan portadas y certificadas (ARQ 85 y ARQ 86): **299,79 puntos de
+beta** que estaban midiendo ruido. Lo que las desbloqueo no fue el datashare
+sino leerlas: `location.val.accounttype` ya venia en `xpm_location`, una de
+las 19 columnas de las que solo leiamos cuatro. El volcado de
+`V_Tipo_Cuenta_Ord` (44 filas) llego despues y solo hacia falta para `CEL019`.
+
+**Tres trampas que costaron el rato y conviene no volver a pagar:**
+
+1. **`MAX(tco.valor)` no lleva `COALESCE`.** El fallo de catalogo da NULL, las
+   tres ramas del `CASE` de categoria evaluan UNKNOWN y la fila cae al
+   `ELSE 0`: categoria **cero**. Un `COALESCE(..., 0)` la metaria por
+   `WHEN cel019 < 35 THEN 1` y regalaria 46,68 puntos a cada celular sin
+   cuenta.
+2. **La asimetria del `'23'` en `EMA021` es del legado.** Cuatro de sus cinco
+   ramas castean a INTEGER; la del 23 compara la cadena cruda. Se porta
+   literal.
+3. **Un fallo de catalogo es invisible.** "Sin cuenta", "tipo ausente del
+   catalogo" y "tipo de peso minimo" terminan los tres en categoria 0, sin
+   error y sin perder la fila. El catalogo no trae los tipos 17, 25, 26, 34,
+   37, 50 y 51, y el datashare entrega justo `'17'`, `'34'` y `'51'`.
+
+**`CEL019` topa en categoria 3 y divide por 4**, de modo que aporta como mucho
+el 75% de su beta. Es defecto del legado y se porta tal cual. **`CEL006` tiene
+el mismo defecto** (`caracteristicas_lf.txt:333-338`); las otras nueve del
+canal llegan a 4, incluidas las binarias `CEL015`, `CEL017` y `CEL023`, que
+saltan 1 -> 4 a proposito. La convencion se entendia y estas dos se escaparon:
+si se abre ticket, van juntas.
 
 **Y TEL tiene sus propios contadores por ventana**, al contrario de lo que
 afirma el commit `630284f`: `REC_STAGE.calculo_total` (`:1674-1690`) define

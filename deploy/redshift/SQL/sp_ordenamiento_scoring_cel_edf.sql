@@ -78,7 +78,21 @@ BEGIN
       --   Y es la COMPUERTA del canal: un 0 aqui saca la fila del ranking.
       --   Ver el WHERE del SELECT final.
       CAST(100.0 * COALESCE(MAX(ooc.valor), 0) AS DECIMAL(18,2)) AS cel018,
-      CAST(100.0 * SUM(CASE WHEN ic.tipo_cuenta = 'POSPAGO' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS DECIMAL(18,2)) AS cel019,
+      -- CEL019 (Caracteristicas.txt:112): MAX del peso del tipo de cuenta,
+      -- del catalogo V_Tipo_Cuenta_Ord, sobre las cuentas atadas a este
+      -- celular. Lo que habia aqui -- el porcentaje de filas 'POSPAGO' --
+      -- era invencion nuestra: no aparece en el legado. Quinta de la
+      -- familia de CEL014, CEL017, TEL017 y TEL010.
+      --
+      -- SIN COALESCE, Y ES DELIBERADO. En el legado los dos joins son LEFT,
+      -- de modo que un celular sin cuenta, o con un tipo que no esta en el
+      -- catalogo, da MAX(NULL) = NULL. Su CASE de categoria (:151) no tiene
+      -- rama IS NULL: las tres comparaciones evaluan UNKNOWN y la fila cae
+      -- al ELSE 0, categoria CERO. Un COALESCE(..., 0) aqui la metaria por
+      -- "WHEN cel019 < 35 THEN 1" y regalaria 1/4 * 186,72 = 46,68 puntos a
+      -- cada celular sin cuenta. El ELSE 0 de la CTE 'categorized' ya hace
+      -- lo correcto: basta con dejar pasar el NULL.
+      CAST(MAX(tco.valor) AS DECIMAL(18,2)) AS cel019,
       COUNT(*) AS cel020_raw,
       -- CEL023 se calcula en 'base': necesita el maximo por persona.
       COUNT(*) AS cel023_filas
@@ -87,6 +101,19 @@ BEGIN
       ON v.id_buro_persona = ic.id_buro_persona
     LEFT JOIN bdm_datos.catalogo_operador_ord_cel ooc
       ON ooc.cod_operador = LEFT(ic.celular, 3)
+    -- El legado castea en el ON: "CAST(CTAP.Cod_Tipo_Cta_Fte AS INTEGER)
+    -- = TCO.Cod_Tipo_Cta_Fte" (:112). Aqui se guarda el CAST, porque en
+    -- Redshift un valor no numerico o que no quepa en 4 bytes ABORTA la
+    -- sentencia en vez de devolver NULL -- asi cayo el job #293 con
+    -- personidtype. Con el guardia el valor sucio cae a NULL, que es a
+    -- donde lo manda el LEFT JOIN del legado de todos modos.
+    LEFT JOIN bdm_datos.catalogo_tipo_cuenta_ord tco
+      ON tco.cod_tipo_cta_fte = CASE
+           WHEN TRIM(ic.cod_tipo_cta_fte) ~ '^[0-9]+$'
+            AND LENGTH(TRIM(ic.cod_tipo_cta_fte)) <= 9
+           THEN CAST(TRIM(ic.cod_tipo_cta_fte) AS INTEGER)
+           ELSE NULL
+         END
     GROUP BY ic.id_buro_persona, ic.celular
   ),
   persona_cel AS (
