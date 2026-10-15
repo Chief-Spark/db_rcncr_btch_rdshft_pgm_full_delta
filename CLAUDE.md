@@ -102,6 +102,16 @@ por fuerza bruta columnar y Postgres en un nodo no.
 | `REDSHIFT:232` | `UPDATE`/`DELETE` de nivel superior sin `WHERE` | `WHERE` explicito, o `TRUNCATE` |
 | `JENKINS:104/105` | rama sin ID de subtarea | nombrar la rama con la subtarea |
 
+**EL TRASLADO A BITBUCKET LLEVA SOLO `deploy/redshift/`.** Nada de
+`CLAUDE.md`, `validar.sh`, `docs/` ni `banco/`: Bitbucket es el repo de
+despliegue y Jenkins solo lee `sourcePath`, `orderFile` y `sqlFolder`, todos
+dentro del paquete. La secuencia de `./migra418.sh traslado <id>` ya lo hace
+bien; **la linea de `git checkout ... -- validar.sh CLAUDE.md` fue un anadido
+mio y es un error**: ensucia el diff que alguien tiene que revisar. Decision
+del equipo, SLCOPRBA-1355. Consecuencia asumida: los chequeos de `validar.sh`
+viven solo en el repo de trabajo; si alguna vez hacen falta del lado de
+Bitbucket, el sitio es un paso del pipeline, no el repo.
+
 `rollback.par` es el reverso exacto de `deploy.par`, modulo el prefijo
 `NN_rollback_` en los archivos numerados. Todo archivo sin prefijo numerico
 conserva su nombre en `RevSQL/`.
