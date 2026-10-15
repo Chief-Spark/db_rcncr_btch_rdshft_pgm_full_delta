@@ -32,8 +32,18 @@ BEGIN
            SUM(CASE WHEN meses_reporte <= 24 THEN 1 ELSE 0 END) AS tr_24,
            SUM(CASE WHEN meses_reporte >  24 THEN 1 ELSE 0 END) AS tr_24m,
            -- Divisor de CEL023 (Caracteristicas.txt:3130-3139): la recencia
-           -- MAS VIEJA entre TODOS los celulares de la persona.
-           MAX(meses_reporte) AS max_meses_persona
+           -- MAS VIEJA entre TODOS los celulares de la persona. SLCOPRBA-1355:
+           -- el legado la toma FILTRADA por gestion (:3133-3135) y aqui iba
+           -- sin filtrar. Un celular 'NO VALIDA' con la recencia mas vieja
+           -- desplazaba el divisor y volteaba el bit de CEL023 para TODOS los
+           -- celulares de esa persona.
+           MAX(CASE WHEN descripcion_gestion <> 'NO VALIDA'
+                      OR descripcion_gestion IS NULL
+                    THEN meses_reporte ELSE NULL END) AS max_meses_persona,
+           -- Divisor de CEL020 (:1150-1159): suscriptores DISTINTOS de la
+           -- persona. Antes era SUM(COUNT(*)) sobre los celulares, o sea
+           -- filas de reporte: otra magnitud.
+           COUNT(DISTINCT id_buro_suscriptor) AS n_susc_persona
       FROM bdm_tempo.stg_insumo_celular
      GROUP BY id_buro_persona
   ),
@@ -93,9 +103,17 @@ BEGIN
       -- cada celular sin cuenta. El ELSE 0 de la CTE 'categorized' ya hace
       -- lo correcto: basta con dejar pasar el NULL.
       CAST(MAX(tco.valor) AS DECIMAL(18,2)) AS cel019,
-      COUNT(*) AS cel020_raw,
-      -- CEL023 se calcula en 'base': necesita el maximo por persona.
-      COUNT(*) AS cel023_filas
+      -- CEL020 (:1583-1591, :3031-3037, :3153-3154): el legado agrupa por
+      -- Cod_Suscriptor y cuenta ESOS GRUPOS. Hacia COUNT(*) de filas de
+      -- reporte, que es otra magnitud: 152,49 puntos de beta midiendo ruido.
+      -- id_buro_suscriptor ya viajaba en el insumo y no se usaba.
+      COUNT(DISTINCT ic.id_buro_suscriptor) AS cel020_raw,
+      -- Numerador de CEL023 (:1566-1568): la recencia mas vieja de ESTE
+      -- celular, FILTRADA por gestion. No se puede reusar cel003, que es el
+      -- MAX sin filtrar y asi lo quiere el legado (:2524).
+      MAX(CASE WHEN ic.descripcion_gestion <> 'NO VALIDA'
+                 OR ic.descripcion_gestion IS NULL
+               THEN ic.meses_reporte ELSE NULL END) AS max_meses_cel
     FROM bdm_tempo.stg_insumo_celular ic
     INNER JOIN ventanas v
       ON v.id_buro_persona = ic.id_buro_persona
@@ -116,12 +134,9 @@ BEGIN
          END
     GROUP BY ic.id_buro_persona, ic.celular
   ),
-  persona_cel AS (
-    SELECT id_buro_persona, SUM(cel020_raw) AS total_reportes FROM base_agg GROUP BY 1
-  ),
   base AS (
     SELECT a.*,
-      CAST(100.0 * a.cel020_raw / NULLIF(p.total_reportes, 0) AS DECIMAL(18,2)) AS cel020,
+      CAST(100.0 * a.cel020_raw / NULLIF(v.n_susc_persona, 0) AS DECIMAL(18,2)) AS cel020,
       -- CEL023 (:785-786): (recencia mas vieja de la PERSONA - la de ESTE
       -- celular) / la de la persona. Es la MISMA forma que EMA023 y TEL025;
       -- antes era una bandera de "tiene texto de ubicacion", que no se
@@ -130,10 +145,9 @@ BEGIN
       --   que CEL020, pero ahi son CONTEOS y aqui son MAX(Meses_Reporte)
       --   (:1566-1568 y :3133-3135). Portarla por analogia con CEL020 da un
       --   numero equivocado.
-      CAST(100.0 * (CAST(v.max_meses_persona AS DECIMAL(18,6)) - a.cel003)
+      CAST(100.0 * (CAST(v.max_meses_persona AS DECIMAL(18,6)) - a.max_meses_cel)
            / NULLIF(v.max_meses_persona, 0) AS DECIMAL(18,2)) AS cel023
     FROM base_agg a
-    JOIN persona_cel p ON a.id_buro_persona = p.id_buro_persona
     JOIN ventanas   v ON v.id_buro_persona = a.id_buro_persona
   ),
   categorized AS (

@@ -400,12 +400,30 @@ BEGIN
     c.cod_dw_persona_ubic,
     c.cod_pin_persona,
     c.id_buro_persona,
-    LTRIM(c.valor_contacto, '0') AS celular,
+    -- SLCOPRBA-1355: el LTRIM de ceros era invencion nuestra. El legado
+    -- agrupa por Texto_Ubicacion EN CRUDO y saca el prefijo de operador con
+    -- SUBSTR(Texto_Ubicacion, 1, 3) (Caracteristicas.txt:912), sin
+    -- normalizar: un grep de 'ltrim' sobre el volcado entero da cero.
+    -- Importaba doble: el prefijo normalizado podia caer fuera del catalogo
+    -- de operadores y la compuerta CEL018 <> 0 sacaba ese celular del
+    -- ranking entero. En el mock no hay celulares con cero inicial, asi que
+    -- el cambio es inerte ahi y fiel en datos reales.
+    c.valor_contacto AS celular,
     COALESCE(ref.dir_ref, c.texto_ubicacion_vinculo) AS texto_ubicacion,
     c.id_buro_suscriptor,
+    -- SLCOPRBA-1355: CEL023 filtra por gestion en el numerador Y en el
+    -- divisor (Caracteristicas.txt:1566-1568 y :3133-3135) y hasta ahora no
+    -- viajaba al canal. Misma expresion que en el insumo de telefono: para
+    -- un celular de diez digitos el heuristico de ">=7 digitos numericos" si
+    -- significa algo. NO vale para el canal DIR, donde una direccion nunca
+    -- es una cadena de digitos y marcaria 'NO VALIDA' a todas.
+    CASE
+      WHEN c.valor_contacto ~ '^[0-9]+$' AND LENGTH(TRIM(c.valor_contacto)) >= 7 THEN 'VALIDA'
+      ELSE 'NO VALIDA'
+    END AS descripcion_gestion,
     COALESCE(c.fecha_contacto, CURRENT_DATE) AS fecha_reporte,
     GREATEST(DATEDIFF(month, COALESCE(c.fecha_contacto, CURRENT_DATE), CURRENT_DATE), 0) AS meses_reporte,
-    LEFT(LTRIM(c.valor_contacto, '0'), 3) AS operador,
+    LEFT(c.valor_contacto, 3) AS operador,
     COALESCE(sf.sector_financiero, 0) AS sector_financiero,
     COALESCE(tcat.tipo_cuenta, 'PREPAGO') AS tipo_cuenta,
     -- SLCOPRBA-1355: tipo de cuenta que reporto el celular. Lo consume
@@ -417,7 +435,7 @@ BEGIN
   LEFT JOIN bdm_datos.catalogo_sector_financiero sf
     ON sf.id_buro_suscriptor = c.id_buro_suscriptor
   LEFT JOIN bdm_datos.catalogo_tipo_cuenta_tel tcat
-    ON tcat.prefijo_operador = LEFT(LTRIM(c.valor_contacto, '0'), 3)
+    ON tcat.prefijo_operador = LEFT(c.valor_contacto, 3)
   LEFT JOIN bdm_tempo.stg_persona_dir_ref ref
     ON ref.id_buro_persona = c.id_buro_persona
   WHERE c.contact_type = '9'

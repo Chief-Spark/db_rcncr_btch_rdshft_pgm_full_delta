@@ -163,10 +163,35 @@ BEGIN
       CASE WHEN ema003 <= 26 THEN 1 WHEN ema003 <= 39 THEN 2 WHEN ema003 <= 54 THEN 3 WHEN ema003 > 54 THEN 4 ELSE 0 END AS c03,
       CASE WHEN ema007 <= 0 THEN 1 WHEN ema007 <= 1 THEN 2 WHEN ema007 <= 2 THEN 3 WHEN ema007 > 2 THEN 4 ELSE 0 END AS c07,
       CASE WHEN ema010 <= 1 THEN 1 WHEN ema010 <= 2 THEN 2 WHEN ema010 <= 3 THEN 3 WHEN ema010 > 3 THEN 4 ELSE 0 END AS c10,
-      CASE WHEN ema014 = 1 THEN 4 ELSE 1 END AS c14,
-      CASE WHEN ema015 < 20 THEN 1 WHEN ema015 < 50 THEN 2 WHEN ema015 < 70 THEN 3 WHEN ema015 >= 70 THEN 4 ELSE 0 END AS c15,
-      CASE WHEN ema016 < 1 THEN 1 WHEN ema016 < 63 THEN 2 WHEN ema016 < 95 THEN 3 WHEN ema016 >= 95 THEN 4 ELSE 0 END AS c16,
-      CASE WHEN ema017 < 20 THEN 1 WHEN ema017 < 50 THEN 2 WHEN ema017 < 80 THEN 3 WHEN ema017 >= 80 THEN 4 ELSE 0 END AS c17,
+      -- LAS CUATRO CATEGORIZACIONES DE ABAJO ESTABAN INVENTADAS
+      -- (SLCOPRBA-1355). Las FORMULAS que las alimentan siempre fueron
+      -- correctas -- misma ventana, mismo divisor, mismo *100, mismo
+      -- DECIMAL(18,2) que el legado (Caracteristicas.txt:1723-1742) -- y los
+      -- divisores de la suma tambien (/4 en los cuatro, :679 :700 :1852
+      -- :3107). Lo unico que estaba mal era el CASE, y eran 229,51 puntos de
+      -- beta mal asignados. Ahora son los de Caracteristicas.txt:1005-1024.
+      --
+      -- EMA014 (:1005-1012). Era `= 1 THEN 4 ELSE 1`: una bandera binaria
+      -- olvidada comparada contra un porcentaje 0..100, de modo que solo
+      -- disparaba con un 1,00% exacto. Con beta NEGATIVA (-130,80) el legado
+      -- castiga al correo con mas del 85% de sus reportes por encima de 24
+      -- meses -- buzon muerto --, y el nuestro no castigaba a casi nadie.
+      CASE WHEN ema014 <= 8.33 THEN 1 WHEN ema014 <= 41.18 THEN 2
+           WHEN ema014 <= 85 THEN 3 WHEN ema014 > 85 THEN 4 ELSE 0 END AS c14,
+      -- EMA015 (:1013-1015) y EMA016 (:1016-1018) son BINARIAS en el legado,
+      -- de la misma familia que CEL015, CEL017 y CEL023: saltan 1 -> 4 y se
+      -- dividen entre 4, asi que el salto vale 3/4 de beta de golpe.
+      -- Nosotros las graduabamos en cuatro bandas inventadas, y el `< 1` de
+      -- EMA016 ni siquiera reproducia el `<= 0`: un 0,5% caia en 1 donde el
+      -- legado da 4.
+      CASE WHEN ema015 <= 0 THEN 1 ELSE 4 END AS c15,
+      CASE WHEN ema016 <= 0 THEN 1 ELSE 4 END AS c16,
+      -- EMA017 (:1019-1024) TOPA EN 3 y divide entre 4 (:679), de modo que
+      -- aporta como mucho el 75% de su beta. Es el TERCER caso de esa familia
+      -- junto a CEL019 y CEL006. Defecto del legado: se porta tal cual.
+      -- Nosotros llegabamos a 4 y sobre-penalizabamos (beta -30,56).
+      CASE WHEN ema017 <= 0 THEN 1 WHEN ema017 <= 66.67 THEN 2
+           WHEN ema017 > 66.67 THEN 3 ELSE 0 END AS c17,
       CASE WHEN ema018 <= 0 THEN 1 ELSE 4 END AS c18,   -- :1342-1349 (era ELSE 3)
       CASE WHEN ema020 <= 0 THEN 1 WHEN ema020 <= 50 THEN 2 WHEN ema020 > 50 THEN 3 ELSE 0 END AS c20,
       CASE WHEN ema021 <= 5 THEN 1 WHEN ema021 <= 45 THEN 2 WHEN ema021 <= 50 THEN 3 WHEN ema021 > 50 THEN 4 ELSE 0 END AS c21,
