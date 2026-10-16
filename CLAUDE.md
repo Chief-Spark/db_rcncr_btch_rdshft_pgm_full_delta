@@ -112,25 +112,40 @@ del equipo, SLCOPRBA-1355. Consecuencia asumida: los chequeos de `validar.sh`
 viven solo en el repo de trabajo; si alguna vez hacen falta del lado de
 Bitbucket, el sitio es un paso del pipeline, no el repo.
 
-**EL DETECTOR DEL `[REDSHIFT:419]` MIRA EL CHANGESET DEL BUILD, NO EL ARBOL
-DEL REPO.** Cuando lo encuentra imprime
+**EL `[REDSHIFT:419]` NO SALE Y EL JOB MUERE: LO VERIFICADO Y LO QUE NO.**
+Cuando el detector encuentra el paquete imprime
 `[REDSHIFT:419] Paquete detectado en 'deploy/redshift/<id>'`; cuando no, cae
 en silencio a la ruta legacy y el job muere con
 `NoSuchFileException: .../deploy/redshift/deploy.par`, antes del stage de
-despliegue y sin tocar DEV. Dos cosas dejan el changeset sin archivos del
-paquete, y las dos costaron un job:
+despliegue y **sin tocar DEV**. Eso esta comprobado en los jobs #372, #373 y
+#374, que fallan los tres con la misma firma.
 
-| Que | Job | Por que |
-|---|---|---|
-| Un commit que **no toca** `deploy/redshift/` | #372 | solo cambiaba `CLAUDE.md` y `validar.sh`: el build muere en vez de no hacer nada |
-| Un `push --force` | #373 | al reescribir la historia, el commit que construyo la vez anterior deja de ser alcanzable y el calculo de "que cambio" se queda vacio |
+**La causa raiz NO esta establecida, y tres explicaciones mias ya cayeron.**
+Estan aqui para que nadie las vuelva a pagar:
 
-**La salida de los dos casos es la misma: un commit normal hacia adelante que
-toque un archivo del paquete.** Nunca reescribir la rama de Bitbucket entre
-despliegues. Y conviene saber que el paquete en si estaba intacto en los dos
-fallos -- 151 archivos, ruta correcta --, de modo que **contar archivos no
-diagnostica nada aqui**: lo que hay que mirar es la pestana `Changes` del
-build.
+| Hipotesis | Estado |
+|---|---|
+| "El paquete desaparecio de la rama" | falsa segun `git ls-files`: 151 archivos, ruta correcta. Pero ojo al parrafo de abajo: esa comprobacion no valia |
+| "El commit no toca `deploy/redshift/`" | **sostenida solo para el #372** (`6a125a7` cambiaba unicamente `CLAUDE.md` y `validar.sh`): un commit asi tumba el build en vez de no hacer nada |
+| "Un `push --force` deja a Jenkins sin changeset" | **caida con el #374**, que fallo igual |
+
+**LA LECCION QUE SI VALE, Y ES DE METODO: `git ls-files` NO SIRVE PARA ESTO.**
+Lee el indice local; Jenkins construye el remoto de Bitbucket. La comprobacion
+correcta es
+`git ls-tree -r --name-only origin/<rama> -- deploy/redshift`, y hay que
+correrla **despues del push**, en el clon de Bitbucket.
+
+**Y hay un modo de fallo real en la secuencia del traslado** (`migra418.sh:88-92`):
+`git rm -r --cached deploy/redshift` borra el paquete del indice *antes* de que
+`git checkout github/<rama> -- deploy/redshift` lo reponga. PowerShell no
+encadena con `&&`, asi que si la copia falla, el `git commit` y el `git push`
+siguientes se ejecutan igual y **suben el borrado**. Verificar con
+`git ls-files` entre el `checkout` y el `commit`, y con `git ls-tree` contra el
+remoto despues del `push`.
+
+**Nunca reescribir la rama de Bitbucket entre despliegues**, y repuesto lo que
+falte, seguir siempre con un commit normal hacia adelante que toque un archivo
+del paquete.
 
 `rollback.par` es el reverso exacto de `deploy.par`, modulo el prefijo
 `NN_rollback_` en los archivos numerados. Todo archivo sin prefijo numerico
