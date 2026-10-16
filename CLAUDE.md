@@ -112,6 +112,26 @@ del equipo, SLCOPRBA-1355. Consecuencia asumida: los chequeos de `validar.sh`
 viven solo en el repo de trabajo; si alguna vez hacen falta del lado de
 Bitbucket, el sitio es un paso del pipeline, no el repo.
 
+**EL DETECTOR DEL `[REDSHIFT:419]` MIRA EL CHANGESET DEL BUILD, NO EL ARBOL
+DEL REPO.** Cuando lo encuentra imprime
+`[REDSHIFT:419] Paquete detectado en 'deploy/redshift/<id>'`; cuando no, cae
+en silencio a la ruta legacy y el job muere con
+`NoSuchFileException: .../deploy/redshift/deploy.par`, antes del stage de
+despliegue y sin tocar DEV. Dos cosas dejan el changeset sin archivos del
+paquete, y las dos costaron un job:
+
+| Que | Job | Por que |
+|---|---|---|
+| Un commit que **no toca** `deploy/redshift/` | #372 | solo cambiaba `CLAUDE.md` y `validar.sh`: el build muere en vez de no hacer nada |
+| Un `push --force` | #373 | al reescribir la historia, el commit que construyo la vez anterior deja de ser alcanzable y el calculo de "que cambio" se queda vacio |
+
+**La salida de los dos casos es la misma: un commit normal hacia adelante que
+toque un archivo del paquete.** Nunca reescribir la rama de Bitbucket entre
+despliegues. Y conviene saber que el paquete en si estaba intacto en los dos
+fallos -- 151 archivos, ruta correcta --, de modo que **contar archivos no
+diagnostica nada aqui**: lo que hay que mirar es la pestana `Changes` del
+build.
+
 `rollback.par` es el reverso exacto de `deploy.par`, modulo el prefijo
 `NN_rollback_` en los archivos numerados. Todo archivo sin prefijo numerico
 conserva su nombre en `RevSQL/`.
