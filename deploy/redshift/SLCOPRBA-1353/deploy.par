@@ -39,9 +39,12 @@ sp_unificacion_mock_r3_esc1_geo_misma_via_puerta_cercana.sql
 sp_unificacion_mock_regla3.sql
 sp_geo_exportar_insumo.sql
 sp_geo_exportar_insumo_mock.sql
+sp_geo_simular_arcgis_mock.sql
 sp_geo_cargar_georreferenciacion.sql
+sp_geo_cargar_georreferenciacion_mock.sql
 sp_geo_cargar_distancias.sql
 sp_geo_reenganchar_r3.sql
+sp_geo_reenganchar_r3_mock.sql
 sp_geo_ciclo_lote.sql
 sp_geo_exportar_insumo_wrapper.sql
 sp_geo_ciclo_lote_wrapper.sql
@@ -70,5 +73,6 @@ sp_unif_gate_convergencia_snapshot.sql
 sp_unif_gate_convergencia_evaluar.sql
 sp_unificacion_mock_gate_arq.sql
 sp_cert_evaluar_criterios_mock.sql
+sp_cert_geo_mock.sql
 sp_cert_evaluar_criterios_ord_mock.sql
 sp_cert_asercion_final.sql

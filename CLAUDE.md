@@ -159,6 +159,58 @@ remoto despues del `push`.
 falte, seguir siempre con un commit normal hacia adelante que toque un archivo
 del paquete.
 
+## El ciclo GEO mock: que se certifica y que no (SLCOPRBA-1355)
+
+**Los cinco criterios GEO estaban bloqueados por permisos, no por logica.** El
+rol IAM `rcncr-batch-redshift-geo` no esta asociado al cluster DEV, de modo
+que ni el `UNLOAD` escribe en S3 ni el `COPY` lee. Eso tumbaba CA-01 y dejaba
+CA-02..CA-05 sin forma de ejercitarse.
+
+**La salida fue sustituir el viaje a S3, no simular mal el resto.** Cuatro
+piezas nuevas y un interruptor:
+
+| Pieza | Que es |
+|---|---|
+| `s3_enabled` en `geo_config_mock` | vale `'0'` y hace que `sp_geo_exportar_insumo_mock` **omita** el `UNLOAD`. El Lote queda en `exportado` en vez de `fallido`, y **CA-01 se desbloquea solo**: el evaluador ya tenia `WHEN lc.estado = 'exportado' THEN 'PASSED'` |
+| `bdm_stage.mock_geo_respuesta` | **es el archivo de vuelta**, con las mismas 32 columnas crudas del contrato |
+| `sp_geo_simular_arcgis_mock` | el doble del sistema EXTERNO. No es un port, y el nombre lo dice |
+| `sp_geo_cargar_georreferenciacion_mock` | espejo del cargador. **Difiere en UNA sentencia**: el `COPY` pasa a `INSERT ... SELECT` |
+| `sp_geo_reenganchar_r3_mock` | espejo del reenganche. Solo cambian tres nombres |
+
+El alcance del tablero paso de **45 a 50** criterios.
+
+**LO QUE SIGUE SIN CERTIFICARSE, y hay que repetirlo cada vez que alguien lea
+el 50/50:** que el `UNLOAD` escriba de verdad en S3 y que el `COPY` lo lea.
+Son dos sentencias cuyo riesgo es de permisos. Todo lo demas -- gates de
+estado y de conteo, conciliacion de tipos, los tres rechazos, los tres
+`UPDATE` por Status y las dos ramas del reenganche -- es el mismo SQL.
+
+**EL CABLEADO YA EXISTIA Y NADIE LO SABIA.**
+`02b_vistas_insumo_mock.sql` define `v_mock_ubicacion_estandarizada` con un
+`COALESCE` de la latitud propia con la de `geo_atributos_mock` por `LEFT
+JOIN`. O sea que lo que el cargador mock escribe entra en la Regla 3 por el
+mismo camino que en produccion. Faltaba quien escribiera, no por donde.
+
+**LA TRAMPA QUE CASI CUESTA EL TABLERO DE UNIFICACION.** Un simulador que
+geocodificara las ~103.000 ubicaciones candidatas le daria a la Regla 3
+coordenadas que antes no tenia, apareceria con pares nuevos y moveria los
+conteos exactos de `R3-02`..`R3-10`, que estan en PASSED. Certificar GEO
+rompiendo Unificacion no es certificar. Por eso el modo `'M'` **solo devuelve
+geocodificada la ubicacion que YA tenia coordenadas en el mock, y con esas
+mismas coordenadas**. El insumo de la Regla 3 queda byte a byte igual.
+
+**Y UNA DE ORDEN:** el ciclo GEO mock corre **entre la convergencia y el
+tablero**, nunca dentro del e2e. El cargador mueve el Lote a `cargado` y CA-01
+exige verlo en `exportado`: metido dentro, CA-01 se caeria por un efecto de
+orden y no por un defecto.
+
+**Al generar un espejo por sustitucion, anclar el corte de cabecera a
+principio de linea.** Un `t.index('CREATE OR REPLACE PROCEDURE')` engancha la
+primera aparicion, que esta **dentro de un comentario** (`-- Objeto en
+bdm_datos; idempotente (CREATE OR REPLACE PROCEDURE).`), parte la linea en dos
+y deja un `)` suelto. Lo caza el chequeo de parentesis de `validar.sh`, no el
+de sintaxis.
+
 `rollback.par` es el reverso exacto de `deploy.par`, modulo el prefijo
 `NN_rollback_` en los archivos numerados. Todo archivo sin prefijo numerico
 conserva su nombre en `RevSQL/`.

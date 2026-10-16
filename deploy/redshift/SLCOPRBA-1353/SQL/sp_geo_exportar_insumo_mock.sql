@@ -21,6 +21,14 @@
 -- de distancias en la via mock, porque no hay enriquecimiento disponible; por
 -- eso la Regla 3 queda fuera de la certificacion mock.
 --
+-- SLCOPRBA-1355 -- EL UNLOAD YA NO SE LANZA EN LA VIA MOCK. El parametro
+-- s3_enabled de geo_config_mock vale '0' y hace que el UNLOAD se OMITA, de
+-- modo que el Lote queda en 'exportado' y CA-01 es certificable. Antes se
+-- lanzaba y fallaba, y el Lote acababa en 'fallido': eso es lo que tenia
+-- bloqueado el criterio. El camino REAL no lee s3_enabled y sigue igual.
+-- Con s3_enabled = '1' se recupera el comportamiento de abajo, que se
+-- conserva palabra por palabra porque sigue siendo cierto:
+--
 -- EL UNLOAD DEBE FALLAR Y ESO ES RESULTADO ESPERADO:
 --   el rol IAM rcncr-batch-redshift-geo no esta asociado al cluster DEV. El
 --   fallo de exportacion NO es bloqueante por diseno (Req 2.10, 2.11): se marca
@@ -78,6 +86,7 @@ DECLARE
   v_unload_select   VARCHAR(2000);
   v_unload_sql      VARCHAR(8000);
   v_dbg             VARCHAR(500);
+  v_s3_enabled      VARCHAR(500);
 BEGIN
   v_usuario       := LEFT(CURRENT_USER, 100);
   v_cuenta_actual := CURRENT_AWS_ACCOUNT;
@@ -151,6 +160,15 @@ BEGIN
   FROM bdm_datos.geo_config_mock WHERE ambiente = v_ambiente AND parametro = 'iam_role';
   IF v_iam_role IS NULL THEN
     RAISE EXCEPTION 'sp_geo_exportar_insumo_mock: parametro ausente: iam_role (ambiente %).', v_ambiente;
+  END IF;
+
+  -- s3_enabled: interruptor del viaje a S3, propio de la via mock. Ausente se
+  -- interpreta como '0' (no exportar) y NO aborta: un ambiente que todavia no
+  -- tenga la fila debe comportarse como mock, no reventar.
+  SELECT valor INTO v_s3_enabled
+  FROM bdm_datos.geo_config_mock WHERE ambiente = v_ambiente AND parametro = 's3_enabled';
+  IF v_s3_enabled IS NULL THEN
+    v_s3_enabled := '0';
   END IF;
 
   SELECT NULLIF(valor, '')::INTEGER INTO v_max_records
@@ -312,6 +330,16 @@ BEGIN
   -- Fallo de exportacion NO bloqueante (Req 2.10, 2.11): RAISE INFO, no
   -- EXCEPTION, para que la corrida continue con R1+R2 hacia Ordenamiento.
   -- En DEV se espera que caiga aqui por el rol IAM no asociado al cluster.
+  IF v_s3_enabled <> '1' THEN
+    -- VIA MOCK: no se toca S3. El Lote se queda como lo dejo el INSERT de
+    -- arriba, 'exportado', con sus candidatos etiquetados y en estado
+    -- 'pendiente de geocodificacion'. Es exactamente lo que pide CA-01; lo
+    -- unico que no ocurre es el archivo fisico, y eso queda escrito como
+    -- divergencia en vez de disfrazarse de exito.
+    RAISE INFO 'sp_geo_exportar_insumo_mock: Lote % exportado (% candidatos, ambiente %); UNLOAD OMITIDO por s3_enabled=0 (via mock). El destino que se habria usado es %.',
+      v_lote, v_conteo, v_ambiente, v_s3_target;
+
+  ELSE
   BEGIN
     EXECUTE v_unload_sql;
 
@@ -329,6 +357,7 @@ BEGIN
     RAISE INFO 'sp_geo_exportar_insumo_mock: Lote % marcado fallido (fase exportacion): %. Pipeline NO bloqueado; continua a Ordenamiento con R1+R2.',
       v_lote, SQLERRM;
   END;
+  END IF;
 
   DROP TABLE IF EXISTS bdm_tempo.stg_mock_geo_insumo;
   DROP TABLE IF EXISTS bdm_tempo.stg_mock_geo_candidatos;
