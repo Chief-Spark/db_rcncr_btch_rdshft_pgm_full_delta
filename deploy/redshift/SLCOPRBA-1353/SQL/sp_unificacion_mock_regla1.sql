@@ -1,7 +1,7 @@
 -- Orquestador Regla 1
--- MODO MOCK — lee v_mock_*/bdm_stage; NO usa edf_views ni v_xpm_*
+-- MODO MOCK - lee v_mock_*/bdm_stage; NO usa edf_views ni v_xpm_*
 -- Escenario: CALL escenarios R1 en orden
--- Fuente: bdm_stage → bdm_tempo.v_mock_* | Salida: bdm_datos.unificacion_direccion_mock | MODO MOCK
+-- Fuente: bdm_stage -> bdm_tempo.v_mock_* | Salida: bdm_datos.unificacion_direccion_mock | MODO MOCK
 -- Generado: tools/gen_unificacion_mock_sps.py (espejo mock)
 
 CREATE OR REPLACE PROCEDURE bdm_datos.sp_unificacion_mock_regla1(

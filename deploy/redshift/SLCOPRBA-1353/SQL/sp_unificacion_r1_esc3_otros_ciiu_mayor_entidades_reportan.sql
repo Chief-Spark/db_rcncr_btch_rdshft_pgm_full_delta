@@ -1,6 +1,6 @@
--- R1 Esc3 — otros CIIU, mismo texto distinto tipo
--- Escenario: Gana quien reportan más entidades
--- Fuente: edf_views → bdm_tempo.v_xpm_* | Salida: bdm_datos.unificacion_direccion
+-- R1 Esc3 - otros CIIU, mismo texto distinto tipo
+-- Escenario: Gana quien reportan mas entidades
+-- Fuente: edf_views -> bdm_tempo.v_xpm_* | Salida: bdm_datos.unificacion_direccion
 -- Prerequisito: sp_unificacion_r1_preparar_insumo
 -- Generado: tools/gen_unificacion_sps_por_escenario.py
 

@@ -2,10 +2,10 @@
 -- Escenario: por cada PADRE del grupo crea UNA direccion nueva con el
 --            complemento del padre mas lo que aportan sus hijos, unifica el
 --            grupo COMPLETO contra ella y lo marca 'X4'.
--- Fuente: bdm_stage → bdm_tempo.v_mock_* | Salida: bdm_datos.direccion_fisica_generada_mock + bdm_datos.rpu_generada_mock + bdm_datos.unificacion_direccion_mock
+-- Fuente: bdm_stage -> bdm_tempo.v_mock_* | Salida: bdm_datos.direccion_fisica_generada_mock + bdm_datos.rpu_generada_mock + bdm_datos.unificacion_direccion_mock
 -- Prerequisito: sp_unificacion_mock_r2_esc3_sin_nit_misma_nomenclatura
 --               sp_unificacion_mock_r2_construir_diccionario_complementos
--- MODO MOCK — lee v_mock_*/bdm_stage; NO usa edf_views ni v_xpm_*
+-- MODO MOCK - lee v_mock_*/bdm_stage; NO usa edf_views ni v_xpm_*
 --
 -- PARIDAD CON TERADATA (PRO_UnificacionR2.sql)
 --

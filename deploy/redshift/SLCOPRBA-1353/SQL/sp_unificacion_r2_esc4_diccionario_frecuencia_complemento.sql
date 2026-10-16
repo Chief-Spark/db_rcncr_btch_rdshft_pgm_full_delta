@@ -1,8 +1,8 @@
--- R2 Esc4 — diccionario de complementos
+-- R2 Esc4 - diccionario de complementos
 -- Escenario: Gana mayor frecuencia en diccionario; empate excluido
 -- Fix QA 2026-09-11 (TC-R2-14 / R2_EMPATE): stg_regla2_e04_ganador + HAVING COUNT(*)=1
---   → si dos RPU empatan en frecuencia máxima, NO unifica
--- Fuente: edf_views → bdm_tempo.v_xpm_* | Salida: bdm_datos.unificacion_direccion
+--   -> si dos RPU empatan en frecuencia maxima, NO unifica
+-- Fuente: edf_views -> bdm_tempo.v_xpm_* | Salida: bdm_datos.unificacion_direccion
 -- Prerequisito: sp_unificacion_r2_esc3_sin_nit_misma_nomenclatura
 -- Generado: tools/gen_unificacion_sps_por_escenario.py
 

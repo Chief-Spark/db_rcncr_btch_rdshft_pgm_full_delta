@@ -1,7 +1,7 @@
--- R2 Esc5 — nivel de nomenclatura
--- MODO MOCK — lee v_mock_*/bdm_stage; NO usa edf_views ni v_xpm_*
+-- R2 Esc5 - nivel de nomenclatura
+-- MODO MOCK - lee v_mock_*/bdm_stage; NO usa edf_views ni v_xpm_*
 -- Escenario: Nomenclaturas distintas: menor nivel pierde
--- Fuente: bdm_stage → bdm_tempo.v_mock_* | Salida: bdm_datos.unificacion_direccion_mock | MODO MOCK
+-- Fuente: bdm_stage -> bdm_tempo.v_mock_* | Salida: bdm_datos.unificacion_direccion_mock | MODO MOCK
 -- Prerequisito: sp_unificacion_mock_r2_esc4_diccionario_frecuencia_complemento
 -- Generado: tools/gen_unificacion_mock_sps.py (espejo mock)
 

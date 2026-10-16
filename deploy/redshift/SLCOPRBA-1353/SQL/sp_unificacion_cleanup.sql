@@ -1,5 +1,5 @@
 -- Cleanup nivel 0 - Unificacion (datos reales feature/unificacion-edf-views)
--- SLCOPRBA-1284 / SLCOPRBA-1287: promoción a QA Unificación Alpha (edf_views)
+-- SLCOPRBA-1284 / SLCOPRBA-1287: promocion a QA Unificacion Alpha (edf_views)
 -- Fuente: edf_views | Salida: bdm_datos.unificacion_direccion
 -- Reset de la tabla de salida antes de aplicar R1/R2/R3 via Framework Batch.
 

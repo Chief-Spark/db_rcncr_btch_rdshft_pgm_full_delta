@@ -1,6 +1,6 @@
--- R2 Esc5 — nivel de nomenclatura
+-- R2 Esc5 - nivel de nomenclatura
 -- Escenario: Nomenclaturas distintas: menor nivel pierde
--- Fuente: edf_views → bdm_tempo.v_xpm_* | Salida: bdm_datos.unificacion_direccion
+-- Fuente: edf_views -> bdm_tempo.v_xpm_* | Salida: bdm_datos.unificacion_direccion
 -- Prerequisito: sp_unificacion_r2_esc4_diccionario_frecuencia_complemento
 -- Generado: tools/gen_unificacion_sps_por_escenario.py
 

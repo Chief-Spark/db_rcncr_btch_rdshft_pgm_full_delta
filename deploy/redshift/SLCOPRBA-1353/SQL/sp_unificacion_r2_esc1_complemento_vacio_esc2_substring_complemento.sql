@@ -1,6 +1,6 @@
--- R2 Esc1 — complemento vacío absorbe con complemento
--- Escenario: R2 Esc2 — substring de complemento en mismo texto
--- Fuente: edf_views → bdm_tempo.v_xpm_* | Salida: bdm_datos.unificacion_direccion
+-- R2 Esc1 - complemento vacio absorbe con complemento
+-- Escenario: R2 Esc2 - substring de complemento en mismo texto
+-- Fuente: edf_views -> bdm_tempo.v_xpm_* | Salida: bdm_datos.unificacion_direccion
 -- Prerequisito: sp_unificacion_r2_preparar_insumo
 -- Generado: tools/gen_unificacion_sps_por_escenario.py
 

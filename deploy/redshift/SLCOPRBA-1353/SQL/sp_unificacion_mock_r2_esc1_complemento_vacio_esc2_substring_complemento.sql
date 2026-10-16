@@ -1,7 +1,7 @@
--- R2 Esc1 — complemento vacío absorbe con complemento
--- MODO MOCK — lee v_mock_*/bdm_stage; NO usa edf_views ni v_xpm_*
--- Escenario: R2 Esc2 — substring de complemento en mismo texto
--- Fuente: bdm_stage → bdm_tempo.v_mock_* | Salida: bdm_datos.unificacion_direccion_mock | MODO MOCK
+-- R2 Esc1 - complemento vacio absorbe con complemento
+-- MODO MOCK - lee v_mock_*/bdm_stage; NO usa edf_views ni v_xpm_*
+-- Escenario: R2 Esc2 - substring de complemento en mismo texto
+-- Fuente: bdm_stage -> bdm_tempo.v_mock_* | Salida: bdm_datos.unificacion_direccion_mock | MODO MOCK
 -- Prerequisito: sp_unificacion_mock_r2_preparar_insumo
 -- Generado: tools/gen_unificacion_mock_sps.py (espejo mock)
 

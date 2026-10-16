@@ -21,7 +21,7 @@
 --   * Apertura de la fila de corrida en unif_control (estado 'en proceso'),
 --     recuperando el corrida_id generado por IDENTITY (Req 4.2, 1.5, 14.1).
 --
--- ALCANCE AÑADIDO EN LA OLA ACTUAL (Task 4.2):
+-- ALCANCE ANADIDO EN LA OLA ACTUAL (Task 4.2):
 --   * TRUNCATE condicional al modo efectivo (solo FULL/Bootstrap, una vez al
 --     inicio) sobre bdm_datos.unificacion_direccion (Req 5.3, 10.2).
 --   * Encadenado R1 -> R2 -> GEO -> R3 propagando (v_modo_efectivo, v_lote,
@@ -31,7 +31,7 @@
 --   * Materializacion de bdm_tempo.stg_unif_delta_ubic tras R2 (patron
 --     DROP-CREATE) con las cod_dw_ubic distintas del universo delta (Req 1.4).
 --
--- ALCANCE AÑADIDO EN LA OLA ACTUAL (Task 4.3):
+-- ALCANCE ANADIDO EN LA OLA ACTUAL (Task 4.3):
 --   * El encadenado (Task 4.2) y el avance de Watermark + cierre 'completado'
 --     (happy path) quedan envueltos en un BEGIN ... EXCEPTION WHEN OTHERS ... END
 --     interno (habilitado por NONATOMIC): asi el fallo de cualquier etapa se
@@ -102,7 +102,7 @@ DECLARE
     v_pers_distintas BIGINT := 0;  -- distinct id_buro_persona del universo procesado
     v_total_unif    BIGINT := 0;   -- parejas de la Clave_Unificacion producidas para el lote
 
-    -- Etapa en curso: permite cerrar 'fallido' exactamente la etapa que abortó
+    -- Etapa en curso: permite cerrar 'fallido' exactamente la etapa que aborto
     -- dentro del bloque EXCEPTION del encadenado (Task 4.3, Req 13.8).
     v_etapa_actual  VARCHAR(20);
 BEGIN

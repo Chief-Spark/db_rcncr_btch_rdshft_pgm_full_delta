@@ -1,6 +1,6 @@
--- R1 Esc2 — CIIU 81/82/90, mismo texto distinto tipo
--- Escenario: Padre RES/CRR + más entidades reportan
--- Fuente: edf_views → bdm_tempo.v_xpm_* | Salida: bdm_datos.unificacion_direccion
+-- R1 Esc2 - CIIU 81/82/90, mismo texto distinto tipo
+-- Escenario: Padre RES/CRR + mas entidades reportan
+-- Fuente: edf_views -> bdm_tempo.v_xpm_* | Salida: bdm_datos.unificacion_direccion
 -- Prerequisito: sp_unificacion_r1_preparar_insumo
 -- Generado: tools/gen_unificacion_sps_por_escenario.py
 

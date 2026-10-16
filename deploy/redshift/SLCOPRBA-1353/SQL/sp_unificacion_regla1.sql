@@ -1,6 +1,6 @@
 -- Orquestador Regla 1
 -- Escenario: CALL escenarios R1 en orden
--- Fuente: edf_views → bdm_tempo.v_xpm_* | Salida: bdm_datos.unificacion_direccion
+-- Fuente: edf_views -> bdm_tempo.v_xpm_* | Salida: bdm_datos.unificacion_direccion
 -- Generado: tools/gen_unificacion_sps_por_escenario.py
 
 -- Firma Framework Batch (6 params VARCHAR): in_solicitud, in_nit_suscriptor,

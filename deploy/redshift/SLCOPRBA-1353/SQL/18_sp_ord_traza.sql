@@ -1,5 +1,5 @@
 -- ============================================================
--- 18_sp_ord_traza.sql — traza no bloqueante Ordenamiento
+-- 18_sp_ord_traza.sql - traza no bloqueante Ordenamiento
 -- ============================================================
 
 CREATE OR REPLACE PROCEDURE bdm_datos.ord_traza_inicio(

@@ -1,7 +1,7 @@
--- R2 Esc3 — misma nomenclatura sin NIT
--- MODO MOCK — lee v_mock_*/bdm_stage; NO usa edf_views ni v_xpm_*
--- Escenario: Excluye tipo identificación 3 (NIT)
--- Fuente: bdm_stage → bdm_tempo.v_mock_* | Salida: bdm_datos.unificacion_direccion_mock | MODO MOCK
+-- R2 Esc3 - misma nomenclatura sin NIT
+-- MODO MOCK - lee v_mock_*/bdm_stage; NO usa edf_views ni v_xpm_*
+-- Escenario: Excluye tipo identificacion 3 (NIT)
+-- Fuente: bdm_stage -> bdm_tempo.v_mock_* | Salida: bdm_datos.unificacion_direccion_mock | MODO MOCK
 -- Prerequisito: sp_unificacion_mock_r2_esc1_complemento_vacio_esc2_substring_complemento
 -- Generado: tools/gen_unificacion_mock_sps.py (espejo mock)
 

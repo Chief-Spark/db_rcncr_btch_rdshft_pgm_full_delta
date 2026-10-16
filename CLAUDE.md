@@ -112,7 +112,19 @@ del equipo, SLCOPRBA-1355. Consecuencia asumida: los chequeos de `validar.sh`
 viven solo en el repo de trabajo; si alguna vez hacen falta del lado de
 Bitbucket, el sitio es un paso del pipeline, no el repo.
 
-**EL `[REDSHIFT:419]` NO SALE Y EL JOB MUERE: LO VERIFICADO Y LO QUE NO.**
+**EL `[REDSHIFT:419]` NO SALE: ES DEL PIPELINE, NO DEL REPO.** Lo cierra una
+prueba que no admite lectura alternativa: **STRCT desplego verde un dia y al
+siguiente fallo identico, con el mismo paquete y sin un commit de por medio.**
+Cuatro hipotesis mias cayeron por buscar la causa en el repo. Escalado a
+DevSecOps. El paquete esta verificado contra el remoto de Bitbucket: 151
+archivos bajo `deploy/redshift/SLCOPRBA-1353/`.
+
+**EL CLUSTER DE DEV SE PAUSA A DIARIO SOBRE LAS 19:00 DE BOGOTA.** La ventana
+de despliegue termina ahi. No explica los fallos de arriba -- el #372, el #373
+y el #374 se lanzaron entre las 18:00 y las 19:00, con el cluster arriba --,
+pero decide a que hora se puede lanzar.
+
+**LO QUE SE COMPROBO SOBRE EL 419, Y LO QUE NO.**
 Cuando el detector encuentra el paquete imprime
 `[REDSHIFT:419] Paquete detectado en 'deploy/redshift/<id>'`; cuando no, cae
 en silencio a la ruta legacy y el job muere con
@@ -154,6 +166,16 @@ conserva su nombre en `RevSQL/`.
 ## Convenciones de codigo
 
 - **UTF-8 sin BOM. ASCII sin acentos**, a proposito, en todo el repo.
+  **El paquete esta limpio y el chequeo 2 de `validar.sh` ya lo EXIGE entero**
+  (SLCOPRBA-1355: 58 archivos y 157 lineas, todas comentarios -- 9 en strct,
+  37 en pgm, 12 en dt). Dos cosas que conviene saber si se vuelve a tocar:
+  **`docs/` y `README.md` quedan fuera a proposito**, porque son prosa en
+  castellano y ahi los acentos son correctos; y **habia mojibake** (UTF-8 ya
+  leido una vez como cp1252) en `02_vistas_insumo_edf_views.sql`, que hay que
+  **decodificar con `cp1252` ANTES de transliterar**. Con `latin-1` la
+  conversion revienta en silencio en cuanto la linea lleva un caracter
+  tipografico -- una flecha, una raya o una comilla curva, que no existen en
+  latin-1 --, la reparacion se salta y el acento acaba convertido en `A3`.
 - `NONATOMIC` en toda la cadena de `CALL`. Mezclar modos rompe con
   *"P0001: created in one transaction mode cannot be invoked from another"*.
 - Rollback de procedimientos: `DROP PROCEDURE nombre(<firma exacta>);`

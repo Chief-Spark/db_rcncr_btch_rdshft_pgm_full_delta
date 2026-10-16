@@ -1,7 +1,7 @@
--- R1 — materializar insumo
--- MODO MOCK — lee v_mock_*/bdm_stage; NO usa edf_views ni v_xpm_*
--- Escenario: común R1
--- Fuente: bdm_stage → bdm_tempo.v_mock_* | Salida: bdm_datos.unificacion_direccion_mock | MODO MOCK
+-- R1 - materializar insumo
+-- MODO MOCK - lee v_mock_*/bdm_stage; NO usa edf_views ni v_xpm_*
+-- Escenario: comun R1
+-- Fuente: bdm_stage -> bdm_tempo.v_mock_* | Salida: bdm_datos.unificacion_direccion_mock | MODO MOCK
 -- Prerequisito: vistas v_mock_* + seed bdm_stage
 -- Generado: tools/gen_unificacion_mock_sps.py (espejo mock)
 

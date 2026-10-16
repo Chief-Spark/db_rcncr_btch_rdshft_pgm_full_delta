@@ -1,4 +1,4 @@
--- 13_sp_ordenamiento_scoring_cel_edf.sql (generado — staging EDF, una lectura datashare en preparar)
+-- 13_sp_ordenamiento_scoring_cel_edf.sql (generado - staging EDF, una lectura datashare en preparar)
 -- Regenerar: py -3 tools/gen_ordenamiento_sps_edf.py
 
 CREATE OR REPLACE PROCEDURE bdm_datos.sp_ordenamiento_scoring_cel_edf()
@@ -7,9 +7,9 @@ LANGUAGE plpgsql
 AS $$
 BEGIN
   -- ============================================================
-  -- 04_scoring_cel.sql — Scoring Celular (canal CEL)
-  -- 63 sentencias Teradata → 1 query con CTEs
-  -- 11 características: CEL003-CEL023
+  -- 04_scoring_cel.sql - Scoring Celular (canal CEL)
+  -- 63 sentencias Teradata -> 1 query con CTEs
+  -- 11 caracteristicas: CEL003-CEL023
   -- ============================================================
 
   DELETE FROM bdm_datos.score_ordenamiento

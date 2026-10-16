@@ -1,9 +1,9 @@
--- R2 Esc4 — diccionario de complementos
--- MODO MOCK — lee v_mock_*/bdm_stage; NO usa edf_views ni v_xpm_*
+-- R2 Esc4 - diccionario de complementos
+-- MODO MOCK - lee v_mock_*/bdm_stage; NO usa edf_views ni v_xpm_*
 -- Escenario: Gana mayor frecuencia en diccionario; empate excluido
 -- Fix QA 2026-09-11 (TC-R2-14 / R2_EMPATE): stg_regla2_e04_ganador + HAVING COUNT(*)=1
---   → si dos RPU empatan en frecuencia máxima, NO unifica
--- Fuente: bdm_stage → bdm_tempo.v_mock_* | Salida: bdm_datos.unificacion_direccion_mock | MODO MOCK
+--   -> si dos RPU empatan en frecuencia maxima, NO unifica
+-- Fuente: bdm_stage -> bdm_tempo.v_mock_* | Salida: bdm_datos.unificacion_direccion_mock | MODO MOCK
 -- Prerequisito: sp_unificacion_mock_r2_esc3_sin_nit_misma_nomenclatura
 -- Generado: tools/gen_unificacion_mock_sps.py (espejo mock)
 

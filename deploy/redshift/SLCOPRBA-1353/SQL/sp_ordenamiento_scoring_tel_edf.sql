@@ -1,4 +1,4 @@
--- 12_sp_ordenamiento_scoring_tel_edf.sql (generado — staging EDF, una lectura datashare en preparar)
+-- 12_sp_ordenamiento_scoring_tel_edf.sql (generado - staging EDF, una lectura datashare en preparar)
 -- Regenerar: py -3 tools/gen_ordenamiento_sps_edf.py
 
 CREATE OR REPLACE PROCEDURE bdm_datos.sp_ordenamiento_scoring_tel_edf()
@@ -7,9 +7,9 @@ LANGUAGE plpgsql
 AS $$
 BEGIN
   -- ============================================================
-  -- 03_scoring_tel.sql — Scoring Teléfono Fijo (canal TEL)
-  -- 82 sentencias Teradata → 1 query con CTEs
-  -- 11 características: TEL001-TEL025
+  -- 03_scoring_tel.sql - Scoring Telefono Fijo (canal TEL)
+  -- 82 sentencias Teradata -> 1 query con CTEs
+  -- 11 caracteristicas: TEL001-TEL025
   -- ============================================================
 
   DELETE FROM bdm_datos.score_ordenamiento

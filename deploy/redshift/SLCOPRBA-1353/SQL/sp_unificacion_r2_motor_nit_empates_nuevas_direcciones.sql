@@ -2,7 +2,7 @@
 -- Escenario: por cada PADRE del grupo crea UNA direccion nueva con el
 --            complemento del padre mas lo que aportan sus hijos, unifica el
 --            grupo COMPLETO contra ella y lo marca 'X4'.
--- Fuente: edf_views → bdm_tempo.v_xpm_* | Salida: bdm_datos.direccion_fisica_generada + bdm_datos.rpu_generada + bdm_datos.unificacion_direccion
+-- Fuente: edf_views -> bdm_tempo.v_xpm_* | Salida: bdm_datos.direccion_fisica_generada + bdm_datos.rpu_generada + bdm_datos.unificacion_direccion
 -- Prerequisito: sp_unificacion_r2_esc3_sin_nit_misma_nomenclatura
 --               sp_unificacion_r2_construir_diccionario_complementos
 --

@@ -1,4 +1,4 @@
--- 14_sp_ordenamiento_scoring_ema_edf.sql (generado — staging EDF, una lectura datashare en preparar)
+-- 14_sp_ordenamiento_scoring_ema_edf.sql (generado - staging EDF, una lectura datashare en preparar)
 -- Regenerar: py -3 tools/gen_ordenamiento_sps_edf.py
 
 CREATE OR REPLACE PROCEDURE bdm_datos.sp_ordenamiento_scoring_ema_edf()
@@ -7,9 +7,9 @@ LANGUAGE plpgsql
 AS $$
 BEGIN
   -- ============================================================
-  -- 05_scoring_ema.sql — Scoring Email (canal EMA)
-  -- 38 sentencias Teradata → 1 query con CTEs
-  -- 13 características: EMA003-EMA025
+  -- 05_scoring_ema.sql - Scoring Email (canal EMA)
+  -- 38 sentencias Teradata -> 1 query con CTEs
+  -- 13 caracteristicas: EMA003-EMA025
   -- ============================================================
 
   DELETE FROM bdm_datos.score_ordenamiento

@@ -1,4 +1,4 @@
--- 11_sp_ordenamiento_scoring_dir_edf.sql (generado — staging EDF, una lectura datashare en preparar)
+-- 11_sp_ordenamiento_scoring_dir_edf.sql (generado - staging EDF, una lectura datashare en preparar)
 -- Regenerar: py -3 tools/gen_ordenamiento_sps_edf.py
 
 CREATE OR REPLACE PROCEDURE bdm_datos.sp_ordenamiento_scoring_dir_edf()
@@ -15,7 +15,7 @@ BEGIN
   -- Input: bdm_tempo.stg_insumo_direccion + bdm_datos.beta_ordenamiento
   -- Output: INSERT en bdm_datos.score_ordenamiento (canal='DIR')
   --
-  -- 12 características: DIR001IN, DIR004RO, DIR007TO, DIR010FI,
+  -- 12 caracteristicas: DIR001IN, DIR004RO, DIR007TO, DIR010FI,
   --   DIR013OT, DIR017, DIR019, DIR034FI, DIR050TO, DIR057, DIR059, DIR009
   -- ============================================================
 
@@ -27,7 +27,7 @@ BEGIN
     cod_dw_persona_ubic, cod_pin_persona, id_buro_persona, canal, score, lugar
   )
   WITH
-  -- Paso base: agregar métricas por persona+dirección
+  -- Paso base: agregar metricas por persona+direccion
   base_agg AS (
     SELECT
       MIN(cod_dw_persona_ubic) AS cod_dw_persona_ubic,
@@ -137,7 +137,7 @@ BEGIN
     GROUP BY id_buro_persona, direccion_fisica
   ),
 
-  -- Métricas a nivel persona (window functions separadas del GROUP BY)
+  -- Metricas a nivel persona (window functions separadas del GROUP BY)
   persona_stats AS (
     SELECT id_buro_persona,
       SUM(cnt_reportes) AS dir050to,
@@ -195,7 +195,7 @@ BEGIN
     JOIN persona_dir  pd ON a.id_buro_persona = pd.id_buro_persona
   ),
 
-  -- Categorización (CASE WHEN → 1..N)
+  -- Categorizacion (CASE WHEN -> 1..N)
   categorized AS (
     SELECT
       cod_dw_persona_ubic, cod_pin_persona, id_buro_persona, direccion_fisica,
@@ -211,7 +211,7 @@ BEGIN
       -- DIR013OT: % otros
       CASE WHEN dir013ot IS NULL THEN 1 WHEN dir013ot <= 4.35 THEN 2
            WHEN dir013ot <= 6.9 THEN 3 WHEN dir013ot <= 14.29 THEN 4 ELSE 5 END AS cat_013ot,
-      -- DIR017: tipo ubicación
+      -- DIR017: tipo ubicacion
       CASE WHEN dir017 IS NULL THEN 1 WHEN dir017 <= 1 THEN 2 ELSE 3 END AS cat_017,
       -- DIR019: el legado NO tiene tabla _Cat para esta. Su _Peso (:456) usa
       -- el valor crudo 0/1 con divisor 2. El mapeo 0->1 / 1->2 que habia aqui
@@ -226,7 +226,7 @@ BEGIN
       -- DIR057: conteo direcciones
       CASE WHEN dir057 IS NULL THEN 1 WHEN dir057 <= 1 THEN 2 WHEN dir057 <= 5 THEN 3
            WHEN dir057 <= 7 THEN 4 WHEN dir057 <= 16 THEN 5 ELSE 6 END AS cat_057,
-      -- DIR059: % reportes dirección
+      -- DIR059: % reportes direccion
       CASE WHEN dir059 IS NULL OR dir059 <= 22.83 THEN 1 WHEN dir059 <= 39.87 THEN 2
            WHEN dir059 <= 52.87 THEN 3 WHEN dir059 <= 58.52 THEN 4 ELSE 5 END AS cat_059,
       -- DIR009: entidades
@@ -234,7 +234,7 @@ BEGIN
     FROM base
   ),
 
-  -- Pesos: (cat / max_cat) × Beta
+  -- Pesos: (cat / max_cat) x Beta
   scored AS (
     SELECT
       c.cod_dw_persona_ubic, c.cod_pin_persona, c.id_buro_persona, c.direccion_fisica,

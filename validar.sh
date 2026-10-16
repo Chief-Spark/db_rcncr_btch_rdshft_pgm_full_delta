@@ -38,20 +38,25 @@ if [ -n "$BOMS" ]; then bad "archivos con BOM:"; echo "$BOMS" | sed 's/^/       
 else ok "sin BOM"; fi
 
 # ------------------------------------------------------------
-# 2. ASCII en lo que ESTE cambio anade
-#    (no en todo el repo: hay cabeceras generadas con acentos de antes)
+# 2. ASCII: TOTAL en el paquete, incremental fuera de el
 # ------------------------------------------------------------
-echo "2) ASCII en las lineas anadidas"
-# El alcance es EL REPO ENTERO, no solo el paquete: la convencion dice
-# "ASCII sin acentos en todo el repo" y hasta hoy este chequeo miraba solo
-# "$ROOT", de modo que un acento en CLAUDE.md, en docs/ o en el propio
-# validar.sh pasaba sin que nadie lo viera. Se colo uno asi (SLCOPRBA-1355).
+echo "2) ASCII"
+# El paquete se exige ENTERO y ya no como aspiracion: se limpio en
+# SLCOPRBA-1355 (58 archivos, 157 lineas, todas comentarios) y hoy no tiene
+# un solo byte no-ASCII, de modo que la regla se puede hacer cumplir. Es lo
+# que viaja a Redshift, asi que es donde importa.
+# docs/ y README.md quedan FUERA del barrido total a proposito: son prosa en
+# castellano y ahi los acentos son correctos. Para esos, y para cualquier
+# archivo nuevo, sigue el chequeo incremental sobre lo que el cambio anade,
+# que es lo que caza un acento recien escrito (se colo uno asi, SLCOPRBA-1355).
+PAQ=$(LC_ALL=C grep -rlP '[^\x00-\x7F]' "$ROOT" 2>/dev/null)
 ADDED=$( { git diff "$BASE" -- . 2>/dev/null | grep '^+' | grep -v '^+++'
            git ls-files --others --exclude-standard 2>/dev/null \
              | while read -r f; do sed 's/^/+/' "$f"; done
          } | grep -nP '[^\x00-\x7F]' )
-if [ -n "$ADDED" ]; then bad "lineas anadidas con no-ASCII:"; echo "$ADDED" | head -20 | sed 's/^/        /'
-else ok "solo ASCII"; fi
+if [ -n "$PAQ" ]; then bad "no-ASCII en el paquete:"; echo "$PAQ" | head -20 | sed 's/^/        /'
+elif [ -n "$ADDED" ]; then bad "lineas anadidas con no-ASCII:"; echo "$ADDED" | head -20 | sed 's/^/        /'
+else ok "paquete ASCII puro; nada no-ASCII en lo anadido"; fi
 
 # ------------------------------------------------------------
 # 3-8. El resto, en un solo recorrido

@@ -1,6 +1,6 @@
--- R2 — materializar insumo
--- Escenario: común R2
--- Fuente: edf_views → bdm_tempo.v_xpm_* | Salida: bdm_datos.unificacion_direccion
+-- R2 - materializar insumo
+-- Escenario: comun R2
+-- Fuente: edf_views -> bdm_tempo.v_xpm_* | Salida: bdm_datos.unificacion_direccion
 -- Prerequisito: Regla 1 ejecutada
 -- Generado: tools/gen_unificacion_sps_por_escenario.py
 

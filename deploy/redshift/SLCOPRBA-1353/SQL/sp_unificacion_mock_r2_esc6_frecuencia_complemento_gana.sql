@@ -1,7 +1,7 @@
--- R2 Esc6 — frecuencia de complemento
--- MODO MOCK — lee v_mock_*/bdm_stage; NO usa edf_views ni v_xpm_*
+-- R2 Esc6 - frecuencia de complemento
+-- MODO MOCK - lee v_mock_*/bdm_stage; NO usa edf_views ni v_xpm_*
 -- Escenario: Mayor frecuencia en diccionario gana
--- Fuente: bdm_stage → bdm_tempo.v_mock_* | Salida: bdm_datos.unificacion_direccion_mock | MODO MOCK
+-- Fuente: bdm_stage -> bdm_tempo.v_mock_* | Salida: bdm_datos.unificacion_direccion_mock | MODO MOCK
 -- Prerequisito: sp_unificacion_mock_r2_esc5_nomenclatura_menor_nivel_pierde
 -- Generado: tools/gen_unificacion_mock_sps.py (espejo mock)
 

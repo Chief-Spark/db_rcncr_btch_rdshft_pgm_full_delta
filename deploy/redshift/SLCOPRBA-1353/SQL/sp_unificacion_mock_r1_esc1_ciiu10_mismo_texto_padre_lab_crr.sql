@@ -1,7 +1,7 @@
--- R1 Esc1 — CIIU 10, mismo texto distinto tipo
--- MODO MOCK — lee v_mock_*/bdm_stage; NO usa edf_views ni v_xpm_*
--- Escenario: Padre LAB/CRR + más entidades reportan
--- Fuente: bdm_stage → bdm_tempo.v_mock_* | Salida: bdm_datos.unificacion_direccion_mock | MODO MOCK
+-- R1 Esc1 - CIIU 10, mismo texto distinto tipo
+-- MODO MOCK - lee v_mock_*/bdm_stage; NO usa edf_views ni v_xpm_*
+-- Escenario: Padre LAB/CRR + mas entidades reportan
+-- Fuente: bdm_stage -> bdm_tempo.v_mock_* | Salida: bdm_datos.unificacion_direccion_mock | MODO MOCK
 -- Prerequisito: sp_unificacion_mock_r1_preparar_insumo
 -- Generado: tools/gen_unificacion_mock_sps.py (espejo mock)
 

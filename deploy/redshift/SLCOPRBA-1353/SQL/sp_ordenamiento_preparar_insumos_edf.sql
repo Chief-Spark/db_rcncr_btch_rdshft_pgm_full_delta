@@ -1,8 +1,8 @@
 -- ============================================================
 -- 05_sp_preparar_insumos_edf.sql
--- Staging TEMPORAL por corrida: 1 lectura datashare → tablas stg_* locales.
+-- Staging TEMPORAL por corrida: 1 lectura datashare -> tablas stg_* locales.
 -- No persiste entre ejecuciones (drop al final de sp_ordenamiento_ejecucion_edf).
--- Misma lógica que vistas bdm_datos.insumo_* en 04_vistas_sin_copia_productor.sql
+-- Misma logica que vistas bdm_datos.insumo_* en 04_vistas_sin_copia_productor.sql
 -- ============================================================
 
 CREATE OR REPLACE PROCEDURE bdm_datos.sp_ordenamiento_preparar_insumos_edf(
@@ -67,7 +67,7 @@ BEGIN
 
   ANALYZE bdm_tempo.stg_ord_personas_alcance;
 
-  -- 1) RPU post-unificación (sin join orden_prioridad — evita fan-out en staging)
+  -- 1) RPU post-unificacion (sin join orden_prioridad - evita fan-out en staging)
   CREATE TABLE bdm_tempo.stg_rpu_post_unificacion
   DISTSTYLE KEY
   DISTKEY (id_buro_persona)
@@ -89,7 +89,7 @@ BEGIN
 
   ANALYZE bdm_tempo.stg_rpu_post_unificacion;
 
-  -- 2) Personas ganadoras (broadcast pequeño)
+  -- 2) Personas ganadoras (broadcast pequeno)
   CREATE TABLE bdm_tempo.stg_persona_dir_ganadora
   DISTSTYLE ALL
   SORTKEY (id_buro_persona)
@@ -117,7 +117,7 @@ BEGIN
 
   ANALYZE bdm_tempo.stg_dir_conteo_persona;
 
-  -- 4) Referencia dirección por persona (TEL/CEL)
+  -- 4) Referencia direccion por persona (TEL/CEL)
   CREATE TABLE bdm_tempo.stg_persona_dir_ref
   DISTSTYLE KEY
   DISTKEY (id_buro_persona)
@@ -172,7 +172,7 @@ BEGIN
 
   ANALYZE bdm_tempo.stg_rpu_dir_ref;
 
-  -- 5) Contacto dirección solo RPUs ganadoras (1 pasada datashare)
+  -- 5) Contacto direccion solo RPUs ganadoras (1 pasada datashare)
   CREATE TABLE bdm_tempo.stg_contacto_direccion_rpu
   DISTSTYLE KEY
   DISTKEY (id_buro_persona)
@@ -205,7 +205,7 @@ BEGIN
 
   ANALYZE bdm_tempo.stg_reporte_rpu;
 
-  -- 7) Contactos canal TEL/CEL/EMA — solo personas ganadoras
+  -- 7) Contactos canal TEL/CEL/EMA - solo personas ganadoras
   -- SLCOPRBA-1355: filtro de hijas a grano de RPU, no de PERSONA.
   --
   -- EL DEFECTO. El unico filtro de unificacion de esta rama era el INNER JOIN

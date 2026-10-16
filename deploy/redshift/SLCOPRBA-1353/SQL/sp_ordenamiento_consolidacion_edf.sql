@@ -1,4 +1,4 @@
--- Consolidacion EDF — UPSERT por personas del alcance (FULL/DELTA)
+-- Consolidacion EDF - UPSERT por personas del alcance (FULL/DELTA)
 CREATE OR REPLACE PROCEDURE bdm_datos.sp_ordenamiento_consolidacion_edf()
 NONATOMIC
 LANGUAGE plpgsql
