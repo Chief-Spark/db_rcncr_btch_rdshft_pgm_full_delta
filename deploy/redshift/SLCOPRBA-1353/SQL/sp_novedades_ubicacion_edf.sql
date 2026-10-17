@@ -258,8 +258,10 @@ BEGIN
   DISTSTYLE KEY DISTKEY(cod_dw_persona_ubic)
   AS
   SELECT e4.*,
-         CAST(g.latitud  AS VARCHAR(40)) AS latitud,
-         CAST(g.longitud AS VARCHAR(40)) AS longitud,
+         -- Sin CAST: geo_atributos ya las trae en DECIMAL(10,6), que es el
+         -- tipo del contrato desde la politica de tipos de SLCOPRBA-1355.
+         g.latitud,
+         g.longitud,
          CAST(NULL AS VARCHAR(100))      AS barrio,         -- BLOQUEADA: contrato GEO sin pinar
          CAST(NULL AS VARCHAR(100))      AS localidad,      -- BLOQUEADA: sin columna de origen
          CAST(NULL AS VARCHAR(20))       AS codigo_postal,  -- BLOQUEADA: sin columna de origen
@@ -336,8 +338,8 @@ BEGIN
     e6.latitud,
     -- Las cinco que el legado emite como literales por esta ruta
     -- (Novedad.sql:8358-8363). Sus valores reales viven en la etapa 2.
-    CAST(NULL AS INTEGER)                               AS reportado_desde,
-    CAST(NULL AS INTEGER)                               AS ultimo_reporte,
+    CAST(NULL AS DATE)                                  AS reportado_desde,
+    CAST(NULL AS DATE)                                  AS ultimo_reporte,
     CAST(NULL AS INTEGER)                               AS fuente,
     0                                                   AS numero_reportes,
     0                                                   AS numero_entidades,

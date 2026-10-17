@@ -119,10 +119,13 @@ Cuatro hipotesis mias cayeron por buscar la causa en el repo. Escalado a
 DevSecOps. El paquete esta verificado contra el remoto de Bitbucket: 151
 archivos bajo `deploy/redshift/SLCOPRBA-1353/`.
 
-**EL CLUSTER DE DEV SE PAUSA A DIARIO SOBRE LAS 19:00 DE BOGOTA.** La ventana
-de despliegue termina ahi. No explica los fallos de arriba -- el #372, el #373
-y el #374 se lanzaron entre las 18:00 y las 19:00, con el cluster arriba --,
-pero decide a que hora se puede lanzar.
+**EL CLUSTER DE DEV YA NO SE PAUSA: ESTA SIEMPRE ARRIBA (SLCOPRBA-1355).**
+Hasta ahora esta seccion decia que se pausaba a diario sobre las 19:00 de
+Bogota y que ahi terminaba la ventana de despliegue. **Ya no hay ventana**: se
+puede lanzar a cualquier hora. Lo que sigue en pie es el dato historico, que
+es lo unico que esa nota aportaba al 419: el #372, el #373 y el #374 se
+lanzaron entre las 18:00 y las 19:00 **con el cluster arriba**, de modo que la
+pausa nunca explico esos fallos.
 
 **LO QUE SE COMPROBO SOBRE EL 419, Y LO QUE NO.**
 Cuando el detector encuentra el paquete imprime
