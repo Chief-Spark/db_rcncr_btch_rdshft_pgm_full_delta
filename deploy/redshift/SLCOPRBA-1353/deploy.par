@@ -76,3 +76,12 @@ sp_cert_evaluar_criterios_mock.sql
 sp_cert_geo_mock.sql
 sp_cert_evaluar_criterios_ord_mock.sql
 sp_cert_asercion_final.sql
+sp_nov_control_abrir_cerrar.sql
+sp_nov_control_mock_abrir_cerrar.sql
+sp_novedades_ubicacion_edf.sql
+sp_novedades_ubicacion_mock.sql
+sp_novedades_cargar_mat_ubicacion_edf.sql
+sp_novedades_cargar_mat_ubicacion_mock.sql
+sp_novedades_ciclo_edf.sql
+sp_novedades_mock_ciclo.sql
+sp_cert_evaluar_criterios_nov_mock.sql

@@ -235,6 +235,115 @@ de sintaxis.
 `NN_rollback_` en los archivos numerados. Todo archivo sin prefijo numerico
 conserva su nombre en `RevSQL/`.
 
+## Novedades (P0035): el tercer proceso, arrancado por Ubicacion
+
+**Novedades NO depende de las Fases 1-3 del Ordenamiento.** Buscados
+`MATERIALIZA`, `CTA_ATRIBUTOS`, `CTA_TOTALES`, `CONCAT_ATRIBUTOS`,
+`CALC_UBICACIONES`, `UBIC_DIRECCIONES` y `FINAL_UBIC` en los 406 KB de
+`Novedad.sql`: **cero coincidencias**. Lo unico que toma del Ordenamiento es
+`ORDEN_PRIORIDAD` (`Novedad.sql:8347`), que `sp_ordenamiento_consolidacion_edf`
+ya escribe. Eso es lo que desbloqueo la vertiente: no faltaba F1-F3.
+
+El legado son **diez** SPs en `Novedad.sql`, no nueve -- existe tambien
+`PRO_Novedad_Linea_PICalculados_Ctls` (`:4066`), que el `111.BTQ` no invoca y
+el `140.BTQ` si -- mas cuatro scripts de malla. `Mosaic` queda fuera por
+decision legal, y **no toca Ubicacion**: su predicado aparece una sola vez en
+todo el archivo, en `:2482`, dentro de `Info_Basica`.
+
+**SE EMPIEZA POR UBICACION PORQUE ES PRODUCTOR PURO.** No lee ninguna temporal
+ajena y cinco de los demas dependen de sus dos salidas: `Catalogo` (`:288`),
+`Contact` (`:615`), `Historial` (`:1721`), `PICalculados_Ctls` (`:4808`) y
+`Ubi_Agregada`, que las usa en once puntos. **Por eso las dos salidas son
+contrato publico y su DDL esta pinada en `strct`**: `stg_nov_ubica_etapa_9`
+con 42 columnas y `stg_nov_ubica_etapa_2` con 15. Un `CTAS` dejaria que el
+tipo lo infiriera la consulta y el contrato cambiaria sin avisar.
+
+**EL SP NO INSERTA EN `MAT_INFO_UBICACION`, y conviene saberlo antes de
+buscarlo.** Termina en las dos etapas; la carga la hacen los TPT:
+`etapa_9 -> Vstg_Reconocer_Info_Ubica (120.TPT:86-176) -> WHERE Severidad <> -1
+(130.TPT:215) -> UPSERT (130.TPT:573-703)`. Por eso el port son dos piezas.
+
+| Pieza | Donde |
+|---|---|
+| Contratos, tabla final y control | `30_ddl_novedades.sql`, `30b` mock, `31_ddl_nov_control.sql`, `31b` mock |
+| Tablero de 32 criterios | `33_ddl_cert_criterios_nov.sql` |
+| El port y su espejo | `sp_novedades_ubicacion_{edf,mock}.sql` |
+| La pieza de los TPT | `sp_novedades_cargar_mat_ubicacion_{edf,mock}.sql` |
+| Control y orquestador | `sp_nov_control_*`, `sp_novedades_ciclo_edf.sql`, `sp_novedades_mock_ciclo.sql` |
+| Evaluador y tablero | `sp_cert_evaluar_criterios_nov_mock.sql`, `validacion_certificacion_nov.sql` |
+| Lo que hay que pedir | `docs/PETICION_CATALOGOS_NOVEDADES.md` |
+
+**EL CATALOGO DE CRITERIOS SALE DEL CODIGO, NO DE UN DOCUMENTO.** Unificacion
+y Ordenamiento tienen su RF; Novedades no. Cada criterio cita la linea del
+legado de la que sale, y si algun dia aparece un documento funcional hay que
+revisarlo contra el.
+
+**CINCO TRAMPAS DEL LEGADO, LOCALIZADAS Y PORTADAS LITERALES:**
+
+| Que | Donde |
+|---|---|
+| `FLAG_OP` referencia el alias de una columna definida **dos lineas despues**. Teradata lo resuelve, **Redshift no**: hay que repetir el `CASE` | `Novedad.sql:8392-8396` |
+| `V_CARGA_FULL` lee `REC_MTDAT.LOG_TD` con el esquema **hardcodeado**, ignorando el parametro | `:7366-7372` |
+| Centinelas de nulo inconsistentes: `''` y `'-1'` en la etapa 9, `'SV'` en las agregaciones, y la etapa 2 une por igualdad en esas tres columnas | `:8354`, `:8374`, `:8502-8504`, `:8649-8651` |
+| La homologacion de fuente **jamas se aplica**: el `COALESCE` interno nunca da NULL, asi que todo sale `'CAM'` | `:8635` |
+| `TMP_UBICA_ETAPA_0` es **codigo muerto**: se crea, se analiza y se borra sin que nadie la lea. No se porta | `:7514`, `:8723` |
+
+**Y CINCO COLUMNAS QUE EL LEGADO DEJA EN BLANCO POR ESA RUTA**, que no son un
+defecto del port: `REPORTADO_DESDE`, `ULTIMO_REPORTE`, `FUENTE`,
+`NUMERO_REPORTES` y `NUMERO_ENTIDADES` salen NULL y 0 **literales**
+(`:8358-8363`). Sus valores reales viven en la etapa 2, que esa ruta no
+consume. Elevado como divergencia funcional, no corregido.
+
+**EL CONTROL DE DELTA NO ES UN PORT: ES DISENO NUEVO, y el motivo es que el
+del legado esta INOPERATIVO.** `111.BTQ:64-65` hace
+`DELETE FROM LOG_TD WHERE Nombre_Proceso = 'P0035_Extractor_Novedades'` **al
+inicio de cada corrida**, y el watermark que los SP leen es
+`MAX(FECHA_HORA_FIN)` de esa misma tabla (`Novedad.sql:242-247`): se
+autodestruye, devuelve NULL y **toda corrida del AS-IS es FULL**. Ademas
+`140.BTQ` declara `FncUpdate_LogTD` (`:47-61`) y **no la llama** (`:853-858`).
+`nov_control` se construye sobre el patron de `unif_control`, que si funciona.
+
+**UN FAN-OUT QUE SE PAGO Y NO HAY QUE VOLVER A PAGAR.** Derivar la clase de la
+ubicacion de `v_xpm_contacto_canal` **multiplica la salida por tres**: esa
+vista tiene una fila por canal y no una por ubicacion. Medido en el banco:
+219.000 filas para 73.000 ids. La clase sale del tipo de la **propia**
+ubicacion, nunca de un join. Y en nuestro modelo **toda fila de RPU es una
+direccion**: los telefonos, celulares y correos viven en `contacto_canal`, que
+es otra tabla y otro grano, de modo que portar las clases TEL, CEL y EMAIL
+exige traerla con `UNION ALL` como filas adicionales.
+
+**`bdm_stage.mock_ord_prioridad` NO LA LLENA NADIE.** Esta declarada en
+`05_ddl_ordenamiento_mock.sql` y la trunca `reset_mock.sql`, pero no hay un
+solo `INSERT` contra ella en los tres repos, de modo que
+`v_mock_rpu_post_unificacion.orden_prioridad` es **NULL siempre**. El
+Ordenamiento mock escribe en `bdm_datos.rpu_orden_prioridad`, la tabla REAL,
+porque el mock reutiliza `sp_ordenamiento_consolidacion_edf`. Novedades lee de
+ahi en las dos vias, y esa es la unica linea que el espejo mock no sustituye.
+Defecto preexistente de esa vista, anotado y no corregido.
+
+**ORDEN EN LA BATERIA:** Novedades corre **despues** del Ordenamiento de cada
+fase, porque la etapa 1 filtra por orden de prioridad no nulo (`:7593`). Al
+reves saldria vacio por un efecto de secuencia y no por un defecto -- la misma
+leccion que el ciclo GEO.
+
+**EL GATE NO LO LLEVA TODAVIA.** Igual que con GEO: primero corre verde en
+Redshift real, y en el commit siguiente se amplia
+`sp_cert_asercion_final.sql`. No se pone de gate algo que no ha corrido nunca.
+
+**LO QUE FALTA, Y ES PETICION, NO CODIGO:** nueve catalogos que el SP consume
+y no se entregaron (`TIPO`, `ZONA`, `TIPO_IDENTIFICACION`, `INDICATIVO` y
+`TIPO_CUENTA` salen NULL por eso), las cuatro columnas del contrato GEO sin
+pinar (`BARRIO`, `ESTRATO`, `LOCALIDAD`, `CODIGO_POSTAL`), y el reexport de
+`V_Geografia` y `V_Cod_Entrega_Dato`, que **llegaron truncados a 1000 filas
+exactas**. Detalle en `docs/PETICION_CATALOGOS_NOVEDADES.md`.
+
+**UN RIESGO HEREDADO QUE TOCA LO YA DESPLEGADO.** El mapeo mide que `id` no es
+unico por fila en `xpm_location_val_contactinformations`: 568.657 filas contra
+142.067 `id` distintos, ~4:1. Nuestras vistas asignan
+`cod_dw_persona_ubic = ci.id`, que colapsa datos de contacto; la llave deberia
+derivarse de `(id, index)`. **Afecta a Unificacion, que ya esta desplegada y
+certificada.** No se toca aqui: se anota y se eleva.
+
 ## Convenciones de codigo
 
 - **UTF-8 sin BOM. ASCII sin acentos**, a proposito, en todo el repo.

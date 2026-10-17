@@ -50,8 +50,15 @@ echo "2) ASCII"
 # archivo nuevo, sigue el chequeo incremental sobre lo que el cambio anade,
 # que es lo que caza un acento recien escrito (se colo uno asi, SLCOPRBA-1355).
 PAQ=$(LC_ALL=C grep -rlP '[^\x00-\x7F]' "$ROOT" 2>/dev/null)
-ADDED=$( { git diff "$BASE" -- . 2>/dev/null | grep '^+' | grep -v '^+++'
+# docs/ y README.md quedan fuera TAMBIEN del incremental, no solo del barrido
+# total. Antes solo estaban exentos del total, de modo que un documento NUEVO
+# en docs/ -- prosa en castellano, donde los acentos son CORRECTOS -- tumbaba
+# el validador. Era una contradiccion con la politica escrita, no un hallazgo:
+# la caza la hizo PETICION_CATALOGOS_NOVEDADES.md (SLCOPRBA-1355).
+ADDED=$( { git diff "$BASE" -- . ':(exclude)docs/**' ':(exclude)README.md' 2>/dev/null \
+             | grep '^+' | grep -v '^+++'
            git ls-files --others --exclude-standard 2>/dev/null \
+             | grep -v '^docs/' | grep -v '^README\.md$' \
              | while read -r f; do sed 's/^/+/' "$f"; done
          } | grep -nP '[^\x00-\x7F]' )
 if [ -n "$PAQ" ]; then bad "no-ASCII en el paquete:"; echo "$PAQ" | head -20 | sed 's/^/        /'
