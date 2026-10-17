@@ -37,7 +37,8 @@ for a, b in SUST:
 
 CAB = """-- Novedades - dominio UBICACION (ESPEJO MOCK)
 -- Espejo de sp_novedades_ubicacion_edf.sql. Generado por SUSTITUCION DE
--- FUENTES: no se edita a mano. Regenerar con scratchpad/gen_nov_sp_mock.py.
+-- FUENTES: no se edita a mano. Regenerar con
+-- tools/gen_novedades_espejo_mock.py.
 --
 -- LO UNICO QUE CAMBIA SON LOS NOMBRES DE LOS OBJETOS QUE LEE Y ESCRIBE:
 --   v_xpm_*            -> v_mock_*

@@ -16,6 +16,10 @@ SUST = [
     ("bdm_datos.nov_control_etapa_marcar",              "bdm_datos.nov_control_mock_etapa_marcar"),
     ("bdm_datos.nov_control_abrir",                     "bdm_datos.nov_control_mock_abrir"),
     ("bdm_datos.nov_control_cerrar",                    "bdm_datos.nov_control_mock_cerrar"),
+    # vistas de insumo. El orquestador lee la relacion persona-ubicacion para
+    # calcular el watermark nuevo, igual que hace 16_sp_unificacion_ciclo.sql,
+    # asi que el espejo tiene que apuntar a la vista mock como el resto.
+    ("bdm_tempo.v_xpm_relacion_persona_ubicacion",      "bdm_tempo.v_mock_relacion_persona_ubicacion"),
     # tablas
     ("bdm_datos.mat_info_ubicacion",                    "bdm_datos.mat_info_ubicacion_mock"),
     ("bdm_tempo.stg_nov_ubica_etapa_9",                 "bdm_tempo.stg_nov_ubica_etapa_9_mock"),
@@ -37,7 +41,8 @@ def espejo(src, dst, cab):
 
 CAB = ("-- {titulo} (ESPEJO MOCK)\n"
        "-- Espejo de {src}. Generado por SUSTITUCION DE\n"
-       "-- FUENTES: no se edita a mano. Regenerar con scratchpad/gen_nov_mocks2.py.\n"
+       "-- FUENTES: no se edita a mano. Regenerar con\n"
+       "-- tools/gen_novedades_espejo_mock_resto.py.\n"
        "-- Solo cambian los nombres de los objetos: _edf -> _mock en los\n"
        "-- procedimientos, y sufijo _mock en las tablas que lee y escribe.\n"
        "-- El diff contra el real debe salir vacio modulo esos nombres.\n\n")

@@ -29,6 +29,8 @@ DECLARE
     v_lote        INTEGER;
     v_fecha       DATE;
     v_watermark   DATE;
+    v_wm_maximo   DATE;
+    v_wm_nuevo    DATE;
     v_bootstrap   BOOLEAN;
     v_corrida_id  BIGINT;
     v_entrada     BIGINT;
@@ -88,10 +90,47 @@ BEGIN
                                             'completado', v_entrada, v_personas,
                                             v_altas, v_cambios, v_bajas);
 
+    -- ---------- el watermark nuevo ----------
+    -- EL WATERMARK SALE DEL MAX DEL DATO, NUNCA DE LA FECHA DE EJECUCION.
+    -- Esta linea pasaba v_fecha, que es CURRENT_DATE cuando el Framework no
+    -- manda FECHA, y el efecto no lo veia el tablero: con la frontera en hoy
+    -- y las relaciones fechadas en el pasado, el DELTA solo recogia la rama
+    -- fecha IS NULL y daba PASSED sin haber mirado la ventana. Es el mismo
+    -- bloque de 16_sp_unificacion_ciclo.sql:375-392 y se copia a proposito:
+    -- dos procesos que acotan por la misma columna no pueden tener dos
+    -- semanticas de watermark.
+    --
+    --   * FULL: se SIEMBRA con el maximo observado. Si el universo no tuviera
+    --     ninguna fecha no nula queda NULL, y el siguiente FULL vuelve a
+    --     sembrar.
+    --   * DELTA: se AVANZA solo si el delta trajo alguna fecha no nula; si no,
+    --     se CONSERVA el anterior para no perder la frontera. GREATEST protege
+    --     ademas de un maximo por debajo del anterior: el watermark no
+    --     retrocede.
+    --
+    -- Las filas con fecha NULL quedan fuera del MAX (no aportan avance) pero
+    -- SI entran en v_entrada: forman parte del universo procesado.
+    SELECT MAX(rpu.fecha_relacion_persona_ubicaci)
+      INTO v_wm_maximo
+      FROM bdm_tempo.v_xpm_relacion_persona_ubicacion rpu
+     WHERE rpu.fecha_relacion_persona_ubicaci IS NOT NULL
+       AND ( v_modo = 'FULL'
+             OR rpu.fecha_relacion_persona_ubicaci >= v_watermark );
+
+    IF v_modo = 'FULL' THEN
+        v_wm_nuevo := v_wm_maximo;
+    ELSE
+        IF v_wm_maximo IS NULL THEN
+            v_wm_nuevo := v_watermark;
+        ELSE
+            v_wm_nuevo := GREATEST(v_watermark, v_wm_maximo);
+        END IF;
+    END IF;
+
     -- ---------- cierre de la corrida ----------
     SELECT COUNT(*) INTO v_escritas FROM bdm_datos.mat_info_ubicacion;
 
-    CALL bdm_datos.nov_control_cerrar(v_corrida_id, 'completado', v_fecha,
+    CALL bdm_datos.nov_control_cerrar(v_corrida_id, 'completado', v_wm_nuevo,
                                       v_entrada, v_personas, v_escritas);
 
     RAISE INFO 'sp_novedades_ciclo_edf: corrida % lote % modo % completada; entrada %, personas %, altas %, cambios %, bajas %.',

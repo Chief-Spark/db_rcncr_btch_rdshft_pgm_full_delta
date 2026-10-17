@@ -15,6 +15,19 @@
 --   los siete dominios no portados        -> NO_IMPLEMENTADO
 --   NOV-G-01..G-03                        -> REVISION_MANUAL
 --
+-- Y ESTE PROCEDIMIENTO ES AHORA UN GATE DE VERDAD: sp_cert_asercion_final
+-- tiene rama 'NOVEDADES' desde el job DEV/DATABASE #409, de modo que un
+-- FAILED que se escriba aqui tumba el build. Un criterio mal calibrado ya no
+-- es ruido en un informe.
+--
+-- NOV-UB-13 Y NOV-UB-15 CAMBIARON DE SIGNO (SLCOPRBA-1355). Decian SIN_DATO
+-- "porque el mock no siembra bajas", como si faltara un arquetipo. Era falso:
+-- flag_op = 'E' es CODIGO MUERTO en el legado -- la etapa 1 anti-une
+-- V_BLOQUEO (Novedad.sql:7590-7594) y la etapa 9 vuelve a unir la misma tabla
+-- por la misma llave (:8393) --, y con el muere Severidad = 2, la unica via
+-- de borrado del TPT (120.TPT:163). Ningun arquetipo los desbloquea. Ahora
+-- exigen CERO bajas, que es la paridad real con el AS-IS.
+--
 -- EL UNIVERSO MOCK: info_basica (id_buro_persona) entre 9000000 y 9999999.
 -- Los reales son FNV_HASH(pin), de 64 bits y tipicamente negativos: no
 -- colisionan. El filtro por banda es lo que separa una via de la otra, igual
@@ -257,7 +270,39 @@ BEGIN
          GETDATE(), CURRENT_USER
   FROM bdm_tempo.stg_cert_nov_base z;
 
-  -- ---------- NOV-UB-12: en DELTA hay cambios ----------
+  -- ------------------------------------------------------------
+  -- Apoyo de NOV-UB-12: las DOS RAMAS de la ventana del DELTA, separadas.
+  --
+  -- POR QUE HACE FALTA SEPARARLAS. La ventana del SP es
+  --   fecha_relacion_persona_ubicaci >= watermark OR fecha IS NULL
+  -- (sp_novedades_ubicacion_edf.sql:78-79). Un NOV-UB-12 que solo cuenta
+  -- cambios da PASSED aunque la rama de FECHA no haya aportado una sola
+  -- fila, y eso fue exactamente lo que paso en el job DEV/DATABASE #409: el
+  -- orquestador cerraba la corrida con CURRENT_DATE como watermark nuevo en
+  -- vez del MAX del dato, la frontera quedaba en hoy y el DELTA recogia solo
+  -- la rama de fecha nula. El tablero no lo vio porque no miraba.
+  --
+  -- Toda fila de la salida ya paso la ventana, asi que la que trae fecha no
+  -- nula entro POR FECHA y la que la trae nula entro por la otra rama: la
+  -- particion no necesita releer el watermark.
+  --
+  -- Materializado y con CROSS JOIN, no en subconsulta escalar: es la trampa
+  -- que tumbo el #407 y esta documentada mas abajo.
+  -- ------------------------------------------------------------
+  DROP TABLE IF EXISTS bdm_tempo.stg_cert_nov_ventana;
+  CREATE TABLE bdm_tempo.stg_cert_nov_ventana
+  DISTSTYLE ALL
+  AS
+  SELECT COALESCE(SUM(CASE WHEN r.fecha_relacion_persona_ubicaci IS NOT NULL
+                           THEN 1 ELSE 0 END), 0) AS por_fecha,
+         COALESCE(SUM(CASE WHEN r.fecha_relacion_persona_ubicaci IS NULL
+                           THEN 1 ELSE 0 END), 0) AS por_nula
+  FROM bdm_tempo.stg_cert_nov_base z
+  JOIN bdm_tempo.v_mock_relacion_persona_ubicacion r
+    ON r.cod_dw_persona_ubic = z.id
+  WHERE z.flag_op IN ('I','A');
+
+  -- ---------- NOV-UB-12: en DELTA hay cambios, y por la ventana de FECHA ----------
   INSERT INTO bdm_datos.cert_resultado_nov
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
   SELECT p_lote, p_fase, 'NOV-UB-12',
@@ -265,25 +310,40 @@ BEGIN
               WHEN COUNT(*) = 0 THEN 'SIN_DATO'
               WHEN COALESCE(SUM(CASE WHEN z.flag_op IN ('I','A') THEN 1 ELSE 0 END), 0) = 0
                                  THEN 'FAILED'
+              -- Sin una sola fila por fecha, el DELTA no ha ejercitado la
+              -- ventana: es verde de la rama que no prueba nada.
+              WHEN MAX(w.por_fecha) = 0 THEN 'FAILED'
               ELSE 'PASSED' END,
          'fase=' || p_fase
            || ', altas=' || CAST(COALESCE(SUM(CASE WHEN z.flag_op = 'I' THEN 1 ELSE 0 END), 0) AS VARCHAR)
            || ', cambios=' || CAST(COALESCE(SUM(CASE WHEN z.flag_op = 'A' THEN 1 ELSE 0 END), 0) AS VARCHAR)
-           || ', fuera de la ventana=' || CAST(COALESCE(SUM(CASE WHEN z.flag_op IS NULL THEN 1 ELSE 0 END), 0) AS VARCHAR),
+           || ', fuera de la ventana=' || CAST(COALESCE(SUM(CASE WHEN z.flag_op IS NULL THEN 1 ELSE 0 END), 0) AS VARCHAR)
+           || '; de las que entraron, por fecha=' || CAST(MAX(w.por_fecha) AS VARCHAR)
+           || ' y por fecha nula=' || CAST(MAX(w.por_nula) AS VARCHAR),
          GETDATE(), CURRENT_USER
-  FROM bdm_tempo.stg_cert_nov_base z;
+  FROM       bdm_tempo.stg_cert_nov_base    z
+  CROSS JOIN bdm_tempo.stg_cert_nov_ventana w;
 
   -- ---------- NOV-UB-13: la baja por bloqueo ----------
-  -- El mock no siembra ubicaciones bloqueadas: la rama existe en el SP pero
-  -- ninguna fila la ejercita. SIN_DATO en vez de PASSED, por el mismo motivo
-  -- que NOV-UB-05.
+  -- CORREGIDO (SLCOPRBA-1355). Esto decia "el mock no siembra ubicaciones
+  -- bloqueadas", como si faltara un arquetipo. ERA FALSO: la rama 'E' es
+  -- CODIGO MUERTO EN EL LEGADO. La etapa 1 hace el anti-join contra V_BLOQUEO
+  -- (Novedad.sql:7590-7594) y la etapa 9 vuelve a unir la MISMA tabla por la
+  -- MISMA llave para preguntar por FECHA_BLOQUEO (:8393, :8416): lo que
+  -- sobrevivio no esta en V_BLOQUEO, asi que la condicion nunca da TRUE.
+  -- Ningun arquetipo lo desbloquea. Lo correcto es decirlo, no sembrarlo.
+  -- El criterio verifica entonces lo que SI se puede verificar: que nuestro
+  -- port tampoco emita bajas, que es la paridad con el AS-IS.
   INSERT INTO bdm_datos.cert_resultado_nov
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
   SELECT p_lote, p_fase,  'NOV-UB-13',
          CASE WHEN COALESCE(SUM(CASE WHEN z.flag_op = 'E' THEN 1 ELSE 0 END), 0) = 0
-                   THEN 'SIN_DATO' ELSE 'PASSED' END,
+                   THEN 'PASSED' ELSE 'FAILED' END,
          'bajas en la salida=' || CAST(COALESCE(SUM(CASE WHEN z.flag_op = 'E' THEN 1 ELSE 0 END), 0) AS VARCHAR)
-           || '. El mock no siembra ubicaciones bloqueadas: la rama existe en el SP y ninguna fila la ejercita',
+           || ', esperadas=0. flag_op=E es codigo muerto en el legado: la etapa 1'
+           || ' anti-une V_BLOQUEO (Novedad.sql:7590-7594) y la etapa 9 vuelve a'
+           || ' unirla por la misma llave (:8393), de modo que FECHA_BLOQUEO es'
+           || ' siempre NULL. Emitir una baja seria divergir, no acertar',
          GETDATE(), CURRENT_USER
   FROM bdm_tempo.stg_cert_nov_base z;
 
@@ -341,15 +401,22 @@ BEGIN
   CROSS JOIN bdm_tempo.stg_cert_nov_mat   v;
 
   -- ---------- NOV-UB-15: la baja borra de la tabla final ----------
+  -- Hermano de NOV-UB-13 y corregido por lo mismo. El borrado del legado sale
+  -- de Severidad = 2, y Severidad = 2 sale UNICAMENTE de
+  -- WHEN STG.FLAG_OP = 'E' THEN 2 (120.TPT:163). Sin 'E' no hay Severidad 2:
+  -- el UPSERT de 130.TPT nunca borra. El AS-IS solo inserta y actualiza, y
+  -- eso es lo que el criterio verifica.
   INSERT INTO bdm_datos.cert_resultado_nov
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
   SELECT p_lote, p_fase, 'NOV-UB-15',
-         CASE WHEN c.bajas = 0           THEN 'SIN_DATO'
-              WHEN c.supervivientes > 0  THEN 'FAILED'
+         CASE WHEN c.bajas > 0          THEN 'FAILED'
+              WHEN c.supervivientes > 0 THEN 'FAILED'
               ELSE 'PASSED' END,
-         'bajas=' || CAST(c.bajas AS VARCHAR)
-           || ', de esas aun presentes en la tabla final=' || CAST(c.supervivientes AS VARCHAR)
-           || '. Sin bajas sembradas el criterio queda SIN_DATO, no PASSED',
+         'bajas=' || CAST(c.bajas AS VARCHAR) || ', esperadas=0'
+           || '; de esas aun presentes en la tabla final=' || CAST(c.supervivientes AS VARCHAR)
+           || '. El borrado del legado sale solo de Severidad=2, y Severidad=2'
+           || ' solo de FLAG_OP=E (120.TPT:163), que es codigo muerto: el UPSERT'
+           || ' de 130.TPT nunca borra una fila',
          GETDATE(), CURRENT_USER
   FROM bdm_tempo.stg_cert_nov_cruce c;
 

@@ -28,7 +28,10 @@
 --   consulta verifico el criterio y NO se cumple. Eso es lo que debe parar
 --   la linea.
 --
--- ALCANCE ACTIVO HOY: 'UNIFICACION'.
+-- ALCANCES ACTIVOS HOY: 'UNIFICACION' y 'NOVEDADES'.
+--   El runner de dt lo llama DOS VECES, una por alcance, y no con 'TODO': eso
+--   encenderia Ordenamiento de rebote, que es una decision aparte.
+--
 --   Ordenamiento NO se asercion todavia a proposito: su tablero acaba de
 --   nacer y arrastra defectos reales ya identificados (el ranking empata sin
 --   desempate, EMA024 es constante, cuatro divisores desalineados). Encender
@@ -37,12 +40,19 @@
 --   .par de dt en cuanto esos defectos esten corregidos; el procedimiento ya
 --   lo soporta.
 --
+-- SLCOPRBA-1355: NOVEDADES ENTRA EN EL GATE, y por el mismo criterio que GEO
+--   -- no se pone de gate algo que no ha corrido nunca. Ya corrio: job
+--   DEV/DATABASE #409, los quince NOV-UB-01..15 sobre Redshift real con cero
+--   FAILED. Desde aqui, un FAILED en cualquiera de ellos tumba el build.
+--   Los siete NOV-UB-16..22 quedan DENTRO del conteo y no molestan: estan en
+--   BLOQUEADO, no en FAILED, y BLOQUEADO nunca tumba.
+--
 -- NONATOMIC (leccion #13). Rollback: DROP PROCEDURE con firma exacta
 -- (#12/#14).
 -- ============================================================
 
 CREATE OR REPLACE PROCEDURE bdm_datos.sp_cert_asercion_final(
-    p_alcance VARCHAR   -- UNIFICACION | ORDENAMIENTO | TODO
+    p_alcance VARCHAR   -- UNIFICACION | ORDENAMIENTO | NOVEDADES | TODO
 )
 NONATOMIC
 LANGUAGE plpgsql
@@ -54,6 +64,8 @@ DECLARE
     v_ord_lista  VARCHAR(2000) := 'ninguno';
     v_gate_n     INTEGER := 0;
     v_gate_lista VARCHAR(2000) := 'ninguno';
+    v_nov_n      INTEGER := 0;
+    v_nov_lista  VARCHAR(2000) := 'ninguno';
 BEGIN
 
     -- --------------------------------------------------------
@@ -99,6 +111,19 @@ BEGIN
     END IF;
 
     -- --------------------------------------------------------
+    -- Novedades: el dominio UBICACION, que es lo portado. Los otros siete
+    -- dominios no tienen criterios todavia y por tanto no suman.
+    -- --------------------------------------------------------
+    IF p_alcance IN ('NOVEDADES', 'TODO') THEN
+        SELECT COUNT(*),
+               COALESCE(NULLIF(LISTAGG(c.criterio, ', ') WITHIN GROUP (ORDER BY c.criterio), ''), 'ninguno')
+          INTO v_nov_n, v_nov_lista
+          FROM      bdm_datos.cert_criterio_nov c
+          JOIN      bdm_datos.v_cert_nov_ultimo r ON r.criterio = c.criterio
+         WHERE r.estado = 'FAILED';
+    END IF;
+
+    -- --------------------------------------------------------
     -- El veredicto. Un solo RAISE con todo lo que fallo, para que el log de
     -- Jenkins diga QUE hay que mirar sin tener que abrir la base.
     --
@@ -113,13 +138,14 @@ BEGIN
     -- Por eso el NULLIF que evitaba imprimir '[]' vive ahora en los SELECT
     -- de arriba, que son SQL normal, y no aqui.
     -- --------------------------------------------------------
-    IF (v_unif_n + v_ord_n + v_gate_n) > 0 THEN
+    IF (v_unif_n + v_ord_n + v_gate_n + v_nov_n) > 0 THEN
         RAISE EXCEPTION
-          'CERTIFICACION EN ROJO (alcance %). Unificacion: % criterio(s) FAILED [%]. Gate por arquetipo: % FAILED [%]. Ordenamiento: % criterio(s) FAILED [%]. Revisar el detalle en cert_resultado / cert_resultado_ord / mock_unif_ca_result.',
+          'CERTIFICACION EN ROJO (alcance %). Unificacion: % criterio(s) FAILED [%]. Gate por arquetipo: % FAILED [%]. Ordenamiento: % criterio(s) FAILED [%]. Novedades: % criterio(s) FAILED [%]. Revisar el detalle en cert_resultado / cert_resultado_ord / cert_resultado_nov / mock_unif_ca_result.',
           p_alcance,
           v_unif_n, v_unif_lista,
           v_gate_n, v_gate_lista,
-          v_ord_n,  v_ord_lista;
+          v_ord_n,  v_ord_lista,
+          v_nov_n,  v_nov_lista;
     END IF;
 
     RAISE INFO 'CERTIFICACION OK (alcance %): ningun criterio en FAILED.', p_alcance;

@@ -118,8 +118,23 @@ BEGIN
                  FROM bdm_datos.rpu_orden_prioridad
                 GROUP BY 1 ) pu
          ON pu.cod_dw_persona_ubic = rpu.cod_dw_persona_ubic
+  -- EL BLOQUEO EXCLUYE EL ID, NO LA FILA, y es literal del legado:
+  --   LEFT JOIN V_BLOQUEO BLQ ON RPU.COD_DW_PERSONA_UBIC = BLQ.COD_DW_PERSONA_UBIC
+  --   WHERE ... AND BLQ.COD_DW_PERSONA_UBIC IS NULL        (Novedad.sql:7590-7594)
+  -- V_BLOQUEO es una tabla aparte con grano por cod_dw_persona_ubic, de modo
+  -- que basta estar en ella para que el id entero desaparezca. Aqui el bloqueo
+  -- viene como indicador en la propia fila de RPU, y un
+  -- COALESCE(rpu.bloqueado,0) = 0 excluiria la FILA dejando pasar a sus
+  -- hermanas con el mismo id. No es equivalente: cod_dw_persona_ubic NO es
+  -- unico en el datashare -- 568.657 filas para 142.067 ids, ~4:1 -- asi que
+  -- esa version era MAS ANCHA que el legado. El anti-join lo corrige.
+  -- En el mock no cambia nada: alli el id es unico por construccion.
+  LEFT JOIN ( SELECT DISTINCT cod_dw_persona_ubic
+                FROM bdm_tempo.v_xpm_relacion_persona_ubicacion
+               WHERE COALESCE(bloqueado, 0) = 1 ) blq
+         ON blq.cod_dw_persona_ubic = rpu.cod_dw_persona_ubic
   WHERE  (rpu.ind_unificacion IS NULL OR rpu.ind_unificacion = 0)
-    AND  COALESCE(rpu.bloqueado, 0) = 0
+    AND  blq.cod_dw_persona_ubic IS NULL
     AND  pu.orden_prioridad IS NOT NULL;
 
   -- ------------------------------------------------------------
@@ -301,10 +316,32 @@ BEGIN
   -- en edf_views: alli la ubicacion es un contacto tipado, no tres llaves
   -- separadas. Salen NULL.
   --
-  -- La baja (flag_op = 'E') la decide el bloqueo. El legado compara
-  -- FECHA_BLOQUEO con ayer (Novedad.sql:8393); nuestra vista expone el
-  -- indicador bloqueado sin fecha, de modo que la condicion es el indicador.
-  -- Mas ancha que la del legado, y se anota: un bloqueo viejo tambien da baja.
+  -- SEXTA TRAMPA DEL LEGADO, Y ES LA QUE MAS ENGANA: flag_op = 'E' ES CODIGO
+  -- MUERTO, y con el la unica via de BAJA de MAT_INFO_UBICACION.
+  --
+  -- La rama existe y se lee bien (Novedad.sql:8393):
+  --     CASE WHEN BLQ.FECHA_BLOQUEO = DATE - INTERVAL '1' DAY THEN 'E' ...
+  -- con LEFT JOIN V_BLOQUEO BLQ ON UTP8.COD_DW_PERSONA_UBIC = BLQ.COD_... (:8416).
+  -- Pero la etapa 1 ya hizo el ANTI-JOIN contra ESA MISMA TABLA y ESA MISMA
+  -- LLAVE (:7590-7594): todo id presente en V_BLOQUEO quedo fuera. De modo que
+  -- en la etapa 9 BLQ.FECHA_BLOQUEO es NULL SIEMPRE, la comparacion nunca da
+  -- TRUE y 'E' no se emite jamas.
+  --
+  -- Y arrastra al TPT: Severidad = 2 -- el borrado -- sale UNICAMENTE de
+  -- WHEN STG.FLAG_OP = 'E' THEN 2 (120.TPT:163). Sin 'E' no hay Severidad 2,
+  -- y el UPSERT de 130.TPT nunca borra una fila. El AS-IS solo inserta y
+  -- actualiza.
+  --
+  -- SE PORTA LITERAL, igual que las otras cinco trampas y por el mismo
+  -- criterio (decision SLCOPRBA-1355): la rama se escribe, y como el
+  -- anti-join de arriba reproduce el del legado, aqui tampoco se emite nunca.
+  -- NO es un defecto del port, y NOV-UB-13 / NOV-UB-15 no se "arreglan"
+  -- sembrando un arquetipo de bajas: no les falta dato, verifican una rama
+  -- que el legado no puede tomar.
+  --
+  -- Lo que si es nuestro y se anota: el legado exige ademas que el bloqueo
+  -- sea de AYER, y nuestra vista expone el indicador sin fecha. Si algun dia
+  -- la etapa 1 dejara de excluir el id, nuestra condicion seria mas ancha.
   -- ------------------------------------------------------------
   TRUNCATE TABLE bdm_tempo.stg_nov_ubica_etapa_9;
 

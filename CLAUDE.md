@@ -281,7 +281,7 @@ y Ordenamiento tienen su RF; Novedades no. Cada criterio cita la linea del
 legado de la que sale, y si algun dia aparece un documento funcional hay que
 revisarlo contra el.
 
-**CINCO TRAMPAS DEL LEGADO, LOCALIZADAS Y PORTADAS LITERALES:**
+**SEIS TRAMPAS DEL LEGADO, LOCALIZADAS Y PORTADAS LITERALES:**
 
 | Que | Donde |
 |---|---|
@@ -290,6 +290,23 @@ revisarlo contra el.
 | Centinelas de nulo inconsistentes: `''` y `'-1'` en la etapa 9, `'SV'` en las agregaciones, y la etapa 2 une por igualdad en esas tres columnas | `:8354`, `:8374`, `:8502-8504`, `:8649-8651` |
 | La homologacion de fuente **jamas se aplica**: el `COALESCE` interno nunca da NULL, asi que todo sale `'CAM'` | `:8635` |
 | `TMP_UBICA_ETAPA_0` es **codigo muerto**: se crea, se analiza y se borra sin que nadie la lea. No se porta | `:7514`, `:8723` |
+| **`FLAG_OP = 'E'` es codigo muerto, y con el la unica via de BAJA.** La etapa 1 anti-une `V_BLOQUEO` y la etapa 9 vuelve a unirla por la MISMA llave para preguntar por `FECHA_BLOQUEO`: lo que sobrevivio no esta en la tabla, asi que nunca da TRUE | `:7590-7594` contra `:8393`, `:8416` |
+
+**LA SEXTA ARRASTRA AL TPT Y CAMBIA DOS CRITERIOS.** `Severidad = 2` -- el
+borrado -- sale UNICAMENTE de `WHEN STG.FLAG_OP = 'E' THEN 2`
+(`120.TPT:163`), de modo que **el UPSERT de `130.TPT` nunca borra una fila: el
+AS-IS solo inserta y actualiza.** `NOV-UB-13` y `NOV-UB-15` decian "el mock no
+siembra ubicaciones bloqueadas", como si faltara un arquetipo. **Era falso, y
+ningun arquetipo lo desbloquea**: verifican una rama que el legado no puede
+tomar. Ahora exigen cero bajas, que es la paridad real, y estan en PASSED.
+
+**Y DE PASO CORRIGIO UNA DIVERGENCIA NUESTRA.** Nuestro filtro de la etapa 1
+era `COALESCE(rpu.bloqueado, 0) = 0`, que excluye la FILA; el legado excluye el
+ID entero. No es lo mismo porque **`cod_dw_persona_ubic` NO es unico en el
+datashare** (568.657 filas para 142.067 ids, ~4:1): una hermana sin bloquear
+pasaba y el `MAX(bloqueado)` de la etapa 9 le ponia `'E'`. Eramos mas anchos
+que el legado. Hoy es un anti-join, igual que el original. **En el mock no
+cambia nada**, porque alli el id es unico por construccion.
 
 **Y CINCO COLUMNAS QUE EL LEGADO DEJA EN BLANCO POR ESA RUTA**, que no son un
 defecto del port: `REPORTADO_DESDE`, `ULTIMO_REPORTE`, `FUENTE`,
@@ -334,9 +351,28 @@ fase, porque la etapa 1 filtra por orden de prioridad no nulo (`:7593`). Al
 reves saldria vacio por un efecto de secuencia y no por un defecto -- la misma
 leccion que el ciclo GEO.
 
-**EL GATE NO LO LLEVA TODAVIA.** Igual que con GEO: primero corre verde en
-Redshift real, y en el commit siguiente se amplia
-`sp_cert_asercion_final.sql`. No se pone de gate algo que no ha corrido nunca.
+**NOVEDADES YA ESTA EN EL GATE (job DEV/DATABASE #409).** Se cumplio la
+condicion que esta seccion exigia -- primero verde en Redshift real, el gate en
+el commit siguiente --: el #409 cerro los quince `NOV-UB-01..15` con cero
+FAILED. `sp_cert_asercion_final` tiene ya su rama `NOVEDADES` y
+`run_cert_asercion_final.sql` **lo llama DOS VECES**, con `'UNIFICACION'` y con
+`'NOVEDADES'`. No se cambio a `'TODO'` a proposito: eso encenderia Ordenamiento
+de rebote, que es otra decision. Un FAILED en cualquier `NOV-UB` tumba el build.
+
+**Y EL #409 DEJO UN DEFECTO QUE EL TABLERO NO VEIA: EL WATERMARK SALIA DEL
+RELOJ.** El orquestador cerraba la corrida pasando `v_fecha` como watermark
+nuevo, y `v_fecha` es `CURRENT_DATE` cuando el Framework no manda FECHA. Con la
+frontera en hoy y las relaciones fechadas en el pasado, el DELTA solo recogia
+la rama `fecha IS NULL`: **daba PASSED sin haber mirado la ventana**, y la
+mutacion de la fase 3 (fecha `2026-06-15`) era invisible.
+
+Corregido copiando el bloque de `16_sp_unificacion_ciclo.sql:375-392`:
+`MAX(fecha_relacion_persona_ubicaci)` del universo procesado, siembra en FULL,
+`GREATEST` en DELTA. **La leccion vale para todo lo que acote por fecha: el
+watermark sale del MAX del DATO, nunca de la fecha de ejecucion.** Y
+`NOV-UB-12` ya no cuenta cambios a secas -- desglosa cuantos entran por fecha y
+cuantos por fecha nula, y exige que los primeros sean > 0. Un criterio que no
+separa las dos ramas deja pasar justo esto.
 
 **LO QUE FALTA, Y ES PETICION, NO CODIGO:** nueve catalogos que el SP consume
 y no se entregaron (`TIPO`, `ZONA`, `TIPO_IDENTIFICACION`, `INDICATIVO` y
@@ -474,8 +510,17 @@ certificada.** No se toca aqui: se anota y se eleva.
 ./validar.sh
 ```
 Chequea ASCII, BOM, `$$` y parentesis balanceados, simetria de los `.par`, que
-toda entrada tenga su archivo, `WHERE` en `UPDATE`/`DELETE`, y `LISTAGG` con el
-mismo `WITHIN GROUP` por `SELECT`. Sale distinto de cero si algo falla.
+toda entrada tenga su archivo, `WHERE` en `UPDATE`/`DELETE`, `LISTAGG` con el
+mismo `WITHIN GROUP` por `SELECT`, las reservadas de Redshift como
+identificador (8), los `RAISE` con expresiones (9) y **las subconsultas en la
+lista de un `SELECT` (10)**. Sale distinto de cero si algo falla.
+
+El 10 cierra la terna de los puntos ciegos del banco: `DELTA` -> 8, `RAISE` ->
+9, subconsulta correlacionada en la proyeccion -> 10. **Es AVISO y no falla**:
+una subconsulta no correlacionada ahi es legitima y se usa. Lleva la cuenta de
+parentesis y solo mira las que abren entre un `SELECT` y su `FROM`, de modo que
+`FROM (SELECT ...)`, `JOIN (SELECT ...)` e `IN (SELECT ...)` del `WHERE` no
+avisan.
 
 ## Como responder en este proyecto
 

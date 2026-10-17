@@ -1,6 +1,7 @@
 -- Novedades - control de corrida (ESPEJO MOCK)
 -- Espejo de sp_nov_control_abrir_cerrar.sql. Generado por SUSTITUCION DE
--- FUENTES: no se edita a mano. Regenerar con scratchpad/gen_nov_mocks2.py.
+-- FUENTES: no se edita a mano. Regenerar con
+-- tools/gen_novedades_espejo_mock_resto.py.
 -- Solo cambian los nombres de los objetos: _edf -> _mock en los
 -- procedimientos, y sufijo _mock en las tablas que lee y escribe.
 -- El diff contra el real debe salir vacio modulo esos nombres.

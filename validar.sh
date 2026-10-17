@@ -261,6 +261,68 @@ else
   ok "ningun RAISE pasa una expresion como argumento"
 fi
 
+# ------------------------------------------------------------
+# 10. Subconsulta en la LISTA del SELECT
+#
+# TERCER PUNTO CIEGO DEL BANCO, hermano de DELTA (chequeo 8) y del RAISE
+# (chequeo 9). Redshift RECHAZA una subconsulta escalar en la proyeccion
+# cuando lleva dentro un EXISTS correlacionado:
+#   XX000: This type of correlated subquery pattern is not supported
+#          due to internal error
+# y el error salta en EJECUCION, no al crear el procedimiento. PostgreSQL la
+# ejecuta sin una queja, de modo que la bateria local dio verde y Redshift
+# tumbo el job DEV/DATABASE #407 en NOV-UB-14. La salida es materializar los
+# conteos en una tabla de apoyo y unirla con CROSS JOIN.
+#
+# ES AVISO Y NO FALLA, A PROPOSITO: una subconsulta no correlacionada en la
+# proyeccion es SQL legitimo y aqui se usa. Lo que hace falta no es prohibirla
+# sino que nadie la escriba sin mirar si esta correlacionada.
+#
+# COMO SE DETECTA: se recorre el token y se lleva la cuenta de parentesis.
+# A cada profundidad se marca si estamos entre un SELECT y su FROM; un '('
+# seguido de SELECT abierto DENTRO de esa franja es una subconsulta en la
+# lista. Asi no se confunde con FROM (SELECT ...), JOIN (SELECT ...) ni
+# IN (SELECT ...) del WHERE, que son los tres usos sanos y frecuentes.
+# ------------------------------------------------------------
+echo "10) subconsulta en la lista del SELECT  [REDSHIFT:XX000]"
+SUB_HIT=$(find "$ROOT/SQL" "$ROOT/RevSQL" -name '*.sql' 2>/dev/null | sort | while read -r f; do
+  awk -v ARCH="$f" '
+    {
+      linea = $0
+      sub(/--.*$/, "", linea)            # comentario de linea
+      gsub(/\047[^\047]*\047/, " ", linea)  # literales: sus parentesis no cuentan
+      gsub(/\(/, " ( ", linea)
+      gsub(/\)/, " ) ", linea)
+      n = split(linea, t, /[ \t,;]+/)
+      for (i = 1; i <= n; i++) {
+        tok = toupper(t[i])
+        if (tok == "") continue
+        if (tok == "(") {
+          sig = ""
+          for (j = i + 1; j <= n; j++) if (t[j] != "") { sig = toupper(t[j]); break }
+          if (sig == "SELECT" && proj[prof] == 1)
+            printf "%s:%d: %s\n", ARCH, FNR, substr($0, 1, 110)
+          prof++
+          proj[prof] = 0
+        } else if (tok == ")") {
+          proj[prof] = 0
+          if (prof > 0) prof--
+        } else if (tok == "SELECT") {
+          proj[prof] = 1
+        } else if (tok == "FROM") {
+          proj[prof] = 0
+        }
+      }
+    }
+  ' "$f"
+done)
+if [ -n "$SUB_HIT" ]; then
+  warn "subconsulta en la lista del SELECT (revisar si esta CORRELACIONADA; si lo esta, materializar y CROSS JOIN):"
+  printf '%s\n' "$SUB_HIT" | head -10 | sed 's|^|        |'
+else
+  ok "ninguna subconsulta en la lista de un SELECT"
+fi
+
 echo
 if [ $FAIL -ne 0 ]; then echo "RESULTADO: FALLA"; exit 1; fi
 [ $WARN -ne 0 ] && echo "RESULTADO: OK (con avisos)" || echo "RESULTADO: OK"
