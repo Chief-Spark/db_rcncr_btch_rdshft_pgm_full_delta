@@ -64,6 +64,10 @@ BEGIN
   -- DISTSTYLE ALL: son decenas de miles de filas y varios criterios la
   -- cruzan contra si misma y contra la tabla final.
   -- ------------------------------------------------------------
+  DROP TABLE IF EXISTS bdm_tempo.stg_cert_nov_cruce;
+  DROP TABLE IF EXISTS bdm_tempo.stg_cert_nov_mat;
+  DROP TABLE IF EXISTS bdm_tempo.stg_cert_nov_cruce;
+  DROP TABLE IF EXISTS bdm_tempo.stg_cert_nov_mat;
   DROP TABLE IF EXISTS bdm_tempo.stg_cert_nov_base;
   CREATE TABLE bdm_tempo.stg_cert_nov_base
   DISTSTYLE ALL
@@ -283,45 +287,71 @@ BEGIN
          GETDATE(), CURRENT_USER
   FROM bdm_tempo.stg_cert_nov_base z;
 
+  -- ------------------------------------------------------------
+  -- Apoyo 2 y 3: los conteos que necesitan NOV-UB-14 y NOV-UB-15.
+  --
+  -- POR QUE MATERIALIZADOS Y NO EN SUBCONSULTA, que es lo que tumbo el job
+  -- DEV/DATABASE #407: la version anterior ponia cuatro subconsultas
+  -- escalares en la proyeccion de una tabla derivada, con un EXISTS
+  -- correlacionado dentro de cada una. Redshift lo rechaza en EJECUCION con
+  --   XX000: This type of correlated subquery pattern is not supported
+  -- y PostgreSQL lo acepta sin una queja, de modo que el banco lo dio verde.
+  -- Tercer punto ciego del banco, hermano de DELTA y del RAISE.
+  --
+  -- El LEFT JOIN contra un SELECT DISTINCT sustituye al EXISTS; el
+  -- SELECT DISTINCT evita que la tabla final multiplique filas del cruce si
+  -- algun dia tuviera el id repetido -- que es justo lo que NOV-UB-14 mide.
+  -- ------------------------------------------------------------
+  DROP TABLE IF EXISTS bdm_tempo.stg_cert_nov_mat;
+  CREATE TABLE bdm_tempo.stg_cert_nov_mat
+  DISTSTYLE ALL
+  AS
+  SELECT COUNT(*)           AS en_mat,
+         COUNT(DISTINCT id) AS ids_mat
+  FROM bdm_datos.mat_info_ubicacion_mock;
+
+  DROP TABLE IF EXISTS bdm_tempo.stg_cert_nov_cruce;
+  CREATE TABLE bdm_tempo.stg_cert_nov_cruce
+  DISTSTYLE ALL
+  AS
+  SELECT COALESCE(SUM(CASE WHEN b.flag_op IN ('I','A') THEN 1 ELSE 0 END), 0) AS aplicables,
+         COALESCE(SUM(CASE WHEN b.flag_op IN ('I','A') AND m.id IS NOT NULL
+                           THEN 1 ELSE 0 END), 0)                             AS cubiertas,
+         COALESCE(SUM(CASE WHEN b.flag_op = 'E' THEN 1 ELSE 0 END), 0)        AS bajas,
+         COALESCE(SUM(CASE WHEN b.flag_op = 'E' AND m.id IS NOT NULL
+                           THEN 1 ELSE 0 END), 0)                             AS supervivientes
+  FROM      bdm_tempo.stg_cert_nov_base b
+  LEFT JOIN ( SELECT DISTINCT id FROM bdm_datos.mat_info_ubicacion_mock ) m
+         ON m.id = b.id;
+
   -- ---------- NOV-UB-14: la tabla final recibe el alta y el cambio ----------
   INSERT INTO bdm_datos.cert_resultado_nov
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
   SELECT p_lote, p_fase, 'NOV-UB-14',
-         CASE WHEN v.aplicables = 0                       THEN 'SIN_DATO'
-              WHEN v.en_mat <> v.ids_mat                  THEN 'FAILED'
-              WHEN v.aplicables <> v.cubiertas            THEN 'FAILED'
+         CASE WHEN c.aplicables = 0            THEN 'SIN_DATO'
+              WHEN v.en_mat <> v.ids_mat       THEN 'FAILED'
+              WHEN c.aplicables <> c.cubiertas THEN 'FAILED'
               ELSE 'PASSED' END,
-         'aplicables en la salida (I o A)=' || CAST(v.aplicables AS VARCHAR)
-           || ', de esas presentes en la tabla final=' || CAST(v.cubiertas AS VARCHAR)
+         'aplicables en la salida (I o A)=' || CAST(c.aplicables AS VARCHAR)
+           || ', de esas presentes en la tabla final=' || CAST(c.cubiertas AS VARCHAR)
            || '; filas en la tabla final=' || CAST(v.en_mat AS VARCHAR)
            || ', ids distintos=' || CAST(v.ids_mat AS VARCHAR),
          GETDATE(), CURRENT_USER
-  FROM (
-    SELECT (SELECT COUNT(*) FROM bdm_tempo.stg_cert_nov_base WHERE flag_op IN ('I','A')) AS aplicables,
-           (SELECT COUNT(*) FROM bdm_tempo.stg_cert_nov_base b
-             WHERE b.flag_op IN ('I','A')
-               AND EXISTS (SELECT 1 FROM bdm_datos.mat_info_ubicacion_mock m WHERE m.id = b.id)) AS cubiertas,
-           (SELECT COUNT(*)          FROM bdm_datos.mat_info_ubicacion_mock) AS en_mat,
-           (SELECT COUNT(DISTINCT id) FROM bdm_datos.mat_info_ubicacion_mock) AS ids_mat
-  ) v;
+  FROM       bdm_tempo.stg_cert_nov_cruce c
+  CROSS JOIN bdm_tempo.stg_cert_nov_mat   v;
 
   -- ---------- NOV-UB-15: la baja borra de la tabla final ----------
   INSERT INTO bdm_datos.cert_resultado_nov
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
   SELECT p_lote, p_fase, 'NOV-UB-15',
-         CASE WHEN v.bajas = 0           THEN 'SIN_DATO'
-              WHEN v.supervivientes > 0  THEN 'FAILED'
+         CASE WHEN c.bajas = 0           THEN 'SIN_DATO'
+              WHEN c.supervivientes > 0  THEN 'FAILED'
               ELSE 'PASSED' END,
-         'bajas=' || CAST(v.bajas AS VARCHAR)
-           || ', de esas aun presentes en la tabla final=' || CAST(v.supervivientes AS VARCHAR)
+         'bajas=' || CAST(c.bajas AS VARCHAR)
+           || ', de esas aun presentes en la tabla final=' || CAST(c.supervivientes AS VARCHAR)
            || '. Sin bajas sembradas el criterio queda SIN_DATO, no PASSED',
          GETDATE(), CURRENT_USER
-  FROM (
-    SELECT (SELECT COUNT(*) FROM bdm_tempo.stg_cert_nov_base WHERE flag_op = 'E') AS bajas,
-           (SELECT COUNT(*) FROM bdm_tempo.stg_cert_nov_base b
-             WHERE b.flag_op = 'E'
-               AND EXISTS (SELECT 1 FROM bdm_datos.mat_info_ubicacion_mock m WHERE m.id = b.id)) AS supervivientes
-  ) v;
+  FROM bdm_tempo.stg_cert_nov_cruce c;
 
   -- ---------- NOV-UB-16..22: bloqueadas por insumo que no se entrego ----------
   INSERT INTO bdm_datos.cert_resultado_nov
@@ -364,6 +394,8 @@ BEGIN
     SELECT 'NOV-G-03', 'falta decidir el equivalente en Redshift del patron de recarga del legado (clonar a BK_*, apuntar las vistas al clon, vaciar y reponer). Decision de arquitectura'
   ) c;
 
+  DROP TABLE IF EXISTS bdm_tempo.stg_cert_nov_cruce;
+  DROP TABLE IF EXISTS bdm_tempo.stg_cert_nov_mat;
   DROP TABLE IF EXISTS bdm_tempo.stg_cert_nov_base;
 
 END;

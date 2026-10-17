@@ -404,8 +404,17 @@ certificada.** No se toca aqui: se anota y se eleva.
 - `REPLACE(x, NULL, '')` devuelve **NULL**.
 - `SUM()` sobre cero filas devuelve **NULL**, no 0 -> guarda `COUNT(*) = 0`
   primero, y `COALESCE` despues. Sin eso, un criterio vacio sale PASSED.
-- Subconsulta escalar en la proyeccion dentro de una agregacion: Redshift no la
-  resuelve de forma fiable -> `CROSS JOIN`.
+- **Subconsulta escalar en la proyeccion, y `EXISTS` correlacionado dentro de
+  ella: Redshift las RECHAZA**, no es que sean poco fiables:
+  `XX000: This type of correlated subquery pattern is not supported due to
+  internal error`. Y el error salta en EJECUCION, no al crear el
+  procedimiento. **TERCER PUNTO CIEGO DEL BANCO**, hermano de `DELTA` y del
+  `RAISE`: PostgreSQL las ejecuta sin una queja, de modo que la bateria local
+  dio verde y el tablero salio 12 de 15 -- y Redshift tumbo el job
+  DEV/DATABASE #407 en `NOV-UB-14`. La salida es **materializar los conteos**
+  en una tabla de apoyo y unirla con `CROSS JOIN`; un `LEFT JOIN` contra un
+  `SELECT DISTINCT` sustituye al `EXISTS`. Es lo que ya hacia el evaluador del
+  Ordenamiento y lo que no aplique aqui.
 - El `DISTKEY` tiene que ser una columna de la **lista del SELECT**, no un
   alias (job #315).
 - El `CAST` de la primera rama de un `UNION ALL` fija el tipo del nodo.
