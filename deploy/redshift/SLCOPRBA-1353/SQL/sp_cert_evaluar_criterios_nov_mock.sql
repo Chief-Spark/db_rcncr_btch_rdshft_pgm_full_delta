@@ -216,7 +216,7 @@ BEGIN
                                        OR z.numero_reportes  <> 0
                                        OR z.numero_entidades <> 0
                                      THEN 1 ELSE 0 END), 0) AS VARCHAR)
-           || '. Divergencia funcional elevada: los valores reales viven en la etapa 2 (Novedad.sql:8635-8639)',
+           || '. DECISION TOMADA (SLCOPRBA-1355): se reproduce el legado tal cual, no se pueblan. Los valores reales viven en la etapa 2 (Novedad.sql:8635-8639), que esta ruta no consume',
          GETDATE(), CURRENT_USER
   FROM bdm_tempo.stg_cert_nov_base z;
 

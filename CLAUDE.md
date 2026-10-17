@@ -292,7 +292,12 @@ revisarlo contra el.
 defecto del port: `REPORTADO_DESDE`, `ULTIMO_REPORTE`, `FUENTE`,
 `NUMERO_REPORTES` y `NUMERO_ENTIDADES` salen NULL y 0 **literales**
 (`:8358-8363`). Sus valores reales viven en la etapa 2, que esa ruta no
-consume. Elevado como divergencia funcional, no corregido.
+consume.
+
+**DECISION CERRADA (SLCOPRBA-1355): esas cinco NO se pueblan, y el `'CAM'` de
+la fuente NO se corrige.** Se reproduce el legado tal cual. Dejan de ser
+divergencias abiertas: son el comportamiento esperado, y `NOV-UB-09` verifica
+que SIGAN en blanco. No volver a abrirlas como si fueran un defecto.
 
 **EL CONTROL DE DELTA NO ES UN PORT: ES DISENO NUEVO, y el motivo es que el
 del legado esta INOPERATIVO.** `111.BTQ:64-65` hace

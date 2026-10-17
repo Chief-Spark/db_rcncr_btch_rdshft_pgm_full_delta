@@ -24,6 +24,14 @@
 --   4. cod_dw_telefono y cod_dw_direccion_electronica salen NULL.
 --   5. reportado_desde y ultimo_reporte son MIN/MAX de fecha_reporte.
 --   Cada una se explica donde aparece.
+--
+-- DOS DECISIONES CERRADAS, Y NO SON DIVERGENCIAS A ELEVAR (SLCOPRBA-1355):
+--   1. Las cinco columnas que el legado emite como literales NULL y 0 se
+--      reproducen tal cual. NO se pueblan desde la etapa 2.
+--   2. La fuente sigue saliendo 'CAM' siempre. NO se corrige el COALESCE
+--      que deja muerta la homologacion.
+--   En las dos el criterio es el mismo: se reproduce el legado. Quedan
+--   escritas aqui para que nadie las reabra como si fueran un defecto.
 
 CREATE OR REPLACE PROCEDURE bdm_datos.sp_novedades_ubicacion_edf(
     p_modo      VARCHAR,   -- FULL | DELTA (modo efectivo de la corrida)
