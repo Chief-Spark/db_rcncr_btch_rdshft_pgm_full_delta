@@ -1238,27 +1238,25 @@ BEGIN
                GROUP BY 1 ) ga
          ON ga.lote = m.lote;
 
-  -- CA-02, CA-03, CA-05: el Cargador_GEO y el Reenganchador no tienen variante
-  -- mock. Se ejercitan sobre las tablas reales con un Lote preparado a mano,
-  -- como indica la guia de QA. Este gate no los puede afirmar desde la bateria.
-  -- CA-04: ademas de eso, hoy no puede pasar por dos defectos encadenados.
-  INSERT INTO bdm_datos.cert_resultado
-    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
-  SELECT p_lote, p_fase, m.criterio, m.estado, m.detalle, GETDATE(), CURRENT_USER
-  FROM ( SELECT 'CA-02' AS criterio, 'BLOQUEADO' AS estado,
-                'sp_geo_cargar_georreferenciacion no tiene variante mock; se certifica sobre tablas reales con el Lote de QA (requiere COPY desde S3).' AS detalle UNION ALL
-         SELECT 'CA-03','BLOQUEADO',
-                'mismo SP que CA-02; el cierre a estado cargado solo se observa tras un COPY valido.' UNION ALL
-         -- SLCOPRBA-1355: los DOS defectos de codigo estan corregidos -- la
-         -- llamada ya pasa ('DELTA', in_lote) y las dos vistas de ubicacion
-         -- COALESCEan las coordenadas contra geo_atributos -- de modo que
-         -- NO_IMPLEMENTADO dejo de describir la realidad. Lo que queda no es
-         -- codigo: el criterio se observa sobre un Lote GEO real cargado por
-         -- COPY desde S3, que es lo mismo que bloquea a CA-02, CA-03 y CA-05.
-         SELECT 'CA-04','BLOQUEADO',
-                'los dos defectos de codigo que reportaba quedaron corregidos: la llamada a la Regla 3 ya pasa sus dos argumentos y las vistas de ubicacion leen geo_atributos. El reenganche se certifica sobre tablas reales con un Lote GEO cargado por COPY desde S3, igual que CA-02, CA-03 y CA-05.' UNION ALL
-         SELECT 'CA-05','BLOQUEADO',
-                'la rama sin coordenadas retorna antes del CALL y es correcta por lectura, pero se certifica sobre tablas reales con el Lote de QA.' ) m;
+  -- CA-02..CA-05 YA NO SE ESCRIBEN AQUI (SLCOPRBA-1355).
+  --
+  -- Este bloque los insertaba como BLOQUEADO en cada fase, con el motivo de
+  -- entonces: "el Cargador_GEO y el Reenganchador no tienen variante mock".
+  -- Ya la tienen -- sp_geo_cargar_georreferenciacion_mock y
+  -- sp_geo_reenganchar_r3_mock -- y quien los afirma ahora es
+  -- sp_cert_geo_mock, que corre despues de la bateria con modo = 'GEO'.
+  --
+  -- Se RETIRA en vez de dejarse: el titular y el tablero leen v_cert_ultimo
+  -- y se quedaban con la fila buena, pero el pivote por fase seguia
+  -- mostrando el BLOQUEADO viejo mientras arriba ponia PASSED (job #402).
+  -- Un tablero que se contradice a si mismo no se cree ni cuando acierta.
+  --
+  -- Consecuencia buscada: si sp_cert_geo_mock no llega a correr, los cuatro
+  -- se quedan SIN FILA y el tablero los cuenta como pendientes. Un criterio
+  -- sin evidencia no es un criterio bloqueado.
+  --
+  -- CA-01 si sigue arriba: lo afirma la bateria con el Lote que deja la
+  -- exportacion mock, antes de que el ciclo GEO lo mueva a 'cargado'.
 
   DROP TABLE IF EXISTS bdm_tempo.stg_cert_pares;
   DROP TABLE IF EXISTS bdm_tempo.stg_cert_ent;

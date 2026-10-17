@@ -179,6 +179,26 @@ piezas nuevas y un interruptor:
 
 El alcance del tablero paso de **45 a 50** criterios.
 
+**CERRADO EN REDSHIFT REAL: job DEV/DATABASE #402, tablero en 50 de 50 y
+cero pendientes.** Los cinco pasaron con estos numeros: `CA-01` Lote
+`exportado` con 103.000 candidatos; `CA-02` 14.000 geocodificadas y 89.000
+`U`; `CA-03` Lote `cargado` con `fase_fallo` y `ultimo_error` en NULL;
+`CA-04` 14.000 aptas entraron a la Regla 3; `CA-05` cero aptas y Regla 3
+omitida sin excepcion. Y lo que mas importaba: **`tipo 3 = 5000 contra 5000`
+antes del ciclo**, con `R3-01..R3-10` intactos.
+
+**Con eso, GEO ENTRO EN EL GATE.** `sp_cert_asercion_final.sql` ya no lleva
+`bloque <> 'GEO'`: un FAILED en cualquiera de los cinco tumba el build.
+
+**Y SE RETIRO EL BLOQUE QUE LOS DABA POR BLOQUEADOS.**
+`sp_cert_evaluar_criterios_mock` insertaba `CA-02..CA-05` como BLOQUEADO en
+cada fase. Con el ciclo mock certificandolos, esas filas eran falsas: el
+titular daba PASSED y el pivote por fase seguia diciendo BLOQUEADO en el
+mismo informe. **Un tablero que se contradice a si mismo no se cree ni cuando
+acierta.** Ahora los escribe solo `sp_cert_geo_mock`, con `modo = 'GEO'`, y
+el pivote tiene su columna `geo` -- columna aparte, no una quinta fase, porque
+el ciclo GEO corre una vez y no por fase.
+
 **LO QUE SIGUE SIN CERTIFICARSE, y hay que repetirlo cada vez que alguien lea
 el 50/50:** que el `UNLOAD` escriba de verdad en S3 y que el `COPY` lo lea.
 Son dos sentencias cuyo riesgo es de permisos. Todo lo demas -- gates de

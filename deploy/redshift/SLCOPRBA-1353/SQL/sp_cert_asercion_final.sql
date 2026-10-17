@@ -57,8 +57,16 @@ DECLARE
 BEGIN
 
     -- --------------------------------------------------------
-    -- Unificacion: los 51 criterios menos GEO y GOB-03, que es el alcance
-    -- que QA puede probar hoy (mismo recorte que el titular).
+    -- Unificacion: los 51 criterios menos GOB-03, que es el alcance que QA
+    -- puede probar hoy (mismo recorte que el titular).
+    --
+    -- SLCOPRBA-1355: GEO ENTRA EN EL GATE. Antes decia "menos GEO y GOB-03"
+    -- y el WHERE llevaba bloque <> 'GEO', escrito asi a proposito: no se
+    -- pone como gate algo que no ha corrido nunca. Ya corrio -- job
+    -- DEV/DATABASE #402, los cinco criterios en PASSED sobre Redshift real
+    -- con el tablero en 50/50 --, de modo que el motivo desaparecio. Desde
+    -- aqui, un FAILED en CA-01..CA-05 tumba el build, que es lo que
+    -- significa certificar.
     -- --------------------------------------------------------
     IF p_alcance IN ('UNIFICACION', 'TODO') THEN
         SELECT COUNT(*),
@@ -66,8 +74,7 @@ BEGIN
           INTO v_unif_n, v_unif_lista
           FROM      bdm_datos.cert_criterio c
           JOIN      bdm_datos.v_cert_ultimo r ON r.criterio = c.criterio
-         WHERE c.bloque   <> 'GEO'
-           AND c.criterio <> 'GOB-03'
+         WHERE c.criterio <> 'GOB-03'
            AND r.estado    = 'FAILED';
 
         -- El gate por arquetipo: sus FAILED son aserciones duras sobre la
