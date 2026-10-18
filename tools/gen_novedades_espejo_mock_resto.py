@@ -13,6 +13,14 @@ SUST = [
     ("bdm_datos.sp_novedades_ciclo_edf",                "bdm_datos.sp_novedades_mock_ciclo"),
     # el nombre suelto, para que el RAISE del log no mienta sobre quien corre
     ("sp_novedades_ciclo_edf:",                         "sp_novedades_mock_ciclo:"),
+    # Dominio ACTIVIDAD ECONOMICA. Sin estas cuatro, el espejo del ciclo
+    # llamaba a los SP REALES y leia el contrato REAL: el mock escribia en
+    # mat_info_actividad_economica en vez de en su _mock. Es exactamente la
+    # trampa de paridad que la bitacora da por pagada, y se volvio a pagar.
+    ("bdm_datos.sp_novedades_cargar_mat_acteco_edf",    "bdm_datos.sp_novedades_cargar_mat_acteco_mock"),
+    ("bdm_datos.sp_novedades_actividad_economica_edf",  "bdm_datos.sp_novedades_actividad_economica_mock"),
+    ("bdm_tempo.stg_nov_acteco_etapa_1",                "bdm_tempo.stg_nov_acteco_etapa_1_mock"),
+    ("bdm_datos.mat_info_actividad_economica",          "bdm_datos.mat_info_actividad_economica_mock"),
     ("bdm_datos.nov_control_etapa_marcar",              "bdm_datos.nov_control_mock_etapa_marcar"),
     ("bdm_datos.nov_control_abrir",                     "bdm_datos.nov_control_mock_abrir"),
     ("bdm_datos.nov_control_cerrar",                    "bdm_datos.nov_control_mock_cerrar"),

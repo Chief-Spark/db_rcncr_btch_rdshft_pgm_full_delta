@@ -39,6 +39,10 @@ DECLARE
     v_cambios     BIGINT;
     v_bajas       BIGINT;
     v_escritas    BIGINT;
+    v_entrada_ae  BIGINT;
+    v_personas_ae BIGINT;
+    v_altas_ae    BIGINT;
+    v_cambios_ae  BIGINT;
 BEGIN
     v_modo  := UPPER(COALESCE(in_nemotecnico, 'FULL'));
     v_lote  := CAST(in_id_facturacion AS INTEGER);
@@ -90,7 +94,38 @@ BEGIN
                                             'completado', v_entrada, v_personas,
                                             v_altas, v_cambios, v_bajas);
 
-    -- ---------- el watermark nuevo ----------
+    -- ---------- dominio ACTIVIDAD ECONOMICA ----------
+  -- Va DESPUES de Ubicacion y no en paralelo, aunque no lea ninguna de sus
+  -- dos etapas: el legado invoca los diez SP en serie y el orden de la malla
+  -- es parte de lo que se porta. Cuando entren los dominios que SI leen las
+  -- salidas de Ubicacion (Catalogo, Contact, Historial, PICalculados_Ctls y
+  -- Ubi_Agregada), el orden dejara de ser una convencion y sera un requisito.
+  CALL bdm_datos.nov_control_etapa_marcar(v_corrida_id, v_lote, 'actividad_economica',
+                                          'en proceso', NULL, NULL, NULL, NULL, NULL);
+
+  CALL bdm_datos.sp_novedades_actividad_economica_edf(v_modo, v_watermark);
+  CALL bdm_datos.sp_novedades_cargar_mat_acteco_edf(v_lote);
+
+  SELECT COUNT(*),
+         COUNT(DISTINCT info_basica_id),
+         SUM(CASE WHEN flag_op = 'I' THEN 1 ELSE 0 END),
+         SUM(CASE WHEN flag_op = 'A' THEN 1 ELSE 0 END)
+    INTO v_entrada_ae, v_personas_ae, v_altas_ae, v_cambios_ae
+    FROM bdm_tempo.stg_nov_acteco_etapa_1;
+
+  -- SUM() sobre cero filas devuelve NULL, no 0. Mismo cuidado que arriba.
+  v_altas_ae   := COALESCE(v_altas_ae, 0);
+  v_cambios_ae := COALESCE(v_cambios_ae, 0);
+
+  -- Las bajas van a 0 LITERAL y no a un conteo: este dominio no las emite
+  -- nunca. Su Severidad no tiene rama que devuelva 2 (120.TPT:186-197), de
+  -- modo que el DELETE del 130.TPT:753 es codigo muerto. Contar 'E' aqui
+  -- sugeriria que puede haberlas.
+  CALL bdm_datos.nov_control_etapa_marcar(v_corrida_id, v_lote, 'actividad_economica',
+                                          'completado', v_entrada_ae, v_personas_ae,
+                                          v_altas_ae, v_cambios_ae, 0);
+
+  -- ---------- el watermark nuevo ----------
     -- EL WATERMARK SALE DEL MAX DEL DATO, NUNCA DE LA FECHA DE EJECUCION.
     -- Esta linea pasaba v_fecha, que es CURRENT_DATE cuando el Framework no
     -- manda FECHA, y el efecto no lo veia el tablero: con la frontera en hoy

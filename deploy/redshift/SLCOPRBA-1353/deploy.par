@@ -84,4 +84,8 @@ sp_novedades_cargar_mat_ubicacion_edf.sql
 sp_novedades_cargar_mat_ubicacion_mock.sql
 sp_novedades_ciclo_edf.sql
 sp_novedades_mock_ciclo.sql
+sp_novedades_actividad_economica_edf.sql
+sp_novedades_actividad_economica_mock.sql
+sp_novedades_cargar_mat_acteco_edf.sql
+sp_novedades_cargar_mat_acteco_mock.sql
 sp_cert_evaluar_criterios_nov_mock.sql

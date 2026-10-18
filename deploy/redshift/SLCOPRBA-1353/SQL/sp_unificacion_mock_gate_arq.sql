@@ -173,6 +173,39 @@ BEGIN
   GROUP BY 1;
 
   -- ------------------------------------------------------------------
+  -- N, LA REPLICA POR ARQUETIPO, MEDIDA DEL DATO Y NO ESCRITA A MANO.
+  --
+  -- POR QUE. Este procedimiento clavaba quince conteos absolutos -- 66000,
+  -- 8000, 5000 y varios 1000 -- que valen UNICAMENTE con N = 1000. La
+  -- cabecera de seed_mock_matriz.sql:85-87 dice que "subir N aqui es el unico
+  -- cambio necesario para escalar", y era FALSO en las dos direcciones: con
+  -- cualquier otro N este gate daba FAILED en todo. Medida la N, el gate vale
+  -- para el que sea y la afirmacion de la semilla pasa a ser cierta.
+  --
+  -- COMO. Cada arquetipo siembra exactamente N personas sobre la banda
+  -- 9000000 + ARQ * 10000 + i, con i = 0..N-1, de modo que el MAXIMO de
+  -- personas por arquetipo ES N. Se toma el maximo y no el de un arquetipo
+  -- concreto para que la medida sobreviva a que uno cualquiera se quede corto
+  -- por un filtro de la cascada.
+  --
+  -- Se lee de la SEMILLA y no de la salida: unificacion_direccion_mock ya ha
+  -- pasado por la cascada y varios arquetipos pierden filas ahi a proposito.
+  --
+  -- Materializada y luego CROSS JOIN, no subconsulta escalar en la
+  -- proyeccion: es la trampa que tumbo el job DEV/DATABASE #407.
+  -- ------------------------------------------------------------------
+  DROP TABLE IF EXISTS bdm_tempo.stg_gate_n;
+  CREATE TABLE bdm_tempo.stg_gate_n
+  DISTSTYLE ALL
+  AS
+  SELECT COALESCE(MAX(a.personas), 0) AS n
+  FROM ( SELECT CAST((s.id_buro_persona - 9000000) / 10000 AS INTEGER) AS arq,
+                COUNT(DISTINCT s.id_buro_persona)                      AS personas
+           FROM bdm_stage.relacion_persona_ubicacion s
+          WHERE s.id_buro_persona BETWEEN 9010000 AND 9739999
+          GROUP BY 1 ) a;
+
+  -- ------------------------------------------------------------------
   -- FULL: la matriz, arquetipo por arquetipo
   -- ------------------------------------------------------------------
   IF p_fase = 'FULL' THEN
@@ -188,30 +221,33 @@ BEGIN
                WITHIN GROUP (ORDER BY x.arq), 'todos cuadran')
     FROM (
       SELECT e.arq,
-             e.filas_persona * 1000       AS esperado,
+             e.filas_persona * g.n        AS esperado,
              COALESCE(r.filas, 0)         AS real_filas
       FROM       bdm_tempo.stg_gate_arq_esperado e
+      CROSS JOIN bdm_tempo.stg_gate_n            g
       LEFT JOIN  bdm_tempo.stg_gate_arq_real     r ON r.arq = e.arq
-      WHERE e.filas_persona * 1000 <> COALESCE(r.filas, 0)
+      WHERE e.filas_persona * g.n <> COALESCE(r.filas, 0)
     ) x;
 
     INSERT INTO bdm_stage.mock_unif_ca_result (criterio_ca, estado, detalle)
     SELECT 'FULL/CA-U02',
-           CASE WHEN SUM(filas) = 66000 THEN 'PASSED' ELSE 'FAILED' END,
-           'total unificacion_direccion_mock=' || CAST(COALESCE(SUM(filas), 0) AS VARCHAR)
-             || ' (esperado 66000 = 51000 + 2000 de los ARQ 57 y 58 + 2000 del ARQ 60'
-             || ' + 5000 de la Regla 3, ARQ 61 a 70 + 2000 del ARQ 71 + 2000 del ARQ 72'
-             || ' + 2000 del ARQ 73)'
-    FROM bdm_tempo.stg_gate_arq_real;
+           CASE WHEN SUM(g.filas) = MAX(n.n) * 66 THEN 'PASSED' ELSE 'FAILED' END,
+           'total unificacion_direccion_mock=' || CAST(COALESCE(SUM(g.filas), 0) AS VARCHAR)
+             || ' (esperado ' || CAST(MAX(n.n) * 66 AS VARCHAR) || ' = N x 66 = N x (51 + 2 de los ARQ 57 y 58 + 2 del ARQ 60'
+             || ' + 5 de la Regla 3, ARQ 61 a 70 + 2 del ARQ 71 + 2 del ARQ 72'
+             || ' + 2 del ARQ 73), con N=' || CAST(MAX(n.n) AS VARCHAR) || ')'
+    FROM       bdm_tempo.stg_gate_arq_real g
+    CROSS JOIN bdm_tempo.stg_gate_n         n;
 
     INSERT INTO bdm_stage.mock_unif_ca_result (criterio_ca, estado, detalle)
     SELECT 'FULL/CA-U03',
-           CASE WHEN COUNT(*) = 8000
+           CASE WHEN COUNT(*) = MAX(n.n) * 8
                  AND SUM(CASE WHEN COALESCE(d.generada_enriquecida, 0) = 1 THEN 0 ELSE 1 END) = 0
                 THEN 'PASSED' ELSE 'FAILED' END,
-           'direcciones generadas=' || CAST(COUNT(*) AS VARCHAR) || ' (esperado 8000 = 5000 del sitio 1 + 1000 del sitio 2 + 1000 del sitio 3 + 1000 del sitio 4), sin marca='
+           'direcciones generadas=' || CAST(COUNT(*) AS VARCHAR) || ' (esperado ' || CAST(MAX(n.n) * 8 AS VARCHAR) || ' = N x (5 del sitio 1 + 1 del sitio 2 + 1 del sitio 3 + 1 del sitio 4)), sin marca='
              || CAST(SUM(CASE WHEN COALESCE(d.generada_enriquecida, 0) = 1 THEN 0 ELSE 1 END) AS VARCHAR)
-    FROM bdm_datos.direccion_fisica_generada_mock d;
+    FROM       bdm_datos.direccion_fisica_generada_mock d
+    CROSS JOIN bdm_tempo.stg_gate_n                     n;
 
     -- El complemento que el motor arma para E7. Es el criterio que distingue
     -- "el motor corrio" de "el motor fusiono bien".
@@ -224,10 +260,11 @@ BEGIN
     -- dos: por eso este criterio sigue siendo UN conteo de un unico texto.
     INSERT INTO bdm_stage.mock_unif_ca_result (criterio_ca, estado, detalle)
     SELECT 'FULL/CA-U04',
-           CASE WHEN COUNT(*) = 5000 THEN 'PASSED' ELSE 'FAILED' END,
+           CASE WHEN COUNT(*) = MAX(n.n) * 5 THEN 'PASSED' ELSE 'FAILED' END,
            'generadas con complemento ''TO 2 CS 4 AP 1''=' || CAST(COUNT(*) AS VARCHAR)
-             || ' (esperado 5000)'
-    FROM bdm_datos.direccion_fisica_generada_mock d
+             || ' (esperado ' || CAST(MAX(n.n) * 5 AS VARCHAR) || ')'
+    FROM       bdm_datos.direccion_fisica_generada_mock d
+    CROSS JOIN bdm_tempo.stg_gate_n                     n
     WHERE TRIM(d.complemento) = 'TO 2 CS 4 AP 1';
 
     -- El complemento que arma el SITIO 2 para el ARQ 71. Mismo papel que
@@ -239,10 +276,11 @@ BEGIN
     -- legado, donde N1 es el complemento ENTERO del hijo.
     INSERT INTO bdm_stage.mock_unif_ca_result (criterio_ca, estado, detalle)
     SELECT 'FULL/CA-U11',
-           CASE WHEN COUNT(*) = 1000 THEN 'PASSED' ELSE 'FAILED' END,
+           CASE WHEN COUNT(*) = MAX(n.n) THEN 'PASSED' ELSE 'FAILED' END,
            'generadas por el sitio 2 con complemento ''ED 1 CS 5 LC 3''='
-             || CAST(COUNT(*) AS VARCHAR) || ' (esperado 1000)'
-    FROM bdm_datos.direccion_fisica_generada_mock d
+             || CAST(COUNT(*) AS VARCHAR) || ' (esperado ' || CAST(MAX(n.n) AS VARCHAR) || ')'
+    FROM       bdm_datos.direccion_fisica_generada_mock d
+    CROSS JOIN bdm_tempo.stg_gate_n                     n
     WHERE TRIM(d.complemento) = 'ED 1 CS 5 LC 3';
 
     -- El complemento que arma el SITIO 3 (sello 'A8', escenario 6 subcaso 1).
@@ -253,10 +291,11 @@ BEGIN
     -- llega a 8000 y este da 0, corrio pero fusiono mal.
     INSERT INTO bdm_stage.mock_unif_ca_result (criterio_ca, estado, detalle)
     SELECT 'FULL/CA-U12',
-           CASE WHEN COUNT(*) = 1000 THEN 'PASSED' ELSE 'FAILED' END,
+           CASE WHEN COUNT(*) = MAX(n.n) THEN 'PASSED' ELSE 'FAILED' END,
            'generadas por el sitio 3 con complemento ''BL 2 ED 7''='
-             || CAST(COUNT(*) AS VARCHAR) || ' (esperado 1000)'
-    FROM bdm_datos.direccion_fisica_generada_mock d
+             || CAST(COUNT(*) AS VARCHAR) || ' (esperado ' || CAST(MAX(n.n) AS VARCHAR) || ')'
+    FROM       bdm_datos.direccion_fisica_generada_mock d
+    CROSS JOIN bdm_tempo.stg_gate_n                     n
     WHERE TRIM(d.complemento) = 'BL 2 ED 7';
 
     -- El complemento que arma el SITIO 4 (sello 'D9', escenario 6 subcaso 2).
@@ -271,10 +310,11 @@ BEGIN
     -- 1000 y el censo mostraria C7 en 0.
     INSERT INTO bdm_stage.mock_unif_ca_result (criterio_ca, estado, detalle)
     SELECT 'FULL/CA-U13',
-           CASE WHEN COUNT(*) = 1000 THEN 'PASSED' ELSE 'FAILED' END,
+           CASE WHEN COUNT(*) = MAX(n.n) THEN 'PASSED' ELSE 'FAILED' END,
            'generadas por el sitio 4 con complemento ''BR 5 AP 301''='
-             || CAST(COUNT(*) AS VARCHAR) || ' (esperado 1000)'
-    FROM bdm_datos.direccion_fisica_generada_mock d
+             || CAST(COUNT(*) AS VARCHAR) || ' (esperado ' || CAST(MAX(n.n) AS VARCHAR) || ')'
+    FROM       bdm_datos.direccion_fisica_generada_mock d
+    CROSS JOIN bdm_tempo.stg_gate_n                     n
     WHERE TRIM(d.complemento) = 'BR 5 AP 301';
 
   END IF;
@@ -324,12 +364,21 @@ BEGIN
     FROM bdm_tempo.stg_gate_arq_real;
 
     -- Lo que ya estaba no se re-escribe: el total del FULL sigue en pie.
+    --
+    -- LAS 200 SON LITERALES Y NO MULTIPLO DE N, a diferencia del resto de
+    -- este gate: la mutacion siembra un 'WHERE n.i < 100' FIJO sobre el ARQ 21
+    -- y otro sobre el ARQ 22 (run_reconocer_e2e_mock_full_delta.sql:169,181).
+    -- No depende de N, y por eso CA-U08 y CA-U09 tampoco se tocaron.
+    -- CONSECUENCIA: N no puede bajar de 100 sin cambiar tambien la mutacion,
+    -- porque referenciaria personas que no se sembraron.
     INSERT INTO bdm_stage.mock_unif_ca_result (criterio_ca, estado, detalle)
     SELECT 'DELTA2/CA-U10',
-           CASE WHEN SUM(filas) = 66200 THEN 'PASSED' ELSE 'FAILED' END,
-           'total tras la mutacion=' || CAST(COALESCE(SUM(filas), 0) AS VARCHAR)
-             || ' (esperado 66200 = 66000 del FULL + 200 nuevas)'
-    FROM bdm_tempo.stg_gate_arq_real;
+           CASE WHEN SUM(g.filas) = MAX(n.n) * 66 + 200 THEN 'PASSED' ELSE 'FAILED' END,
+           'total tras la mutacion=' || CAST(COALESCE(SUM(g.filas), 0) AS VARCHAR)
+             || ' (esperado ' || CAST(MAX(n.n) * 66 + 200 AS VARCHAR)
+             || ' = N x 66 del FULL + 200 nuevas, con N=' || CAST(MAX(n.n) AS VARCHAR) || ')'
+    FROM       bdm_tempo.stg_gate_arq_real g
+    CROSS JOIN bdm_tempo.stg_gate_n         n;
   END IF;
 
   -- ------------------------------------------------------------------
