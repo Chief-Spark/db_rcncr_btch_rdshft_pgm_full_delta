@@ -92,6 +92,33 @@ El banco pone de su lado un `ANALYZE` y unos indices sobre las tablas sembradas.
 Es compensacion del motor, no un parche al repo: Redshift resuelve esos joins
 por fuerza bruta columnar y Postgres en un nodo no.
 
+**EL PIPELINE CORRE LA BATERIA DOS VECES Y EL BANCO UNA. CUARTO PUNTO CIEGO
+(job DEV/DATABASE #412).** El ciclo controlado de Jenkins es
+`RLLBCK_PRECHECK -> DDL_1 -> DPLY -> DDL_2 -> RLLBCK_FINAL -> DDL_3 -> compare
+-> DPLY`: el **DPLY aparece dos veces** y la bateria entera corre dos veces
+sobre el mismo cluster. Todo lo que una corrida escribe y el reset no borra
+sobrevive de una pasada a la otra, de modo que **la primera sale verde y la
+segunda falla**. El banco corre la bateria una sola vez y no ve nada.
+
+Lo pago Novedades: `reset_mock.sql` -- que es el archivo **1 de deploy.par** --
+no borraba una sola tabla suya. El FULL de la segunda pasada salio con
+`bootstrap=f`, los DELTA siguientes leyeron el `MAX(watermark_nuevo)` de la
+primera (`2026-06-15`) por encima del que ese FULL acababa de sembrar
+(`2026-03-01`), la ventana por fecha se quedo vacia y `NOV-UB-12` lo cazo.
+
+**La regla que queda: LO QUE UNA CORRIDA ESCRIBE, EL RESET LO BORRA**, y una
+tabla de control nueva entra en `reset_mock.sql` **en el mismo commit que su
+DDL**. Para reproducir a Jenkins en el banco hay que correr `fase dt` **dos
+veces seguidas**; una sola pasada no prueba esto.
+
+**Y el reset estaba DUPLICADO, que es lo que dejo que derivara.**
+`run_reconocer_e2e_mock_full_delta.sql` lleva su propia copia en linea -- para
+poder correr suelto -- y decia *"Mismo contenido que reset_mock.sql"* cuando ya
+le faltaban el diccionario de via, el censo de escenarios, los siete
+`mock_ord_*` y `cert_resultado`. Hoy las dos listas son identicas y asi hay que
+mantenerlas: el `diff` de los `TRUNCATE` de los dos archivos tiene que salir
+vacio.
+
 ## Politicas del pipeline
 
 | Codigo | Causa | Como se evita |
@@ -358,6 +385,26 @@ FAILED. `sp_cert_asercion_final` tiene ya su rama `NOVEDADES` y
 `run_cert_asercion_final.sql` **lo llama DOS VECES**, con `'UNIFICACION'` y con
 `'NOVEDADES'`. No se cambio a `'TODO'` a proposito: eso encenderia Ordenamiento
 de rebote, que es otra decision. Un FAILED en cualquier `NOV-UB` tumba el build.
+
+**EL #412 LO CONFIRMO Y DE PASO COBRO EL PRIMER PRECIO DEL GATE.** La primera
+pasada de DPLY salio entera en verde -- Unificacion `50|50|0`, Novedades
+`15|14|1`, los dos `CERTIFICACION OK` -- y **la segunda tumbo el build** con
+`NOV-UB-12` en FAILED. No era un defecto del port: era que `reset_mock.sql` no
+borraba nada de Novedades y la segunda pasada heredaba el watermark de la
+primera. Detalle y la regla que deja, en la seccion del banco.
+
+**El criterio no se equivoco: la corrida de verdad no habia mirado la ventana.**
+Es justo lo que el desglose por rama se anadio a detectar, y lo detecto el mismo
+dia que entro al gate.
+
+**Lo que NO se cambio, y es deliberado:** el `MAX(watermark_nuevo)` del
+orquestador (`sp_novedades_ciclo_edf.sql:57-59`). Unificacion lee exactamente
+igual (`16_sp_unificacion_ciclo.sql:162`) y esta certificada; dos procesos que
+acotan por la misma columna no pueden tener dos semanticas de watermark. Y en
+produccion el sintoma no existe: un FULL solo baja la frontera si el dato de
+encima desaparecio, y ahi nada borra filas -- en la bateria desaparece porque el
+reset borra la mutacion a proposito. Queda anotado como riesgo latente
+compartido, no como trabajo abierto.
 
 **Y EL #409 DEJO UN DEFECTO QUE EL TABLERO NO VEIA: EL WATERMARK SALIA DEL
 RELOJ.** El orquestador cerraba la corrida pasando `v_fecha` como watermark
