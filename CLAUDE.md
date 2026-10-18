@@ -406,6 +406,42 @@ encima desaparecio, y ahi nada borra filas -- en la bateria desaparece porque el
 reset borra la mutacion a proposito. Queda anotado como riesgo latente
 compartido, no como trabajo abierto.
 
+**ACTIVIDAD ECONOMICA YA ESTA CERTIFICADA: diez criterios `NOV-AE-01..10`.**
+Ocho por consulta y dos en BLOQUEADO -- `NOV-AE-06` por
+`V_ACTIVIDAD_ECONO_CIIU` y `NOV-AE-07` por `V_Hom_Tip_Ident_Linea`, los dos
+catalogos que no se entregaron. **Entraron al gate sin tocarlo**: la rama
+`NOVEDADES` de `sp_cert_asercion_final` cuenta los FAILED de **todo**
+`cert_resultado_nov`, sin filtrar por bloque, de modo que un FAILED en
+cualquier `NOV-AE` tumba el build desde el primer despliegue. El alcance del
+tablero paso de 15 a 23 criterios y el catalogo de 32 a 41.
+
+**Y `NOV-HIS-01` SALIO DEL CATALOGO: era una nota envejecida.** Decia
+*"PRO_Novedad_Linea_Historial no esta portado"* y ese SP es justo el que
+produce `MAT_INFO_ACTIVIDAD_ECONOMICA` -- la nomenclatura del legado esta
+cruzada y manda el `120.TPT`, no el nombre. Los dominios no portados pasan de
+siete a seis. Misma moraleja que la del grano de TEL: **una seccion que afirma
+que algo falta envejece peor que el codigo.**
+
+**LA LECCION, Y ES LA QUE VALE PARA CUALQUIER VENTANA: UN DELTA EN CERO NO
+PRUEBA QUE NO HAYA CAMBIOS.** El #413 mostro `relaciones_entrada = 0` en los
+dos DELTA de ACTECO y nadie lo miraba. No era un defecto del port: **toda
+`fecha_reporte` del mock estaba en febrero** y el watermark es `2026-03-01`,
+asi que la rama por fecha de
+`fecha_reporte >= watermark OR fecha IS NULL`
+(`sp_novedades_actividad_economica_edf.sql:149-151`) no tenia nada que
+recoger. Antes de dar por buena una rama vacia hay que comparar el **rango del
+dato** con el watermark.
+
+**Y AL SEMBRAR UNA FECHA NUEVA, ELEGIR UN ARQUETIPO CUYO CRITERIO NO DEPENDA DE
+ELLA.** Se movieron los ARQ 16..20 a `2026-04-10`, que son el **empate puro**
+de la Regla 1 (`R1-08`) y deciden por numero de entidades reportantes. Cambia
+el VALOR de la fecha, no el numero de filas ni el de suscriptores distintos:
+`numero_entidades_reportan` no se mueve, y como las dos direcciones de cada
+persona se mueven juntas, el empate de score del Ordenamiento tampoco se rompe.
+Medido en el banco: Unificacion `50/50/0`, Ordenamiento `45/44/1` y
+`grupos_con_empate` identicos (CEL 100 / DIR 200 / EMA 0 / TEL 0 con N=100).
+**Radio de impacto cero**, que era el riesgo a descartar antes de tocar nada.
+
 **Y EL #409 DEJO UN DEFECTO QUE EL TABLERO NO VEIA: EL WATERMARK SALIA DEL
 RELOJ.** El orquestador cerraba la corrida pasando `v_fecha` como watermark
 nuevo, y `v_fecha` es `CURRENT_DATE` cuando el Framework no manda FECHA. Con la
