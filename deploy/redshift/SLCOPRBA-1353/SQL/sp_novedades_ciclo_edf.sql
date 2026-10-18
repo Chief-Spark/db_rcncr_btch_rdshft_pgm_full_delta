@@ -1,7 +1,8 @@
 -- Novedades - orquestador del ciclo
--- Encadena el control de corrida, el dominio UBICACION y la carga de la
--- tabla final. Los otros siete dominios se enganchan aqui cuando se porten:
--- el catalogo de etapas de nov_control_etapa ya los nombra.
+-- Encadena el control de corrida y los TRES dominios portados -- UBICACION,
+-- ACTIVIDAD ECONOMICA y UBICACION AGREGADA -- con la carga de sus tablas
+-- finales. Los cinco que faltan se enganchan aqui cuando se porten: el
+-- catalogo de etapas de nov_control_etapa ya los nombra.
 --
 -- FIRMA DEL FRAMEWORK BATCH, SEIS PARAMETROS VARCHAR Y EN ESTE ORDEN.
 -- Los tres primeros no se usan y aun asi forman parte de la firma; cambiarla
@@ -43,6 +44,10 @@ DECLARE
     v_personas_ae BIGINT;
     v_altas_ae    BIGINT;
     v_cambios_ae  BIGINT;
+    v_entrada_ag  BIGINT;
+    v_personas_ag BIGINT;
+    v_altas_ag    BIGINT;
+    v_cambios_ag  BIGINT;
 BEGIN
     v_modo  := UPPER(COALESCE(in_nemotecnico, 'FULL'));
     v_lote  := CAST(in_id_facturacion AS INTEGER);
@@ -124,6 +129,48 @@ BEGIN
   CALL bdm_datos.nov_control_etapa_marcar(v_corrida_id, v_lote, 'actividad_economica',
                                           'completado', v_entrada_ae, v_personas_ae,
                                           v_altas_ae, v_cambios_ae, 0);
+
+  -- ---------- dominio UBICACION AGREGADA ----------
+  -- Va DESPUES de Ubicacion porque LEE SUS DOS ETAPAS -- once puntos de
+  -- lectura, cinco de la etapa 2 y seis de la etapa 9 -- y no por convencion.
+  -- Invertido el orden saldria vacio por un efecto de secuencia y no por un
+  -- defecto, que es la misma leccion del ciclo GEO y de Novedades entera.
+  -- Y despues de Actividad Economica, que es el orden en que el 111.BTQ
+  -- invoca los diez SP del legado.
+  CALL bdm_datos.nov_control_etapa_marcar(v_corrida_id, v_lote, 'ubi_agregada',
+                                          'en proceso', NULL, NULL, NULL, NULL, NULL);
+
+  CALL bdm_datos.sp_novedades_ubi_agregada_edf();
+  CALL bdm_datos.sp_novedades_cargar_mat_ubi_agregada_edf(v_lote);
+
+  -- LAS METRICAS SALEN DE LA SEVERIDAD, NO DE flag_op. En este dominio
+  -- flag_op es 'I' LITERAL (Novedad.sql:7170): contar altas por ahi diria que
+  -- todo es alta incluso cuando la Severidad lo trata como cambio. Por eso el
+  -- cargador deja viva stg_nov_ubiagr_sev y la leemos aqui.
+  --   severidad = 1 y ya_estaba = 0 -> alta
+  --   severidad = 1 y ya_estaba = 1 -> cambio
+  --   severidad = -1                -> no cambio nada, no se escribio
+  SELECT COUNT(*),
+         COUNT(DISTINCT info_basica),
+         SUM(CASE WHEN severidad = 1 AND ya_estaba = 0 THEN 1 ELSE 0 END),
+         SUM(CASE WHEN severidad = 1 AND ya_estaba = 1 THEN 1 ELSE 0 END)
+    INTO v_entrada_ag, v_personas_ag, v_altas_ag, v_cambios_ag
+    FROM bdm_tempo.stg_nov_ubiagr_sev;
+
+  -- SUM() sobre cero filas devuelve NULL, no 0. Mismo cuidado que arriba.
+  v_altas_ag   := COALESCE(v_altas_ag, 0);
+  v_cambios_ag := COALESCE(v_cambios_ag, 0);
+
+  -- Las bajas van a 0 LITERAL, igual que en Actividad Economica: la Severidad
+  -- de este dominio no tiene rama que devuelva 2 (120.TPT:406-442), de modo
+  -- que el DELETE del 130.TPT:1135-1147 es codigo muerto.
+  CALL bdm_datos.nov_control_etapa_marcar(v_corrida_id, v_lote, 'ubi_agregada',
+                                          'completado', v_entrada_ag, v_personas_ag,
+                                          v_altas_ag, v_cambios_ag, 0);
+
+  -- Ahora si: bdm_tempo es compartido y una tabla huerfana confunde al
+  -- siguiente que mire.
+  DROP TABLE IF EXISTS bdm_tempo.stg_nov_ubiagr_sev;
 
   -- ---------- el watermark nuevo ----------
     -- EL WATERMARK SALE DEL MAX DEL DATO, NUNCA DE LA FECHA DE EJECUCION.

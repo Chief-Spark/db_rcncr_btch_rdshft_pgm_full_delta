@@ -12,9 +12,14 @@ B = os.path.join(_RAIZ, "SQL") + os.sep
 # a1 mas un '0' suelto. Es la misma leccion que nov_control contra
 # nov_control_etapa, que dio nov_control_mock_etapa_mock.
 SUST = [
-    # procedimiento
+    # procedimientos. El del cargador va PRIMERO porque el del SP de etapas es
+    # prefijo suyo si se compara sin \b, y aqui la alternativa larga manda.
+    (r'bdm_datos\.sp_novedades_cargar_mat_ubi_agregada_edf',
+     'bdm_datos.sp_novedades_cargar_mat_ubi_agregada_mock'),
     (r'bdm_datos\.sp_novedades_ubi_agregada_edf',
      'bdm_datos.sp_novedades_ubi_agregada_mock'),
+    # tabla final
+    (r'bdm_datos\.mat_ubicacion_agregada\b', 'bdm_datos.mat_ubicacion_agregada_mock'),
     # las dos etapas de Ubicacion que lee, y su propia etapa de salida
     (r'bdm_tempo\.stg_nov_ubica_etapa_9\b', 'bdm_tempo.stg_nov_ubica_etapa_9_mock'),
     (r'bdm_tempo\.stg_nov_ubica_etapa_2\b', 'bdm_tempo.stg_nov_ubica_etapa_2_mock'),
@@ -22,12 +27,12 @@ SUST = [
      'bdm_tempo.stg_nov_ubiagr_etapa_final_mock'),
     # las 16 intermedias cambian de nombre A PROPOSITO, no de sufijo: real y
     # mock comparten el esquema bdm_tempo y una corrida pisaria a la otra.
-    (r'bdm_tempo\.stg_nov_ubiagr_(a\d+|r\d+|final1)\b',
+    (r'bdm_tempo\.stg_nov_ubiagr_(a\d+|r\d+|final1|sev|llaves)\b',
      r'bdm_tempo.stg_mock_nov_ubiagr_\1'),
 ]
 
 CAB = ("-- Novedades - dominio UBICACION AGREGADA (ESPEJO MOCK)\n"
-       "-- Espejo de sp_novedades_ubi_agregada_edf.sql. Generado por\n"
+       "-- Espejo del real. Generado por\n"
        "-- SUSTITUCION DE FUENTES: no se edita a mano. Regenerar con\n"
        "-- tools/gen_novedades_espejo_ubiagr.py.\n"
        "-- Solo cambian los nombres de los objetos: _edf -> _mock en el\n"
@@ -51,3 +56,5 @@ def espejo(src, dst):
 
 
 espejo("sp_novedades_ubi_agregada_edf.sql", "sp_novedades_ubi_agregada_mock.sql")
+espejo("sp_novedades_cargar_mat_ubi_agregada_edf.sql",
+       "sp_novedades_cargar_mat_ubi_agregada_mock.sql")

@@ -1,5 +1,5 @@
 -- Novedades - dominio UBICACION AGREGADA (ESPEJO MOCK)
--- Espejo de sp_novedades_ubi_agregada_edf.sql. Generado por
+-- Espejo del real. Generado por
 -- SUSTITUCION DE FUENTES: no se edita a mano. Regenerar con
 -- tools/gen_novedades_espejo_ubiagr.py.
 -- Solo cambian los nombres de los objetos: _edf -> _mock en el

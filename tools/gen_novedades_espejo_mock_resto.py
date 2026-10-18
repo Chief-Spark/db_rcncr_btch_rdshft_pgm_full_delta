@@ -19,6 +19,13 @@ SUST = [
     # trampa de paridad que la bitacora da por pagada, y se volvio a pagar.
     ("bdm_datos.sp_novedades_cargar_mat_acteco_edf",    "bdm_datos.sp_novedades_cargar_mat_acteco_mock"),
     ("bdm_datos.sp_novedades_actividad_economica_edf",  "bdm_datos.sp_novedades_actividad_economica_mock"),
+    # Dominio UBICACION AGREGADA. El cargador va ANTES que el SP de etapas:
+    # su nombre contiene al otro y un replace de cadena los confundiria.
+    ("bdm_datos.sp_novedades_cargar_mat_ubi_agregada_edf", "bdm_datos.sp_novedades_cargar_mat_ubi_agregada_mock"),
+    ("bdm_datos.sp_novedades_ubi_agregada_edf",         "bdm_datos.sp_novedades_ubi_agregada_mock"),
+    # La tabla de Severidad que el cargador deja viva y el orquestador lee y
+    # borra. Cambia de nombre, no de sufijo: real y mock comparten bdm_tempo.
+    ("bdm_tempo.stg_nov_ubiagr_sev",                    "bdm_tempo.stg_mock_nov_ubiagr_sev"),
     ("bdm_tempo.stg_nov_acteco_etapa_1",                "bdm_tempo.stg_nov_acteco_etapa_1_mock"),
     ("bdm_datos.mat_info_actividad_economica",          "bdm_datos.mat_info_actividad_economica_mock"),
     ("bdm_datos.nov_control_etapa_marcar",              "bdm_datos.nov_control_mock_etapa_marcar"),
