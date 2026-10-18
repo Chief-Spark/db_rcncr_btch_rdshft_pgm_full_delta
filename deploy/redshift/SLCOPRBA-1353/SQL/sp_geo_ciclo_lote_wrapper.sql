@@ -71,7 +71,7 @@ BEGIN
   END IF;
 
   IF v_lote_txt = '' THEN
-    RAISE EXCEPTION '%: no se encontro un Lote entero ni en in_id_facturacion ni en in_nemotecnico (recibidos: "%" y "%")', 'sp_geo_ciclo_lote_wrapper', in_id_facturacion, in_nemotecnico;
+    RAISE EXCEPTION 'sp_geo_ciclo_lote_wrapper: no se encontro un Lote entero ni en in_id_facturacion ni en in_nemotecnico (recibidos: "%" y "%")', in_id_facturacion, in_nemotecnico;
   END IF;
   v_lote := v_lote_txt::INTEGER;
 

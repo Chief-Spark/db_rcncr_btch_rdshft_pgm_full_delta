@@ -231,11 +231,16 @@ else
   ok "ninguna reservada usada como alias ni como columna"
 fi
 
-echo "9) argumentos de RAISE con expresiones  [REDSHIFT:112]"
+echo "9) argumentos de RAISE con expresiones o literales  [REDSHIFT:112]"
 # El RAISE de Redshift admite VARIABLES, no expresiones:
 #   RAISE level 'format' [, variable [, ...]];
 # Una funcion en la lista es error de SINTAXIS en el propio CREATE. PostgreSQL
 # si las admite, asi que el banco local no lo ve. Tumbo el job #367.
+# UN LITERAL DE CADENA TAMPOCO VALE, y es el mismo error con otra cara:
+#   RAISE EXCEPTION '%: ...', 'nombre_del_sp', v_x;   <-- 42601
+# El nombre va DENTRO de la cadena de formato. Tumbo el job #419, y el chequeo
+# no lo veia porque un literal no lleva parentesis: por eso ahora se mira
+# tambien si queda una comilla en la cola.
 # Se une cada sentencia hasta su ';', se BORRA la cadena de formato (que lleva
 # parentesis propios: "criterio(s)") y se mira si queda un '(' en la cola.
 RAISE_HIT=$(find "$ROOT/SQL" "$ROOT/RevSQL" -name '*.sql' 2>/dev/null | sort | while read -r f; do
@@ -248,17 +253,17 @@ RAISE_HIT=$(find "$ROOT/SQL" "$ROOT/RevSQL" -name '*.sql' 2>/dev/null | sort | w
       if (linea ~ /;/) {
         cola = buf
         sub("^[^" q "]*" q "([^" q "]|" q q ")*" q, "", cola)
-        if (index(cola, "(") > 0) printf "%s:%d: %s\n", ARCH, ini, substr(buf, 1, 120)
+        if (index(cola, "(") > 0 || index(cola, q) > 0) printf "%s:%d: %s\n", ARCH, ini, substr(buf, 1, 120)
         buf = ""
       }
     }
   ' "$f"
 done)
 if [ -n "$RAISE_HIT" ]; then
-  bad "RAISE con expresiones en los argumentos (Redshift solo admite variables):"
+  bad "RAISE con expresiones o literales en los argumentos (Redshift solo admite variables):"
   printf '%s\n' "$RAISE_HIT" | head -10 | sed 's|^|        |'
 else
-  ok "ningun RAISE pasa una expresion como argumento"
+  ok "ningun RAISE pasa una expresion ni un literal como argumento"
 fi
 
 # ------------------------------------------------------------
