@@ -16,6 +16,10 @@
 --   NOV-AE-01..10 menos 06 y 07           -> CONSULTA
 --   NOV-AE-06 y NOV-AE-07                 -> BLOQUEADO (catalogo que no se
 --                                            entrego)
+--   NOV-AG-01                             -> CONSULTA (mira el contrato, no
+--                                            las filas)
+--   NOV-AG-02..NOV-AG-08                  -> BLOQUEADO (el mismo catalogo,
+--                                            que aqui vacia el dominio entero)
 --   NOV-G-01..G-03                        -> REVISION_MANUAL
 --
 -- Y ESTE PROCEDIMIENTO ES AHORA UN GATE DE VERDAD: sp_cert_asercion_final
@@ -64,6 +68,10 @@ DECLARE
     -- Dominio ACTIVIDAD ECONOMICA: mismo patron, mismo motivo.
     v_cols_a1 INTEGER := 0;
     v_cols_am INTEGER := 0;
+    -- Dominio UBICACION AGREGADA: igual. Es el unico criterio del dominio que
+    -- se puede evaluar hoy, porque mira el contrato y no las filas.
+    v_cols_ag INTEGER := 0;
+    v_cols_agm INTEGER := 0;
 BEGIN
 
   -- Idempotencia del propio gate. WHERE explicito [REDSHIFT:232].
@@ -85,6 +93,14 @@ BEGIN
   SELECT COUNT(*) INTO v_cols_am
     FROM information_schema.columns
    WHERE table_schema = 'bdm_datos' AND table_name = 'mat_info_actividad_economica_mock';
+
+  SELECT COUNT(*) INTO v_cols_ag
+    FROM information_schema.columns
+   WHERE table_schema = 'bdm_tempo' AND table_name = 'stg_nov_ubiagr_etapa_final_mock';
+
+  SELECT COUNT(*) INTO v_cols_agm
+    FROM information_schema.columns
+   WHERE table_schema = 'bdm_datos' AND table_name = 'mat_ubicacion_agregada_mock';
 
   -- ------------------------------------------------------------
   -- Apoyo: la salida del dominio, acotada al universo mock.
@@ -611,6 +627,55 @@ BEGIN
     SELECT 'NOV-AE-07', 'falta el catalogo V_Hom_Tip_Ident_Linea, el mismo que bloquea NOV-UB-18: el tipo de identificacion sale NULL'
   ) c;
 
+  -- ------------------------------------------------------------
+  -- DOMINIO UBICACION AGREGADA (NOV-AG-01..08)
+  --
+  -- SIETE DE LOS OCHO SALEN BLOQUEADO, Y NO ES PRUDENCIA: ES QUE EL DOMINIO
+  -- EMITE CERO FILAS. tipo_identificacion sale NULL en toda fila
+  -- (sp_novedades_ubicacion_edf.sql:362) y la etapa 5 une por igualdad en esa
+  -- columna (Novedad.sql:5431): NULL = NULL es falso y el join vacia la
+  -- cadena. Medido en el banco: etapas 1 a 4 con 8.500 filas, la 5 con cero.
+  --
+  -- UN SIN_DATO SERIA MENTIR POR OMISION. SIN_DATO dice "el mock no siembra
+  -- este caso" y se arregla sembrando un arquetipo; aqui ningun arquetipo lo
+  -- arregla, porque falta un catalogo del datashare. BLOQUEADO es el estado
+  -- que ya usan NOV-AE-06/07 y NOV-UB-16..22 para exactamente esto.
+  --
+  -- Y NO SE EVALUAN EN FALSO: un COUNT(*) sobre cero filas daria PASSED en
+  -- varios de ellos -- es la trampa del SUM() sobre cero filas que ya costo
+  -- un criterio --, de modo que escribirlos como CONSULTA los dejaria en
+  -- verde sin haber mirado nada.
+  -- ------------------------------------------------------------
+
+  -- ---------- NOV-AG-01: las columnas de los dos contratos ----------
+  -- EL UNICO EVALUABLE HOY: mira information_schema, que no depende de que
+  -- haya filas. Es lo que cazaria una deriva del contrato mientras el resto
+  -- espera al catalogo.
+  INSERT INTO bdm_datos.cert_resultado_nov
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'NOV-AG-01',
+         CASE WHEN v_cols_ag = 30 AND v_cols_agm = 32 THEN 'PASSED' ELSE 'FAILED' END,
+         'columnas de stg_nov_ubiagr_etapa_final_mock=' || CAST(v_cols_ag AS VARCHAR)
+           || ' (esperado 30 = 29 del contrato de 130.TPT:1033-1147 mas flag_op)'
+           || ' y de mat_ubicacion_agregada_mock=' || CAST(v_cols_agm AS VARCHAR)
+           || ' (esperado 32 = 29 mas lote, fecha_actualizacion y usuario_bd)',
+         GETDATE(), CURRENT_USER;
+
+  -- ---------- NOV-AG-02..08: bloqueadas por el mismo catalogo ----------
+  INSERT INTO bdm_datos.cert_resultado_nov
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, c.criterio, 'BLOQUEADO', c.detalle, GETDATE(), CURRENT_USER
+  FROM (
+    SELECT CAST('NOV-AG-02' AS VARCHAR(12)) AS criterio,
+           CAST('falta V_Hom_Tip_Ident_Linea: con tipo_identificacion en NULL la etapa 5 (Novedad.sql:5431) sale vacia y no hay filas sobre las que medir el grano de la llave de siete columnas' AS VARCHAR(1024)) AS detalle UNION ALL
+    SELECT 'NOV-AG-03', 'mismo catalogo: sin filas en la etapa final no hay listas concatenadas que comprobar' UNION ALL
+    SELECT 'NOV-AG-04', 'mismo catalogo: sin filas no hay ranking que numerar' UNION ALL
+    SELECT 'NOV-AG-05', 'mismo catalogo: sin filas no se puede comprobar que las cinco columnas de reporte vengan pobladas' UNION ALL
+    SELECT 'NOV-AG-06', 'mismo catalogo: sin filas el conteo de bajas sale cero por vacio y no por paridad, que es justo lo que este criterio debe distinguir' UNION ALL
+    SELECT 'NOV-AG-07', 'mismo catalogo: la tabla final no crece entre pasadas porque no entra nada, de modo que el verde no probaria la idempotencia del UPSERT' UNION ALL
+    SELECT 'NOV-AG-08', 'mismo catalogo: sin filas no se puede comprobar que cod_pais siga en blanco'
+  ) c;
+
   -- ---------- NOV-UB-16..22: bloqueadas por insumo que no se entrego ----------
   INSERT INTO bdm_datos.cert_resultado_nov
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
@@ -639,8 +704,7 @@ BEGIN
     SELECT 'NOV-INB-01', 'PRO_Novedad_Linea_Info_Basica (Novedad.sql:2166) no esta portado; depende ademas de la decision funcional del filtro Mosaic' UNION ALL
     SELECT 'NOV-CON-01', 'PRO_Novedad_Linea_Contact (Novedad.sql:186) no esta portado; siete de sus once columnas son datos de gestion que no vienen del datashare' UNION ALL
     SELECT 'NOV-PIN-01', 'PRO_Novedad_Linea_Punto_Interes (Novedad.sql:4585) no esta portado; falta ademas el nombre del punto de interes en el contrato de distancias' UNION ALL
-    SELECT 'NOV-MOV-01', 'PRO_Novedad_Linea_Indic_Movilidad (Novedad.sql:1508) no esta portado y depende del proceso P0029, cuya migracion esta pendiente' UNION ALL
-    SELECT 'NOV-AGR-01', 'PRO_Novedad_Linea_Ubi_Agregada (Novedad.sql:5032) no esta portado; es el mayor consumidor de las dos etapas de Ubicacion'
+    SELECT 'NOV-MOV-01', 'PRO_Novedad_Linea_Indic_Movilidad (Novedad.sql:1508) no esta portado y depende del proceso P0029, cuya migracion esta pendiente'
   ) c;
 
   -- ---------- Gobernanza: no hay consulta que la decida ----------
