@@ -147,7 +147,7 @@ BEGIN
     -- es vacio salvo por un valor explicito no reconocido.)
     -- ========================================================
     IF v_modo NOT IN ('FULL', 'DELTA') THEN
-        RAISE EXCEPTION 'sp_unificacion_ciclo: Modo_Corrida no reconocido (valor recibido: "%"); se aborta sin modificar la Tabla_Destino (Req 1.3). Valores validos: FULL | DELTA.', v_modo;
+        RAISE EXCEPTION 'sp_unificacion_ciclo: Modo_Corrida no reconocido (slot 4 recibido: "%", traducido a: "%"); se aborta sin modificar la Tabla_Destino (Req 1.3). Valores validos: FULL | DELTA.', in_nemotecnico, v_modo;
     END IF;
 
     -- Fecha_Proceso ya resuelta (default CURRENT_DATE cuando no se provee, Req 14.2).

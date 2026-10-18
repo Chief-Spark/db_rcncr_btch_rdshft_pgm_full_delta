@@ -96,7 +96,7 @@ BEGIN
     END IF;
 
     IF v_modo NOT IN ('FULL', 'DELTA') THEN
-        RAISE EXCEPTION 'ORD MOCK: modo invalido %', v_modo;
+        RAISE EXCEPTION 'ORD MOCK: modo invalido. Slot 4 recibido: "%", traducido a: "%"', in_nemotecnico, v_modo;
     END IF;
 
     -- Watermark y Bootstrap, sobre el control MOCK del Ordenamiento.

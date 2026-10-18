@@ -49,7 +49,7 @@ BEGIN
     END;
 
     IF v_modo NOT IN ('FULL', 'DELTA') THEN
-        RAISE EXCEPTION 'ORDENAMIENTO: modo invalido (FULL|DELTA): %', v_modo;
+        RAISE EXCEPTION 'ORDENAMIENTO: modo invalido (FULL|DELTA). Slot 4 recibido: "%", traducido a: "%"', in_nemotecnico, v_modo;
     END IF;
 
     v_fecha := v_fecha_txt::DATE;
