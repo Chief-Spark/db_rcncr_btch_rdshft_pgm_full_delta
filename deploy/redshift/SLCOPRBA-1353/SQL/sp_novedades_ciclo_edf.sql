@@ -26,7 +26,7 @@ NONATOMIC
 LANGUAGE plpgsql
 AS $$
 DECLARE
-    v_modo        VARCHAR(10);
+    v_modo        VARCHAR(64);
     v_lote        INTEGER;
     v_fecha       DATE;
     v_watermark   DATE;
@@ -49,11 +49,13 @@ DECLARE
     v_altas_ag    BIGINT;
     v_cambios_ag  BIGINT;
 BEGIN
-    v_modo  := UPPER(COALESCE(in_nemotecnico, 'FULL'));
+    -- SLCOPRBA-1398: el slot 4 trae el MNEMOTECNICO, no el modo.
+    v_modo  := bdm_datos.fw_resolver_param('MODO', in_nemotecnico);
     v_lote  := CAST(in_id_facturacion AS INTEGER);
-    v_fecha := CASE WHEN NULLIF(BTRIM(COALESCE(in_fecha_ejecucion, '')), '') IS NULL
+    -- El slot 6 trae 'YYMM'. Traducido, y si no es derivable, CURRENT_DATE.
+    v_fecha := CASE WHEN NULLIF(bdm_datos.fw_resolver_param('FECHA', in_fecha_ejecucion), '') IS NULL
                     THEN CURRENT_DATE
-                    ELSE CAST(in_fecha_ejecucion AS DATE) END;
+                    ELSE CAST(bdm_datos.fw_resolver_param('FECHA', in_fecha_ejecucion) AS DATE) END;
 
     -- Watermark efectivo: el mayor de las corridas completadas. Si no hay
     -- ninguna, la corrida es un Bootstrap FULL aunque pidan DELTA -- mismo

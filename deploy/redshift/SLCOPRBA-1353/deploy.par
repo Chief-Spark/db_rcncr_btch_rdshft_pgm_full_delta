@@ -50,6 +50,7 @@ sp_geo_exportar_insumo_wrapper.sql
 sp_geo_ciclo_lote_wrapper.sql
 sp_geo_reenganchar_r3_wrapper.sql
 12_fn_unif_resolver_param.sql
+12b_fn_fw_resolver_param.sql
 14_traza_procedures.sql
 14b_traza_mock_procedures.sql
 15_sp_unif_control_abrir_cerrar.sql

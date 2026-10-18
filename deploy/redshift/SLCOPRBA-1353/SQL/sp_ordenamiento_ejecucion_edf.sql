@@ -9,7 +9,7 @@ NONATOMIC
 LANGUAGE plpgsql
 AS $$
 DECLARE
-  v_modo VARCHAR(10) := COALESCE(NULLIF(TRIM(p_modo), ''), 'FULL');
+  v_modo VARCHAR(64) := COALESCE(NULLIF(TRIM(p_modo), ''), 'FULL');
 BEGIN
   IF COALESCE(p_preparar_insumos, TRUE) THEN
     CALL bdm_datos.sp_ordenamiento_preparar_insumos_edf(v_modo, p_lote, p_watermark);

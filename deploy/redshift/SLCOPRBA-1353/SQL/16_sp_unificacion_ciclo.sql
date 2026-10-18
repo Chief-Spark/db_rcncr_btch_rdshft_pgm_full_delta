@@ -81,7 +81,7 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
     -- Parametros resueltos/normalizados (Req 1.1, 1.2, 6.1, 14.1, 14.2)
-    v_modo          VARCHAR(10);   -- modo solicitado normalizado (FULL|DELTA|otro)
+    v_modo          VARCHAR(64);   -- modo solicitado normalizado (FULL|DELTA|otro)
     v_lote_txt      VARCHAR;       -- lote crudo normalizado (NULL si vacio)
     v_lote          INTEGER;       -- Lote_Corrida entero validado (Req 6.4)
     v_fecha_txt     VARCHAR;       -- fecha resuelta 'YYYY-MM-DD'
@@ -89,7 +89,7 @@ DECLARE
 
     -- Decision de modo efectivo / Bootstrap (Req 2.1, 2.3, 2.4)
     v_wm_anterior   DATE;          -- ultimo Watermark 'completado' (NULL => Bootstrap)
-    v_modo_efectivo VARCHAR(10);   -- modo realmente aplicado (Req 1.5)
+    v_modo_efectivo VARCHAR(64);   -- modo realmente aplicado (Req 1.5)
     v_bootstrap     BOOLEAN := FALSE; -- TRUE si se forzo Bootstrap FULL (Req 2.3)
 
     -- Corrida (Task 4.2/4.3 la propagan a traza y cierre)
@@ -113,9 +113,10 @@ BEGIN
     --   LOTE  : NULLIF(TRIM(...), '') tal cual (aqui se valida presencia/entero).
     --   FECHA : vacio/NULL -> TO_CHAR(CURRENT_DATE,'YYYY-MM-DD'); si no TRIM(...).
     -- ========================================================
-    v_modo      := bdm_datos.unif_resolver_param('MODO',  in_nemotecnico);
+    v_modo      := bdm_datos.fw_resolver_param('MODO',  in_nemotecnico);
     v_lote_txt  := bdm_datos.unif_resolver_param('LOTE',  in_id_facturacion);
-    v_fecha_txt := bdm_datos.unif_resolver_param('FECHA', in_fecha_ejecucion);
+    v_fecha_txt := bdm_datos.unif_resolver_param('FECHA',
+                     bdm_datos.fw_resolver_param('FECHA', in_fecha_ejecucion));
 
     -- ========================================================
     -- (2) VALIDACION DEL LOTE (Req 6.4) -- Task 4.1

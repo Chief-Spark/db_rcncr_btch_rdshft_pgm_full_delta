@@ -42,6 +42,7 @@ sp_ordenamiento_preparar_insumos_edf.sql
 15_rollback_sp_unif_control_abrir_cerrar.sql
 14b_rollback_traza_mock_procedures.sql
 14_rollback_traza_procedures.sql
+12b_rollback_fn_fw_resolver_param.sql
 12_rollback_fn_unif_resolver_param.sql
 sp_geo_reenganchar_r3_wrapper.sql
 sp_geo_ciclo_lote_wrapper.sql

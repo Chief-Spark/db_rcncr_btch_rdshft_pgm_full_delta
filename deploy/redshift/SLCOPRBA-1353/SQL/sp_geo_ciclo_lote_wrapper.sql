@@ -51,14 +51,29 @@ NONATOMIC
 LANGUAGE plpgsql
 AS $$
 DECLARE
-  v_lote INTEGER;
+  v_lote     INTEGER;
+  v_lote_txt VARCHAR(32);
 BEGIN
 
-  -- Parseo seguro del Lote (in_nemotecnico -> INTEGER).
-  IF in_nemotecnico IS NULL OR TRIM(in_nemotecnico) !~ '^[0-9]+$' THEN
-    RAISE EXCEPTION 'sp_geo_ciclo_lote_wrapper: in_nemotecnico no contiene un Lote entero valido (recibido: %)', in_nemotecnico;
+  -- SLCOPRBA-1398: EL LOTE VIENE EN EL SLOT 5, NO EN EL 4.
+  -- El Framework arma la llamada como
+  --   CALL <sp>(execution_id, nit, folder_path, client_id, billing_id, year_month)
+  -- (tf_fw_dynbtch, step_function_definition_builder.py:93), de modo que el
+  -- slot 4 trae el MNEMOTECNICO y el Lote va en in_id_facturacion. Leerlo del
+  -- 4, como se hacia aqui, hacia imposible invocar este wrapper desde el
+  -- Framework: abortaba siempre.
+  --
+  -- Se intenta primero el slot 5 y DESPUES el 4, no al reves: asi sigue
+  -- funcionando cualquier llamada manual que ya pusiera el Lote en el 4.
+  v_lote_txt := bdm_datos.fw_resolver_param('LOTE', in_id_facturacion);
+  IF v_lote_txt = '' THEN
+    v_lote_txt := bdm_datos.fw_resolver_param('LOTE', in_nemotecnico);
   END IF;
-  v_lote := TRIM(in_nemotecnico)::INTEGER;
+
+  IF v_lote_txt = '' THEN
+    RAISE EXCEPTION '%: no se encontro un Lote entero ni en in_id_facturacion ni en in_nemotecnico (recibidos: "%" y "%")', 'sp_geo_ciclo_lote_wrapper', in_id_facturacion, in_nemotecnico;
+  END IF;
+  v_lote := v_lote_txt::INTEGER;
 
   -- in_path_archivo -> ruta GEOCODE ; in_id_facturacion -> ruta DISTANCIAS.
   CALL bdm_datos.sp_geo_ciclo_lote(v_lote, in_path_archivo, in_id_facturacion);

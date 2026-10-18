@@ -61,7 +61,7 @@ NONATOMIC
 LANGUAGE plpgsql
 AS $$
 DECLARE
-  v_modo            VARCHAR(10);
+  v_modo            VARCHAR(64);
   v_ambiente        VARCHAR(10);
   v_cuenta_actual   VARCHAR(20);
   v_cuenta_ambiente VARCHAR(20);
@@ -103,10 +103,11 @@ BEGIN
   --    completo por defecto), de modo que ningun valor inesperado acote el
   --    universo sin querer.
   -- ----------------------------------------------------------
-  IF in_nemotecnico IS NULL OR BTRIM(in_nemotecnico) = '' THEN
+  -- SLCOPRBA-1398: el slot 4 del Framework trae el MNEMOTECNICO, no el modo
+  -- (tf_fw_dynbtch, step_function_definition_builder.py:93).
+  v_modo := NULLIF(bdm_datos.fw_resolver_param('MODO', in_nemotecnico), '');
+  IF v_modo IS NULL THEN
     v_modo := 'FULL';
-  ELSE
-    v_modo := UPPER(BTRIM(in_nemotecnico));
   END IF;
 
   -- ----------------------------------------------------------

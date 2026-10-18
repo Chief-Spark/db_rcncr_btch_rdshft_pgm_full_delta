@@ -62,14 +62,14 @@ NONATOMIC
 LANGUAGE plpgsql
 AS $$
 DECLARE
-    v_modo          VARCHAR(10);
+    v_modo          VARCHAR(64);
     v_lote_txt      VARCHAR;
     v_lote          INTEGER;
     v_fecha_txt     VARCHAR;
     v_fecha         DATE;
 
     v_wm_anterior   DATE;
-    v_modo_efectivo VARCHAR(10);
+    v_modo_efectivo VARCHAR(64);
     v_bootstrap     BOOLEAN := FALSE;
 
     v_corrida_id    BIGINT;
@@ -94,9 +94,10 @@ BEGIN
     -- (1) RESOLUCION DE PARAMETROS -------------------------------------------
     -- Se reutiliza el helper real: el parseo de MODO/LOTE/FECHA es identico y
     -- no tiene nada de especifico de la via real.
-    v_modo      := bdm_datos.unif_resolver_param('MODO',  in_nemotecnico);
+    v_modo      := bdm_datos.fw_resolver_param('MODO',  in_nemotecnico);
     v_lote_txt  := bdm_datos.unif_resolver_param('LOTE',  in_id_facturacion);
-    v_fecha_txt := bdm_datos.unif_resolver_param('FECHA', in_fecha_ejecucion);
+    v_fecha_txt := bdm_datos.unif_resolver_param('FECHA',
+                     bdm_datos.fw_resolver_param('FECHA', in_fecha_ejecucion));
 
     -- (2) VALIDACION DEL LOTE ------------------------------------------------
     -- Abortar SIN tocar la Tabla_Destino_Mock si el lote esta ausente o no es

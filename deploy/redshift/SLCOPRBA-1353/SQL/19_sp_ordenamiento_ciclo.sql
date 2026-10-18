@@ -19,13 +19,13 @@ NONATOMIC
 LANGUAGE plpgsql
 AS $$
 DECLARE
-    v_modo          VARCHAR(10);
+    v_modo          VARCHAR(64);
     v_lote_txt      VARCHAR;
     v_lote          INTEGER;
     v_fecha_txt     VARCHAR;
     v_fecha         DATE;
     v_wm_anterior   DATE;
-    v_modo_efectivo VARCHAR(10);
+    v_modo_efectivo VARCHAR(64);
     v_bootstrap     BOOLEAN := FALSE;
     v_corrida_id    BIGINT;
     v_wm_nuevo      DATE;
@@ -34,9 +34,10 @@ DECLARE
     v_scores        BIGINT := 0;
     v_etapa_actual  VARCHAR(30);
 BEGIN
-    v_modo      := bdm_datos.unif_resolver_param('MODO',  in_nemotecnico);
+    v_modo      := bdm_datos.fw_resolver_param('MODO',  in_nemotecnico);
     v_lote_txt  := bdm_datos.unif_resolver_param('LOTE',  in_id_facturacion);
-    v_fecha_txt := bdm_datos.unif_resolver_param('FECHA', in_fecha_ejecucion);
+    v_fecha_txt := bdm_datos.unif_resolver_param('FECHA',
+                     bdm_datos.fw_resolver_param('FECHA', in_fecha_ejecucion));
 
     IF v_lote_txt IS NULL THEN
         RAISE EXCEPTION 'ORDENAMIENTO: lote obligatorio (in_id_facturacion vacio)';

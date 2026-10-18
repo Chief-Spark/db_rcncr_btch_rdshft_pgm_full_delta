@@ -21,7 +21,7 @@
 --   Comprobado en DEV con dos ejecuciones reales:
 --     'invalid input syntax for type date: "0826"'  -> el slot 6 no es fecha
 --     'value too long for type character varying(10)' al asignar
---     'RECONOCERMOCKVAL' a v_modo VARCHAR(10)       -> el slot 4 no es modo
+--     'RECONOCERMOCKVAL' a v_modo VARCHAR(64)       -> el slot 4 no es modo
 --
 -- ESTE SP NO TIENE LOGICA DE NEGOCIO. Normaliza los tres valores y llama a los
 -- ciclos que ya existen, sin tocarlos.
@@ -30,7 +30,7 @@
 -- reset aqui borraria la unica evidencia de QA que hay en el cluster.
 --
 -- EL MISMO PATRON SIRVE PARA LA VIA REAL, cambiando a que ciclos llama: los
--- cuatro orquestadores reales tienen el mismo v_modo VARCHAR(10), y los tres
+-- cuatro orquestadores reales tienen el mismo v_modo VARCHAR(64), y los tres
 -- sp_unificacion_regla{1,2,3} castean la fecha en el DECLARE -- antes de
 -- BEGIN, donde no hay IF que valga.
 --
@@ -53,7 +53,7 @@ DECLARE
     -- VARCHAR(64) y no (10): aqui entra el mnemotecnico crudo, que es largo.
     -- Estrechar esta variable es exactamente el defecto que este SP evita.
     v_entrada   VARCHAR(64);
-    v_modo      VARCHAR(10);
+    v_modo      VARCHAR(64);
     v_lote      INTEGER;
     v_lote_txt  VARCHAR(32);
     v_fecha_txt VARCHAR(32);

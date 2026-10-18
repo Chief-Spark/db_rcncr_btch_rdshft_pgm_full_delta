@@ -62,8 +62,8 @@ NONATOMIC
 LANGUAGE plpgsql
 AS $$
 DECLARE
-    v_modo          VARCHAR(10);
-    v_modo_efectivo VARCHAR(10);
+    v_modo          VARCHAR(64);
+    v_modo_efectivo VARCHAR(64);
     v_bootstrap     BOOLEAN := FALSE;
     v_lote_txt      VARCHAR;
     v_lote          INTEGER;
@@ -77,19 +77,23 @@ DECLARE
     v_scores        BIGINT := 0;
     v_etapa_actual  VARCHAR(30);
 BEGIN
-    v_modo := CASE
-      WHEN in_nemotecnico IS NULL OR TRIM(in_nemotecnico) = '' THEN 'FULL'
-      ELSE UPPER(TRIM(in_nemotecnico))
-    END;
+    -- SLCOPRBA-1398: el slot 4 del Framework trae el MNEMOTECNICO, no el
+    -- modo (step_function_definition_builder.py:93). fw_resolver_param lo
+    -- traduce; devuelve cadena vacia si no lo reconoce, y la validacion de
+    -- abajo aborta nombrando el valor crudo.
+    v_modo := bdm_datos.fw_resolver_param('MODO', in_nemotecnico);
     v_lote_txt := NULLIF(TRIM(in_id_facturacion), '');
     IF v_lote_txt IS NULL THEN
         RAISE EXCEPTION 'ORD MOCK: lote obligatorio';
     END IF;
     v_lote := v_lote_txt::INTEGER;
-    v_fecha_txt := CASE
-      WHEN in_fecha_ejecucion IS NULL OR TRIM(in_fecha_ejecucion) = '' THEN TO_CHAR(CURRENT_DATE, 'YYYY-MM-DD')
-      ELSE TRIM(in_fecha_ejecucion)
-    END;
+    -- El slot 6 trae 'YYMM', no una fecha. fw_resolver_param lo lleva al
+    -- primer dia del mes; si no es derivable devuelve vacio y aqui se cae a
+    -- CURRENT_DATE, que es el default de siempre.
+    v_fecha_txt := NULLIF(bdm_datos.fw_resolver_param('FECHA', in_fecha_ejecucion), '');
+    IF v_fecha_txt IS NULL THEN
+        v_fecha_txt := TO_CHAR(CURRENT_DATE, 'YYYY-MM-DD');
+    END IF;
 
     IF v_modo NOT IN ('FULL', 'DELTA') THEN
         RAISE EXCEPTION 'ORD MOCK: modo invalido %', v_modo;

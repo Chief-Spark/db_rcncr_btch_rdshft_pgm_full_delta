@@ -24,14 +24,32 @@ DECLARE
   -- DELTA; NO es la Fecha_Proceso). Se derivan aqui y se propagan a
   -- preparar_insumo(p_modo, p_watermark) y a cada escenario(p_modo, p_lote);
   -- ningun escenario re-parsea el Framework_Batch.
-  p_modo      VARCHAR := NULLIF(UPPER(TRIM(COALESCE(in_nemotecnico, ''))), '');
-  p_lote      INTEGER := CAST(NULLIF(TRIM(COALESCE(in_id_facturacion, '')), '') AS INTEGER);
-  p_watermark DATE    := CAST(NULLIF(TRIM(COALESCE(in_fecha_ejecucion, '')), '') AS DATE);
+  -- SLCOPRBA-1398: SE DECLARAN SIN VALOR Y SE ASIGNAN EN EL CUERPO.
+  -- Antes se derivaban aqui mismo, en la zona de declaracion. Eso parece
+  -- inocente y no lo es: un valor que no castea revienta ANTES de BEGIN, donde
+  -- no entra un IF, ni un EXCEPTION, ni nada. Con el Framework Batch pasaba
+  -- siempre -- el slot 6 trae 'YYMM' y no una fecha --, de modo que estos tres
+  -- SP no podian correr bajo el orquestador, pasara lo que pasara.
+  -- Comprobado en DEV: 'invalid input syntax for type date: "0826"' y '"2610"'.
+  p_modo      VARCHAR(64);
+  p_lote      INTEGER;
+  p_watermark DATE;
+  v_aux       VARCHAR(32);
 BEGIN
 
+  -- El slot 4 trae el MNEMOTECNICO, no el modo
+  -- (tf_fw_dynbtch, step_function_definition_builder.py:93).
+  p_modo := NULLIF(bdm_datos.fw_resolver_param('MODO', in_nemotecnico), '');
   IF p_modo IS NULL THEN
     p_modo := 'FULL';   -- FULL por defecto (no romper lo desplegado, Req 10.1).
   END IF;
+
+  p_lote := CAST(NULLIF(bdm_datos.fw_resolver_param('LOTE', in_id_facturacion), '') AS INTEGER);
+
+  -- El slot 6 trae 'YYMM'. Aqui es el WATERMARK, no la Fecha_Proceso (ver la
+  -- cabecera): NULL es legitimo y significa que no hay frontera inferior.
+  v_aux := NULLIF(bdm_datos.fw_resolver_param('FECHA', in_fecha_ejecucion), '');
+  p_watermark := CAST(v_aux AS DATE);
 
   CALL bdm_datos.sp_unificacion_r3_esc1_geo_misma_via_puerta_cercana(p_modo, p_lote);
 
