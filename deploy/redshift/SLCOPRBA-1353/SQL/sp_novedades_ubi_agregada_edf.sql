@@ -590,7 +590,7 @@ BEGIN
          a.ubicacion_tipocuenta,
          CAST(ROW_NUMBER() OVER (
                 PARTITION BY a.info_basica, a.ubicacion_clase
-                ORDER BY NVL(a.ubicacion_orden, 999) ASC,
+                ORDER BY COALESCE(a.ubicacion_orden, 999) ASC,
                          a.ubicacion_reportdesde  DESC NULLS LAST,
                          a.ubicacion_ultreporte   DESC NULLS LAST,
                          a.ubicacion_numreportes  DESC NULLS LAST,
