@@ -6,13 +6,16 @@
 -- PRINCIPIO: un criterio que no se puede afirmar NO sale ausente ni sale
 -- PASSED. Sale con el estado que le corresponde y con la razon exacta.
 --
--- ALCANCE EVALUABLE: 14 de los 32.
+-- ALCANCE EVALUABLE: 22 de los 41.
 --   NOV-UB-01..NOV-UB-15 menos NOV-UB-05  -> CONSULTA
 --   NOV-UB-05                             -> SIN_DATO (la gestion de registro
 --                                            no esta modelada en el mock)
 --   NOV-UB-16..NOV-UB-22                  -> BLOQUEADO (catalogo o contrato
 --                                            GEO que no se entrego)
 --   los siete dominios no portados        -> NO_IMPLEMENTADO
+--   NOV-AE-01..10 menos 06 y 07           -> CONSULTA
+--   NOV-AE-06 y NOV-AE-07                 -> BLOQUEADO (catalogo que no se
+--                                            entrego)
 --   NOV-G-01..G-03                        -> REVISION_MANUAL
 --
 -- Y ESTE PROCEDIMIENTO ES AHORA UN GATE DE VERDAD: sp_cert_asercion_final
@@ -58,6 +61,9 @@ DECLARE
     -- evaluador del Ordenamiento.
     v_cols_e9 INTEGER := 0;
     v_cols_e2 INTEGER := 0;
+    -- Dominio ACTIVIDAD ECONOMICA: mismo patron, mismo motivo.
+    v_cols_a1 INTEGER := 0;
+    v_cols_am INTEGER := 0;
 BEGIN
 
   -- Idempotencia del propio gate. WHERE explicito [REDSHIFT:232].
@@ -71,6 +77,14 @@ BEGIN
   SELECT COUNT(*) INTO v_cols_e2
     FROM information_schema.columns
    WHERE table_schema = 'bdm_tempo' AND table_name = 'stg_nov_ubica_etapa_2_mock';
+
+  SELECT COUNT(*) INTO v_cols_a1
+    FROM information_schema.columns
+   WHERE table_schema = 'bdm_tempo' AND table_name = 'stg_nov_acteco_etapa_1_mock';
+
+  SELECT COUNT(*) INTO v_cols_am
+    FROM information_schema.columns
+   WHERE table_schema = 'bdm_datos' AND table_name = 'mat_info_actividad_economica_mock';
 
   -- ------------------------------------------------------------
   -- Apoyo: la salida del dominio, acotada al universo mock.
@@ -420,6 +434,183 @@ BEGIN
          GETDATE(), CURRENT_USER
   FROM bdm_tempo.stg_cert_nov_cruce c;
 
+  -- ============================================================
+  -- DOMINIO ACTIVIDAD ECONOMICA (NOV-AE-01..10)
+  --
+  -- Segundo dominio portado. Legado: PRO_Novedad_Linea_Historial
+  -- (Novedad.sql:1060-1420) mas los dos TPT.
+  --
+  -- TODO SE MATERIALIZA Y SE UNE CON CROSS JOIN. No hay una sola subconsulta
+  -- escalar en la lista de un SELECT: es la trampa que tumbo el job #407 con
+  -- XX000 y que el banco local no ve porque PostgreSQL la ejecuta sin quejarse.
+  -- ============================================================
+  DROP TABLE IF EXISTS bdm_tempo.stg_cert_ae_falta;
+  DROP TABLE IF EXISTS bdm_tempo.stg_cert_ae_mat;
+  DROP TABLE IF EXISTS bdm_tempo.stg_cert_ae_base;
+  CREATE TABLE bdm_tempo.stg_cert_ae_base
+  DISTSTYLE ALL
+  AS
+  SELECT *
+  FROM bdm_tempo.stg_nov_acteco_etapa_1_mock
+  WHERE info_basica_id BETWEEN 9000000 AND 9999999;
+
+  CREATE TABLE bdm_tempo.stg_cert_ae_mat
+  DISTSTYLE ALL
+  AS
+  SELECT COUNT(*)                       AS filas,
+         COUNT(DISTINCT id)             AS ids,
+         COUNT(DISTINCT info_basica_id) AS personas
+  FROM bdm_datos.mat_info_actividad_economica_mock
+  WHERE info_basica_id BETWEEN 9000000 AND 9999999;
+
+  -- Personas de la etapa que NO llegaron a la tabla final. LEFT JOIN contra un
+  -- SELECT DISTINCT en vez de NOT EXISTS correlacionado, por lo mismo.
+  CREATE TABLE bdm_tempo.stg_cert_ae_falta
+  DISTSTYLE ALL
+  AS
+  SELECT COALESCE(SUM(CASE WHEN m.info_basica_id IS NULL THEN 1 ELSE 0 END), 0) AS ausentes
+  FROM      ( SELECT DISTINCT info_basica_id
+                FROM bdm_tempo.stg_cert_ae_base ) z
+  LEFT JOIN ( SELECT DISTINCT info_basica_id
+                FROM bdm_datos.mat_info_actividad_economica_mock ) m
+         ON m.info_basica_id = z.info_basica_id;
+
+  -- ---------- NOV-AE-01: las columnas de los dos contratos ----------
+  INSERT INTO bdm_datos.cert_resultado_nov
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'NOV-AE-01',
+         CASE WHEN v_cols_a1 = 9 AND v_cols_am = 11 THEN 'PASSED' ELSE 'FAILED' END,
+         'columnas de stg_nov_acteco_etapa_1_mock=' || CAST(v_cols_a1 AS VARCHAR)
+           || ' (esperado 9) y de mat_info_actividad_economica_mock='
+           || CAST(v_cols_am AS VARCHAR)
+           || ' (esperado 11 = 8 del contrato de 130.TPT:76-88 mas lote, fecha_actualizacion y usuario_bd)',
+         GETDATE(), CURRENT_USER;
+
+  -- ---------- NOV-AE-02: un par (ciiu, persona) por fila ----------
+  -- El QUALIFY del legado (Novedad.sql:1379) es REDUNDANTE en la via real,
+  -- porque v_xpm_ciiu_persona ya hace SELECT DISTINCT sobre esas dos columnas.
+  -- En la via MOCK no lo es: v_mock_ciiu_persona lee bdm_stage.ciiu_persona sin
+  -- DISTINCT (02b_vistas_insumo_mock.sql:245-250). Este criterio es el que
+  -- avisaria si alguien lo quita por parecer sobrante.
+  INSERT INTO bdm_datos.cert_resultado_nov
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'NOV-AE-02',
+         CASE WHEN COUNT(*) = 0 THEN 'SIN_DATO'
+              WHEN COUNT(*) = COUNT(DISTINCT z.ciiu || '|' || CAST(z.info_basica_id AS VARCHAR))
+                   THEN 'PASSED' ELSE 'FAILED' END,
+         'filas=' || CAST(COUNT(*) AS VARCHAR)
+           || ', pares (ciiu, persona) distintos='
+           || CAST(COUNT(DISTINCT z.ciiu || '|' || CAST(z.info_basica_id AS VARCHAR)) AS VARCHAR)
+           || ' (deben coincidir: el QUALIFY de Novedad.sql:1379 particiona por ese par)',
+         GETDATE(), CURRENT_USER
+  FROM bdm_tempo.stg_cert_ae_base z;
+
+  -- ---------- NOV-AE-03: solo personas con CIIU informado ----------
+  INSERT INTO bdm_datos.cert_resultado_nov
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'NOV-AE-03',
+         CASE WHEN COUNT(*) = 0 THEN 'SIN_DATO'
+              WHEN COALESCE(SUM(CASE WHEN z.ciiu IS NULL THEN 1 ELSE 0 END), 0) = 0
+                   THEN 'PASSED' ELSE 'FAILED' END,
+         'filas=' || CAST(COUNT(*) AS VARCHAR)
+           || ', con CIIU nulo=' || CAST(COALESCE(SUM(CASE WHEN z.ciiu IS NULL THEN 1 ELSE 0 END), 0) AS VARCHAR)
+           || ' (esperado 0; filtro del legado en Novedad.sql:1377)',
+         GETDATE(), CURRENT_USER
+  FROM bdm_tempo.stg_cert_ae_base z;
+
+  -- ---------- NOV-AE-04: en FULL todo es alta ----------
+  INSERT INTO bdm_datos.cert_resultado_nov
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'NOV-AE-04',
+         CASE WHEN p_fase NOT IN ('FULL', 'FULL2') THEN 'NO_APLICA'
+              WHEN COUNT(*) = 0 THEN 'SIN_DATO'
+              WHEN COALESCE(SUM(CASE WHEN z.flag_op <> 'I' THEN 1 ELSE 0 END), 0) = 0
+                   THEN 'PASSED' ELSE 'FAILED' END,
+         'fase=' || p_fase
+           || ', filas=' || CAST(COUNT(*) AS VARCHAR)
+           || ', altas=' || CAST(COALESCE(SUM(CASE WHEN z.flag_op = 'I' THEN 1 ELSE 0 END), 0) AS VARCHAR)
+           || ', no altas=' || CAST(COALESCE(SUM(CASE WHEN z.flag_op <> 'I' THEN 1 ELSE 0 END), 0) AS VARCHAR),
+         GETDATE(), CURRENT_USER
+  FROM bdm_tempo.stg_cert_ae_base z;
+
+  -- ---------- NOV-AE-05: en DELTA la ventana de FECHA aporta ----------
+  -- GEMELO DE NOV-UB-12, Y POR LA MISMA RAZON. La ventana del SP es
+  --   fecha_reporte >= watermark OR fecha_reporte IS NULL
+  -- (sp_novedades_actividad_economica_edf.sql:149-151). Contar filas a secas
+  -- da PASSED aunque la rama de FECHA no haya aportado ninguna, que es
+  -- exactamente el defecto que el #409 dejo pasar en Ubicacion.
+  --
+  -- Toda fila de la etapa ya paso la ventana, de modo que la que trae fecha no
+  -- nula entro POR FECHA: la particion no necesita releer el watermark.
+  --
+  -- CERO FILAS ES SIN_DATO Y NO FAILED, a proposito: es la verdad cuando la
+  -- semilla no pone ninguna fecha por encima del watermark, y un FAILED ahi
+  -- tumbaria el build por una carencia del mock y no por un defecto del port.
+  INSERT INTO bdm_datos.cert_resultado_nov
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'NOV-AE-05',
+         CASE WHEN p_fase IN ('FULL', 'FULL2') THEN 'NO_APLICA'
+              WHEN COUNT(*) = 0 THEN 'SIN_DATO'
+              WHEN COALESCE(SUM(CASE WHEN z.fecha_reporte IS NOT NULL THEN 1 ELSE 0 END), 0) = 0
+                   THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'fase=' || p_fase
+           || ', filas=' || CAST(COUNT(*) AS VARCHAR)
+           || '; de las que entraron, por fecha='
+           || CAST(COALESCE(SUM(CASE WHEN z.fecha_reporte IS NOT NULL THEN 1 ELSE 0 END), 0) AS VARCHAR)
+           || ' y por fecha nula='
+           || CAST(COALESCE(SUM(CASE WHEN z.fecha_reporte IS NULL THEN 1 ELSE 0 END), 0) AS VARCHAR),
+         GETDATE(), CURRENT_USER
+  FROM bdm_tempo.stg_cert_ae_base z;
+
+  -- ---------- NOV-AE-08: el AS-IS solo inserta ----------
+  INSERT INTO bdm_datos.cert_resultado_nov
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'NOV-AE-08',
+         CASE WHEN COUNT(*) = 0 THEN 'SIN_DATO'
+              WHEN COALESCE(SUM(CASE WHEN z.flag_op = 'E' THEN 1 ELSE 0 END), 0) = 0
+                   THEN 'PASSED' ELSE 'FAILED' END,
+         'bajas en la etapa=' || CAST(COALESCE(SUM(CASE WHEN z.flag_op = 'E' THEN 1 ELSE 0 END), 0) AS VARCHAR)
+           || ', esperadas=0. El DELETE del 130.TPT:753 exige Severidad=2 y el CASE de 120.TPT:186-197 no tiene rama que la devuelva: tres dan 1 y el ELSE da -1. Emitir una baja seria divergir',
+         GETDATE(), CURRENT_USER
+  FROM bdm_tempo.stg_cert_ae_base z;
+
+  -- ---------- NOV-AE-09: el id de la tabla final no se repite ----------
+  INSERT INTO bdm_datos.cert_resultado_nov
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'NOV-AE-09',
+         CASE WHEN v.filas = 0 THEN 'SIN_DATO'
+              WHEN v.filas = v.ids THEN 'PASSED' ELSE 'FAILED' END,
+         'filas en la tabla final=' || CAST(v.filas AS VARCHAR)
+           || ', ids distintos=' || CAST(v.ids AS VARCHAR)
+           || ', personas distintas=' || CAST(v.personas AS VARCHAR)
+           || ' (filas e ids deben coincidir: el id es MAX(id) + la posicion de la fila, 120.TPT:177-179)',
+         GETDATE(), CURRENT_USER
+  FROM bdm_tempo.stg_cert_ae_mat v;
+
+  -- ---------- NOV-AE-10: la etapa llega a la tabla final ----------
+  INSERT INTO bdm_datos.cert_resultado_nov
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'NOV-AE-10',
+         CASE WHEN COUNT(*) = 0 THEN 'SIN_DATO'
+              WHEN MAX(f.ausentes) = 0 THEN 'PASSED' ELSE 'FAILED' END,
+         'personas en la etapa=' || CAST(COUNT(DISTINCT z.info_basica_id) AS VARCHAR)
+           || ', de ellas ausentes de la tabla final=' || CAST(COALESCE(MAX(f.ausentes), 0) AS VARCHAR)
+           || ' (esperado 0; el 130.TPT:215 descarta Severidad=-1 y el resto entra)',
+         GETDATE(), CURRENT_USER
+  FROM       bdm_tempo.stg_cert_ae_base  z
+  CROSS JOIN bdm_tempo.stg_cert_ae_falta f;
+
+  -- ---------- NOV-AE-06 y 07: bloqueadas por catalogo que no se entrego ----------
+  INSERT INTO bdm_datos.cert_resultado_nov
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, c.criterio, 'BLOQUEADO', c.detalle, GETDATE(), CURRENT_USER
+  FROM (
+    SELECT CAST('NOV-AE-06' AS VARCHAR(12)) AS criterio,
+           CAST('falta V_ACTIVIDAD_ECONO_CIIU (Novedad.sql:1352-1354): actividad_economica y version salen NULL. Pedido en docs/PETICION_CATALOGOS_NOVEDADES.md seccion 6' AS VARCHAR(1024)) AS detalle UNION ALL
+    SELECT 'NOV-AE-07', 'falta el catalogo V_Hom_Tip_Ident_Linea, el mismo que bloquea NOV-UB-18: el tipo de identificacion sale NULL'
+  ) c;
+
   -- ---------- NOV-UB-16..22: bloqueadas por insumo que no se entrego ----------
   INSERT INTO bdm_datos.cert_resultado_nov
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
@@ -435,7 +626,10 @@ BEGIN
     SELECT 'NOV-UB-22', 'localidad y codigo postal no tienen columna en geo_atributos; las dos vienen del contrato GEO sin pinar'
   ) c;
 
-  -- ---------- Los siete dominios no portados ----------
+  -- ---------- Los SEIS dominios no portados ----------
+  -- Eran siete. NOV-HIS-01 salio del catalogo: el historial de actividad
+  -- economica es PRO_Novedad_Linea_Historial, que es justo lo que el bloque
+  -- ACTIVIDAD_ECONOMICA certifica desde el job DEV/DATABASE #413.
   INSERT INTO bdm_datos.cert_resultado_nov
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
   SELECT p_lote, p_fase, c.criterio, 'NO_IMPLEMENTADO', c.detalle, GETDATE(), CURRENT_USER
@@ -445,7 +639,6 @@ BEGIN
     SELECT 'NOV-INB-01', 'PRO_Novedad_Linea_Info_Basica (Novedad.sql:2166) no esta portado; depende ademas de la decision funcional del filtro Mosaic' UNION ALL
     SELECT 'NOV-CON-01', 'PRO_Novedad_Linea_Contact (Novedad.sql:186) no esta portado; siete de sus once columnas son datos de gestion que no vienen del datashare' UNION ALL
     SELECT 'NOV-PIN-01', 'PRO_Novedad_Linea_Punto_Interes (Novedad.sql:4585) no esta portado; falta ademas el nombre del punto de interes en el contrato de distancias' UNION ALL
-    SELECT 'NOV-HIS-01', 'PRO_Novedad_Linea_Historial (Novedad.sql:1060) no esta portado' UNION ALL
     SELECT 'NOV-MOV-01', 'PRO_Novedad_Linea_Indic_Movilidad (Novedad.sql:1508) no esta portado y depende del proceso P0029, cuya migracion esta pendiente' UNION ALL
     SELECT 'NOV-AGR-01', 'PRO_Novedad_Linea_Ubi_Agregada (Novedad.sql:5032) no esta portado; es el mayor consumidor de las dos etapas de Ubicacion'
   ) c;
@@ -464,6 +657,9 @@ BEGIN
   DROP TABLE IF EXISTS bdm_tempo.stg_cert_nov_cruce;
   DROP TABLE IF EXISTS bdm_tempo.stg_cert_nov_mat;
   DROP TABLE IF EXISTS bdm_tempo.stg_cert_nov_base;
+  DROP TABLE IF EXISTS bdm_tempo.stg_cert_ae_falta;
+  DROP TABLE IF EXISTS bdm_tempo.stg_cert_ae_mat;
+  DROP TABLE IF EXISTS bdm_tempo.stg_cert_ae_base;
 
 END;
 $$;
