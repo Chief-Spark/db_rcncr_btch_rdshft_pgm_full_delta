@@ -32,13 +32,22 @@
 --   El runner de dt lo llama DOS VECES, una por alcance, y no con 'TODO': eso
 --   encenderia Ordenamiento de rebote, que es una decision aparte.
 --
---   Ordenamiento NO se asercion todavia a proposito: su tablero acaba de
---   nacer y arrastra defectos reales ya identificados (el ranking empata sin
---   desempate, EMA024 es constante, cuatro divisores desalineados). Encender
---   el gate antes de corregirlos solo serviria para dejar el job en rojo sin
---   informacion nueva. Se enciende anadiendo 'ORDENAMIENTO' a la llamada del
---   .par de dt en cuanto esos defectos esten corregidos; el procedimiento ya
---   lo soporta.
+--   Ordenamiento NO se asercion todavia, pero YA NO POR LOS DEFECTOS QUE
+--   ESTE PARRAFO CITABA. Decia que el tablero acababa de nacer y arrastraba
+--   "el ranking empata sin desempate, EMA024 es constante, cuatro divisores
+--   desalineados". Los tres cayeron: el desempate explicito esta aplicado,
+--   el ARQ 84 mueve EMA024 de categoria 1 a 4, y la auditoria de los 42
+--   buckets encontro que los 42 umbrales y los 42 divisores COINCIDEN con
+--   Caracteristicas.txt. Hoy el tablero da cero FAILED en las tres fases,
+--   con las cuatro fases portadas.
+--
+--   LA UNICA CONDICION QUE QUEDA ES LA MISMA QUE PARA GEO Y NOVEDADES: no se
+--   pone de gate algo que no ha corrido en Redshift real. Los 217 PASSED son
+--   del banco, que es PostgreSQL y no certifica. En cuanto el job DEV/DATABASE
+--   salga verde, se enciende anadiendo 'ORDENAMIENTO' a la llamada del .par de
+--   dt, en el commit SIGUIENTE; el procedimiento ya lo soporta y su rama
+--   cuenta solo FAILED, de modo que BLOQUEADO, SIN_DATO y REVISION_MANUAL no
+--   tumban nada.
 --
 -- SLCOPRBA-1355: NOVEDADES ENTRA EN EL GATE, y por el mismo criterio que GEO
 --   -- no se pone de gate algo que no ha corrido nunca. Ya corrio: job

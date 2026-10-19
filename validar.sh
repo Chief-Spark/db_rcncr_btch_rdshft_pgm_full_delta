@@ -196,6 +196,35 @@ else
   if [ -n "$MISS" ]; then bad "entradas sin archivo:$(printf "$MISS")"
   else ok "toda entrada tiene su archivo"; fi
 
+  # ---- y AL REVES: todo archivo tiene su entrada ----
+  # Lo caro de este chequeo es que lo contrario pasaba inadvertido. El paquete
+  # llevaba RevSQL/rollback_ordenamiento_edf.sql sin una sola linea en
+  # rollback.par ni una referencia en los tres repos: entro con el movimiento
+  # del 418 y viajaba a Bitbucket duplicando nueve DROP que ya cubren los
+  # archivos por SP. Un rollback a medias es peor que ninguno, y nada lo veia:
+  # el chequeo de arriba mira que toda ENTRADA tenga archivo, no al reves.
+  #
+  # EN UN REPO 'data' NO ES UN FALLO Y POR ESO SE LEE global.type. En dt hay 20
+  # runners y validaciones que existen para correrse A MANO en DBeaver y que el
+  # .par no lista a proposito. En structure y program no: ahi todo archivo lo
+  # aplica el pipeline o no lo aplica nadie.
+  TIPO=$(sed -nE 's/^[[:space:]]*type:[[:space:]]*([a-z]+).*/\1/p' .jenkins.yml 2>/dev/null | head -1)
+  HUERF=""
+  for d in SQL RevSQL; do
+    [ "$d" = SQL ] && par="$D" || par="$R"
+    for f in "$ROOT/$d"/*; do
+      [ -f "$f" ] || continue
+      b=$(basename "$f")
+      grep -qxF "$b" "$par" || HUERF="$HUERF\n        $d/$b"
+    done
+  done
+  if [ -z "$HUERF" ]; then ok "todo archivo tiene su entrada"
+  elif [ "$TIPO" = data ]; then
+    warn "archivos sin entrada en el .par ($(printf "$HUERF" | grep -c .) en un repo data: se corren a mano)"
+  else
+    bad "archivos sin entrada en el .par:$(printf "$HUERF")"
+  fi
+
   # reverso exacto, normalizando el prefijo NN_rollback_
   norm() { sed -E 's/^([0-9]+[a-z]?)_rollback_/\1_/; s/^rollback_//'; }
   if diff -q <(grep -ve '^[[:space:]]*$' "$D" | norm) \
