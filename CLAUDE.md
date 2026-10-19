@@ -43,6 +43,33 @@ correccion de scoring se hace **una vez** y vale para las dos vias.
 - Ordenamiento F4: **`Caracteristicas.txt`** (ese archivo *es* el modelo).
   F1-F3: `Prc_Ordenamiento2.sql`.
 
+**EL LEGADO DE F1-F3 YA ESTA EN EL REPO Y ANTES NO LO ESTABA.** Vivia en un
+directorio temporal de sesion y se perdia al cerrarla, de modo que el unico
+modo de cumplir la regla 4 sobre esas tres fases era volver a pedirlo. Hoy son
+18 archivos y 13.826 lineas en **`dt/docs/legado_ordenamiento_f1_f3/`**, con un
+`README.md` que reparte los 17 SP por fase -- el reparto NO sale de los
+encabezados, que solo repiten la firma, sino de la evidencia de cada criterio.
+
+Tres cosas de ese README que ahorran el primer dia de lectura:
+
+- **El corazon de F2 son 20 lineas**, `PRO_ORD_CTA_TOTALES_PERSONAS_2.sql:376-396`:
+  los dos primeros digitos de `cod_suscriptor` deciden el portafolio y el
+  portafolio decide el `Sector`. Es aritmetica de cadena y **no necesita el
+  datashare**.
+- **`F2-05` y el codigo no coinciden**: el criterio exige nueve portafolios y
+  el `CASE` produce once (`RO, IN, VE, HP, FR, CC, CP, RC, RS, CT, OT`). Manda
+  el codigo (regla 4); queda por escribir cual es la divergencia.
+- **Los dos predicados de exclusion de F3 estan en el orquestador, no en los
+  SP** (`Prc_Ordenamiento2.sql:1122-1126`), y el de bloqueo es un **anti-join**
+  que excluye el id entero, no la fila. Es la misma distincion que ya costo una
+  divergencia en Novedades.
+
+Y la consecuencia que importa para planificar: **el mock de F1-F3 no necesita
+el datashare.** `docs/PETICION_DATASHARE_F1_F3_ORDENAMIENTO.md` pide once
+objetos BTT y diez REC, y por eso estas fases llevan paradas desde el
+principio; esa peticion es para la via REAL. En mock las fuentes las sembramos
+nosotros, igual que las seis tablas que ya alimentan Unificacion y F4.
+
 ## Reglas que no se negocian
 
 1. **Nunca cambiar la firma de un SP.** El Framework Batch exige 6 parametros
