@@ -147,6 +147,20 @@ BEGIN
            filas_entrada = v_personas, filas_salida = v_contactos
      WHERE corrida_id = v_corrida AND etapa = 'preparar';
 
+    -- ---- cuentas (Fase 2) --------------------------------------------------
+    -- Va ANTES de ubicaciones: el Portafolio es insumo del vector de
+    -- direcciones, que es el orden del legado.
+    v_etapa_actual := 'cuentas';
+    INSERT INTO bdm_stage.mock_ord_control_etapa
+        (corrida_id, lote, etapa, estado, fecha_hora_inicio, usuario_bd)
+    VALUES (v_corrida, v_lote, 'cuentas', 'enproceso', GETDATE(), CURRENT_USER);
+
+    CALL bdm_datos.sp_ordenamiento_cuentas_mock(v_lote);
+
+    UPDATE bdm_stage.mock_ord_control_etapa
+       SET estado = 'completado', fecha_hora_fin = GETDATE()
+     WHERE corrida_id = v_corrida AND etapa = 'cuentas';
+
     -- ---- ubicaciones (Fase 3) ---------------------------------------------
     -- Va DESPUES de preparar porque lee stg_insumo_direccion, y ANTES del
     -- scoring porque es la fase que la precede en el legado.
@@ -254,7 +268,12 @@ BEGIN
     SELECT v_corrida, v_lote, v_modo_efectivo, v_wm_anterior,
            CASE WHEN v_bootstrap THEN 'BOOTSTRAP' ELSE 'CONTROL' END,
            alc.filas, alc.personas, org.por_ubic, org.por_unif,
-           NULL, NULL, NULL, NULL,
+           -- SLCOPRBA-1355: por_cuenta ya NO es NULL. La tercera rama del
+           -- alcance existe desde que la Fase 2 trajo el contrato de cuenta,
+           -- y con ella F1-01 deja de estar bloqueado. Las otras tres siguen
+           -- en NULL porque siguen sin senal: estandarizacion, bloqueo y
+           -- comportamiento no dejan rastro temporal en nuestro modelo.
+           NULL, NULL, org.por_cta, NULL,
            fv.total, fv.dentro,
            NULL, GETDATE(), CURRENT_USER
       FROM ( SELECT COUNT(*)                        AS filas,
@@ -264,7 +283,9 @@ BEGIN
            ( SELECT COUNT(DISTINCT CASE WHEN origen = 'UBICACION'
                                         THEN id_buro_persona END) AS por_ubic,
                     COUNT(DISTINCT CASE WHEN origen = 'UNIFICACION'
-                                        THEN id_buro_persona END) AS por_unif
+                                        THEN id_buro_persona END) AS por_unif,
+                    COUNT(DISTINCT CASE WHEN origen = 'CUENTA'
+                                        THEN id_buro_persona END) AS por_cta
                FROM bdm_tempo.stg_ord_alcance_origen ) org
       CROSS JOIN
            ( SELECT COUNT(DISTINCT rpu.id_buro_persona) AS total,
@@ -277,8 +298,8 @@ BEGIN
 
     CALL bdm_datos.sp_ordenamiento_drop_staging_edf();
 
-    -- F1-05: despues del drop no puede quedar ninguna de las quince.
-    -- (catorce hasta que la Fase 3 anadio stg_ord_ubic_hash).
+    -- F1-05: despues del drop no puede quedar ninguna de las diecisiete.
+    -- (catorce en el legado; la Fase 3 anadio una y la Fase 2 dos).
     --
     -- EL CONTEO VA A UNA VARIABLE ANTES DEL UPDATE, y no dentro de el.
     -- pg_tables vive en el leader node y Redshift NO admite mezclar un
@@ -294,6 +315,7 @@ BEGIN
              'stg_contacto_canal','stg_contacto_direccion_rpu','stg_dir_conteo_persona',
                      'stg_insumo_celular','stg_insumo_direccion','stg_insumo_email',
                      'stg_insumo_telefono','stg_ord_alcance_origen',
+                     'stg_ord_cta_base','stg_ord_cta_hash',
                      'stg_ord_personas_alcance','stg_ord_ubic_hash',
                      'stg_persona_dir_ganadora',
                      'stg_persona_dir_ref','stg_reporte_rpu','stg_rpu_dir_ref',

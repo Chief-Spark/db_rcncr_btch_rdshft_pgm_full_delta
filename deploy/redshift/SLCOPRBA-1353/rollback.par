@@ -36,6 +36,8 @@ sp_ordenamiento_scoring_tel_edf.sql
 sp_ordenamiento_scoring_dir_edf.sql
 sp_ordenamiento_ubicaciones_mock.sql
 sp_ordenamiento_ubicaciones_edf.sql
+sp_ordenamiento_cuentas_mock.sql
+sp_ordenamiento_cuentas_edf.sql
 sp_ordenamiento_preparar_insumos_mock.sql
 sp_ordenamiento_preparar_insumos_edf.sql
 16b_rollback_sp_unificacion_mock_ciclo.sql

@@ -10,6 +10,9 @@ BEGIN
   DROP TABLE IF EXISTS bdm_tempo.stg_ord_alcance_origen;
   -- SLCOPRBA-1355: el staging del hash de la Fase 3.
   DROP TABLE IF EXISTS bdm_tempo.stg_ord_ubic_hash;
+  -- SLCOPRBA-1355: el staging de la Fase 2.
+  DROP TABLE IF EXISTS bdm_tempo.stg_ord_cta_hash;
+  DROP TABLE IF EXISTS bdm_tempo.stg_ord_cta_base;
   DROP TABLE IF EXISTS bdm_tempo.stg_insumo_email;
   DROP TABLE IF EXISTS bdm_tempo.stg_insumo_celular;
   DROP TABLE IF EXISTS bdm_tempo.stg_insumo_telefono;

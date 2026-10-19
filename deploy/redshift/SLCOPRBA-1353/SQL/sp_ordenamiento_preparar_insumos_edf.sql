@@ -64,6 +64,14 @@ BEGIN
          OR (p_watermark IS NOT NULL AND u.fecha_unificacion >= p_watermark)
          OR (p_watermark IS NOT NULL AND u.fecha_modificacion >= p_watermark)
           )
+    UNION
+    -- SLCOPRBA-1355: la tercera rama, el modelo BTT. Ver la nota extensa en
+    -- stg_ord_alcance_origen, mas abajo.
+    SELECT c.id_buro_persona
+    FROM bdm_tempo.v_xpm_cuenta c
+    WHERE COALESCE(p_modo, 'FULL') = 'DELTA'
+      AND p_watermark IS NOT NULL
+      AND c.fecha_nov >= p_watermark
   ) x;
 
   ANALYZE bdm_tempo.stg_ord_personas_alcance;
@@ -108,7 +116,25 @@ BEGIN
        OR u.lote_actualizacion = p_lote
        OR (p_watermark IS NOT NULL AND u.fecha_unificacion >= p_watermark)
        OR (p_watermark IS NOT NULL AND u.fecha_modificacion >= p_watermark)
-        );
+        )
+  UNION ALL
+  -- SLCOPRBA-1355 -- LA TERCERA RAMA: el modelo BTT.
+  --
+  -- PRO_ORD_MATERIALIZA_BTT existe justamente para esto: meter al universo a
+  -- la persona a la que le cambio una CUENTA, no una direccion. Nuestro
+  -- alcance no la tenia, y por eso F1-01 salia BLOQUEADO citando que no habia
+  -- tabla de cuentas contra la que mirar. Con el contrato de la Fase 2 ya
+  -- existe, y el censo llena por_cuenta en vez de dejarlo en NULL.
+  --
+  -- EN FULL NO SE EVALUA, igual que la de unificacion: entra el universo
+  -- entero por la rama de ubicacion.
+  SELECT c.id_buro_persona,
+         CAST('CUENTA' AS VARCHAR(20))
+  FROM bdm_tempo.v_xpm_cuenta c
+  WHERE COALESCE(p_modo, 'FULL') = 'DELTA'
+    AND p_watermark IS NOT NULL
+    AND c.fecha_nov >= p_watermark
+  ;
 
   ANALYZE bdm_tempo.stg_ord_alcance_origen;
 

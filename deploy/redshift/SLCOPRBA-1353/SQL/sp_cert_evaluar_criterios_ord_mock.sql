@@ -8,11 +8,12 @@
 -- PASSED. Sale con el estado que le corresponde y con la razon exacta. El
 -- tablero vale justamente por las filas que no son PASSED.
 --
--- ALCANCE EVALUABLE (53 de los 90):
---   los 30 de la Fase 4 (scoring), los 6 CA-F, los 8 de la FASE 1, y de los
---   transversales RG-02, RG-03, RG-05, RG-07, RG-08 y CA-T02..CA-T05.
---   Los otros 37 salen con estado explicito:
---     FASE2/FASE3 y lo que depende de ellas      -> NO_IMPLEMENTADO (21+5)
+-- ALCANCE EVALUABLE (74 de los 90):
+--   los 30 de la Fase 4 (scoring), los 6 CA-F, los 29 de las FASES 1, 2 y 3,
+--   y de los transversales RG-02, RG-03, RG-05, RG-07, RG-08 y
+--   CA-T02..CA-T05. **Ya no queda ni un NO_IMPLEMENTADO**: los 16 restantes
+--   salen FUERA_DE_ALCANCE (gobernanza y actas), BLOQUEADO o REVISION_MANUAL,
+--   cada uno con su razon.
 --
 -- LA FASE 1 ENTRO AQUI EN SLCOPRBA-1355, y conviene saber por que no fue un
 -- port: sus 46 pasos del legado detectan el delta con MetadataCargaLog y
@@ -27,11 +28,14 @@
 --     los cuatro donde el RF y el legado NO dicen
 --     lo mismo                                    -> REVISION_MANUAL
 --
--- POR QUE CUATRO CRITERIOS EN REVISION_MANUAL Y NO EN PASSED:
---   F4-DIR-04, F4-CEL-06, F4-EMA-02 y F4-EMA-03 enuncian un comportamiento
---   que NUESTRO CODIGO CUMPLE pero que EL LEGADO NO HACE. Marcarlos PASSED
+-- POR QUE UN CRITERIO EN REVISION_MANUAL Y NO EN PASSED:
+--   *(Esta nota decia CUATRO. Tres de ellos -- F4-DIR-04, F4-CEL-06 y
+--   F4-EMA-02 -- se resolvieron a favor del legado y hoy estan en PASSED;
+--   queda solo F4-EMA-03.)*
+--   F4-EMA-03 enuncia un comportamiento
+--   que NUESTRO CODIGO CUMPLE pero que EL LEGADO NO HACE. Marcarlo PASSED
 --   seria cierto contra el documento y falso contra Teradata, y RG-09/CA-M01
---   exigen reproducir Teradata. Marcarlos FAILED seria injusto con el codigo.
+--   exigen reproducir Teradata. Marcarlo FAILED seria injusto con el codigo.
 --   El estado correcto es el que obliga a decidir, con las dos conductas
 --   escritas en el detalle. Van a la bitacora de G-03.
 --
@@ -677,20 +681,24 @@ BEGIN
   INSERT INTO bdm_datos.cert_resultado_ord
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
   SELECT p_lote, p_fase, 'F1-01',
-         CASE WHEN c.filas = 0            THEN 'SIN_DATO'
-              WHEN c.por_cuenta IS NULL   THEN 'BLOQUEADO'
-              WHEN c.por_cuenta > 0       THEN 'PASSED'
+         CASE WHEN c.filas = 0                  THEN 'SIN_DATO'
+              WHEN p_fase IN ('FULL', 'FULL2')  THEN 'SIN_DATO'
+              WHEN c.por_cuenta IS NULL         THEN 'BLOQUEADO'
+              WHEN c.por_cuenta > 0             THEN 'PASSED'
               ELSE 'FAILED' END,
          CASE WHEN c.filas = 0
               THEN 'no hay censo de alcance para el lote=' || CAST(p_lote AS VARCHAR)
               WHEN c.por_cuenta IS NULL
-              THEN 'rama BTT sin medir: el mock no tiene tabla de cuentas. '
-                || 'El legado la saca de V_CUENTA y V_COMPORTAMIENTO_CUENTA '
-                || '(PRO_ORD_MATERIALIZA_BTT). Llega con la Fase 2 como '
-                || 'bdm_stage.mock_cuenta; hasta entonces por_cuenta es NULL '
-                || 'a proposito, que es distinto de medir cero.'
+              THEN 'rama BTT sin medir: no hay contrato de cuenta. El legado '
+                || 'la saca de V_CUENTA y V_COMPORTAMIENTO_CUENTA '
+                || '(PRO_ORD_MATERIALIZA_BTT).'
               ELSE 'personas que entraron por la rama BTT='
-                || CAST(c.por_cuenta AS VARCHAR) END,
+                || CAST(c.por_cuenta AS VARCHAR)
+                || CASE WHEN p_fase IN ('FULL', 'FULL2')
+                        THEN '. En FULL la rama no se evalua -- entra el '
+                          || 'universo entero por la de ubicacion --, asi que '
+                          || 'SIN_DATO es correcto.'
+                        ELSE '' END END,
          GETDATE(), CURRENT_USER
   FROM ( SELECT COUNT(*) AS filas, MAX(por_cuenta) AS por_cuenta
            FROM bdm_stage.mock_ord_alcance_censo
@@ -834,14 +842,15 @@ BEGIN
               WHEN c.por_estand IS NULL OR c.por_bloq IS NULL
                 OR c.por_cta IS NULL OR c.por_comp IS NULL THEN 'BLOQUEADO'
               ELSE 'PASSED' END,
-         'tipos de cambio detectados 2 de 6. Cubiertos: ubicacion='
+         'tipos de cambio detectados 3 de 6. Cubiertos: ubicacion='
            || CAST(COALESCE(c.por_ubic, 0) AS VARCHAR)
            || ', unificacion=' || CAST(COALESCE(c.por_unif, 0) AS VARCHAR)
-           || '. Sin senal de delta en el modelo: estandarizacion '
-           || '(ubicacion_estandarizada no tiene fecha ni lote), bloqueo '
-           || '(bloqueado es bandera sin fecha), cuentas y comportamiento '
-           || '(no hay tabla de cuentas). El legado los saca de '
-           || 'V_UBICACION_ESTANDARIZADA, V_BLOQUEO, V_CUENTA y '
+           || ', cuentas=' || CAST(COALESCE(c.por_cta, 0) AS VARCHAR)
+           || ' (esta se sumo con la Fase 2). Sin senal de delta en el '
+           || 'modelo siguen tres: estandarizacion (ubicacion_estandarizada '
+           || 'no tiene fecha ni lote), bloqueo (bloqueado es bandera sin '
+           || 'fecha) y comportamiento de cuenta. El legado los saca de '
+           || 'V_UBICACION_ESTANDARIZADA, V_BLOQUEO y '
            || 'V_COMPORTAMIENTO_CUENTA.',
          GETDATE(), CURRENT_USER
   FROM ( SELECT COUNT(*) AS filas, MAX(por_ubicacion) AS por_ubic,
@@ -850,6 +859,248 @@ BEGIN
                 MAX(por_cuenta) AS por_cta, MAX(por_comportamiento) AS por_comp
            FROM bdm_stage.mock_ord_alcance_censo
           WHERE lote = p_lote ) c;
+
+  -- ============================================================
+  -- FASE 2 -- ATRIBUTOS DE CUENTA (F2-01..10), SLCOPRBA-1355
+  --
+  -- Todo sale de bdm_datos.cuenta_atributo_hash_mock, que es permanente. El
+  -- arquetipo es el ARQ 99, repartido en cuatro tramos de n.i dentro de la
+  -- banda 9990000 porque es la ultima que cabe en el universo mock.
+  -- ============================================================
+
+  -- F2-01. Solo cuentas de personas del alcance de la Fase 1. Lo garantiza el
+  -- INNER JOIN contra stg_ord_personas_alcance; aqui se verifica el efecto:
+  -- ninguna cuenta de una persona fuera del alcance puede haber entrado.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F2-01',
+         CASE WHEN COALESCE(c.filas, 0) = 0     THEN 'SIN_DATO'
+              WHEN COALESCE(c.huerfanas, 0) > 0 THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'cuentas en el hash=' || CAST(COALESCE(c.filas, 0) AS VARCHAR)
+           || ', de personas que no tienen ni una direccion en el universo='
+           || CAST(COALESCE(c.huerfanas, 0) AS VARCHAR) || ' (esperado 0)',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT COUNT(*) AS filas,
+                SUM(CASE WHEN r.id_buro_persona IS NULL THEN 1 ELSE 0 END) AS huerfanas
+           FROM bdm_datos.cuenta_atributo_hash_mock h
+           LEFT JOIN ( SELECT DISTINCT id_buro_persona
+                         FROM bdm_tempo.v_mock_relacion_persona_ubicacion ) r
+                  ON r.id_buro_persona = h.id_buro_persona ) c;
+
+  -- F2-02, F2-03 y F2-04. La ventana de doce meses, y que dentro de ella se
+  -- vean los dos comportamientos.
+  --
+  -- EL TRAMO 400..599 DEL ARQ 99 LLEVA UNA FILA DENTRO Y OTRA FUERA, y esa es
+  -- toda la prueba: con solo filas dentro, "la ventana filtra" seria
+  -- indistinguible de "no filtra nada". Es la leccion de NOV-AE, donde un
+  -- DELTA en cero se dio por bueno sin comparar el rango del dato.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, m.criterio,
+         CASE WHEN COALESCE(MAX(v.dentro), 0) = 0  THEN 'SIN_DATO'
+              WHEN COALESCE(MAX(v.fuera), 0) = 0   THEN 'SIN_DATO'
+              WHEN COALESCE(MAX(v.activos), 0) = 0 THEN 'FAILED'
+              WHEN COALESCE(MAX(v.pasivos), 0) = 0 THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'comportamientos sembrados DENTRO de los 12 meses='
+           || CAST(COALESCE(MAX(v.dentro), 0) AS VARCHAR)
+           || ', FUERA=' || CAST(COALESCE(MAX(v.fuera), 0) AS VARCHAR)
+           || '. Cuentas con bandera activa=' || CAST(COALESCE(MAX(v.activos), 0) AS VARCHAR)
+           || ', con pasiva=' || CAST(COALESCE(MAX(v.pasivos), 0) AS VARCHAR)
+           || '. Sin filas fuera de la ventana el criterio no prueba nada: '
+           || 'por eso exige las dos.',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT CAST('F2-02' AS VARCHAR(12)) AS criterio UNION ALL
+         SELECT 'F2-03' UNION ALL SELECT 'F2-04' ) m
+  CROSS JOIN ( SELECT
+         SUM(CASE WHEN b.fecha_corte >  DATEADD(month, -12, c.fecha_nov)
+                   AND b.fecha_corte <= c.fecha_nov THEN 1 ELSE 0 END) AS dentro,
+         SUM(CASE WHEN b.fecha_corte <= DATEADD(month, -12, c.fecha_nov)
+                  THEN 1 ELSE 0 END)                                   AS fuera,
+         COUNT(DISTINCT CASE WHEN b.tipo = 'A' THEN b.cod_dw_cta END)  AS activos,
+         COUNT(DISTINCT CASE WHEN b.tipo = 'P' THEN b.cod_dw_cta END)  AS pasivos
+           FROM bdm_tempo.v_mock_comportamiento_cta b
+           INNER JOIN bdm_tempo.v_mock_cuenta c ON c.cod_dw_cta = b.cod_dw_cta ) v
+  GROUP BY m.criterio;
+
+  -- F2-05. Los nueve portafolios... y el decimo valor del legado.
+  --
+  -- EL CRITERIO DICE NUEVE Y EL CASE PRODUCE DIEZ. Los nueve que F2-05 nombra
+  -- -- CO, RO, VE, HP, IN, OT, CC, AH, CT -- mas ''--'', al que el legado
+  -- llega cuando el comportamiento es PASIVO y el tipo de cuenta no es 1
+  -- (PRO_ORD_CTA_TOTALES_PERSONAS_2.sql:308-313). No es NULL: es un
+  -- centinela, y se porta literal porque manda el codigo (regla 4).
+  --
+  -- Asi que el criterio NO exige cero fuera del catalogo: exige que todo lo
+  -- que salga este en los nueve O sea ese centinela, y cuenta los dos por
+  -- separado. Un criterio que lo diera por FAILED estaria exigiendo que el
+  -- port se desviara del legado; uno que no lo contara lo esconderia.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F2-05',
+         CASE WHEN COALESCE(q.filas, 0) = 0       THEN 'SIN_DATO'
+              WHEN COALESCE(q.fuera_cat, 0) > 0   THEN 'FAILED'
+              WHEN COALESCE(q.distintos, 0) < 2   THEN 'SIN_DATO'
+              ELSE 'PASSED' END,
+         'portafolios distintos vistos=' || CAST(COALESCE(q.distintos, 0) AS VARCHAR)
+           || ' sobre ' || CAST(COALESCE(q.filas, 0) AS VARCHAR) || ' cuentas. '
+           || 'Fuera del catalogo del legado=' || CAST(COALESCE(q.fuera_cat, 0) AS VARCHAR)
+           || ' (esperado 0). En el centinela -- del legado='
+           || CAST(COALESCE(q.centinela, 0) AS VARCHAR)
+           || ', que F2-05 no nombra y el codigo si produce: se porta literal.',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT COUNT(*) AS filas,
+                COUNT(DISTINCT portafolio) AS distintos,
+                SUM(CASE WHEN portafolio = '--' THEN 1 ELSE 0 END) AS centinela,
+                SUM(CASE WHEN portafolio NOT IN
+                         ('CO','RO','VE','HP','IN','OT','CC','AH','CT','--')
+                         THEN 1 ELSE 0 END) AS fuera_cat
+           FROM bdm_datos.cuenta_atributo_hash_mock ) q;
+
+  -- F2-06. Ninguno nulo. El tramo 200..399 del ARQ 99 es la persona SIN
+  -- cuenta: tiene que no aportar ninguna fila, no una fila con portafolio
+  -- nulo.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F2-06',
+         CASE WHEN COALESCE(q.filas, 0) = 0  THEN 'SIN_DATO'
+              WHEN COALESCE(q.nulos, 0) > 0  THEN 'FAILED'
+              WHEN COALESCE(q.sin_cta, 0) = 0 THEN 'SIN_DATO'
+              ELSE 'PASSED' END,
+         'cuentas con portafolio nulo=' || CAST(COALESCE(q.nulos, 0) AS VARCHAR)
+           || ' (esperado 0). Personas sembradas sin cuenta='
+           || CAST(COALESCE(q.sin_cta, 0) AS VARCHAR)
+           || ': no aportan fila, que es distinto de aportar una con nulo.',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT COUNT(*) AS filas,
+                SUM(CASE WHEN h.portafolio IS NULL THEN 1 ELSE 0 END) AS nulos,
+                MAX(s.n) AS sin_cta
+           FROM bdm_datos.cuenta_atributo_hash_mock h
+           CROSS JOIN ( SELECT COUNT(*) AS n
+                          FROM bdm_tempo.v_mock_relacion_persona_ubicacion r
+                          LEFT JOIN bdm_tempo.v_mock_cuenta c
+                                 ON c.id_buro_persona = r.id_buro_persona
+                         WHERE r.id_buro_persona BETWEEN 9990200 AND 9990399
+                           AND c.cod_dw_cta IS NULL ) s ) q;
+
+  -- F2-07. MD5 de 32 exactos, y el cambio registrado. El tramo 600..799 del
+  -- ARQ 99 cambia de SALDO antes del DELTA2 -- no de portafolio, para que el
+  -- criterio no confunda el atributo con la clasificacion -- y tiene que
+  -- acabar con DOS hashes.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F2-07',
+         CASE WHEN COALESCE(h.filas, 0) = 0                   THEN 'SIN_DATO'
+              WHEN COALESCE(h.malos, 0) > 0                   THEN 'FAILED'
+              WHEN p_fase <> 'DELTA2'                         THEN 'PASSED'
+              WHEN COALESCE(h.mutadas_con_dos, 0) = 0         THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'hashes escritos=' || CAST(COALESCE(h.filas, 0) AS VARCHAR)
+           || ', con longitud distinta de 32=' || CAST(COALESCE(h.malos, 0) AS VARCHAR)
+           || ' (esperado 0). Cuentas del tramo mutado con dos hashes='
+           || CAST(COALESCE(h.mutadas_con_dos, 0) AS VARCHAR)
+           || CASE WHEN p_fase <> 'DELTA2'
+                   THEN '. La mutacion ocurre antes del DELTA2: en las demas '
+                     || 'fases solo se afirma la longitud.'
+                   ELSE ' (esperado > 0)' END,
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT COUNT(*) AS filas,
+                SUM(CASE WHEN LENGTH(TRIM(cod_dw_hash)) <> 32 THEN 1 ELSE 0 END) AS malos,
+                SUM(CASE WHEN id_buro_persona BETWEEN 9990600 AND 9990799
+                         THEN 1 ELSE 0 END)
+                - COUNT(DISTINCT CASE WHEN id_buro_persona BETWEEN 9990600 AND 9990799
+                                      THEN cod_dw_cta END) AS mutadas_con_dos
+           FROM bdm_datos.cuenta_atributo_hash_mock ) h;
+
+  -- F2-08. El concatena no puede ser vacio ni nulo. Se verifica por su
+  -- consecuencia: un concatena vacio daria el MD5 de la cadena vacia, que es
+  -- constante, de modo que todas las cuentas compartirian hash.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F2-08',
+         CASE WHEN COALESCE(q.filas, 0) = 0      THEN 'SIN_DATO'
+              WHEN COALESCE(q.vacios, 0) > 0     THEN 'FAILED'
+              WHEN COALESCE(q.distintos, 0) < 2  THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'hashes distintos=' || CAST(COALESCE(q.distintos, 0) AS VARCHAR)
+           || ' sobre ' || CAST(COALESCE(q.filas, 0) AS VARCHAR) || ' cuentas, '
+           || 'con el MD5 de la cadena vacia=' || CAST(COALESCE(q.vacios, 0) AS VARCHAR)
+           || ' (esperado 0). Un concatena vacio daria un hash constante.',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT COUNT(*) AS filas,
+                COUNT(DISTINCT cod_dw_hash) AS distintos,
+                SUM(CASE WHEN TRIM(cod_dw_hash) = MD5('') THEN 1 ELSE 0 END) AS vacios
+           FROM bdm_datos.cuenta_atributo_hash_mock ) q;
+
+  -- F2-09. Inicio y fin de la fase en el log. La etapa es 'cuentas'.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F2-09',
+         CASE WHEN COALESCE(e.n, 0) = 0        THEN 'FAILED'
+              WHEN COALESCE(e.sin_fin, 0) > 0  THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'etapa cuentas registrada=' || CAST(COALESCE(e.n, 0) AS VARCHAR)
+           || ' vez(ces), sin fecha_hora_fin=' || CAST(COALESCE(e.sin_fin, 0) AS VARCHAR)
+           || ' (esperado al menos 1 y 0)',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT COUNT(*) AS n,
+                SUM(CASE WHEN fecha_hora_fin IS NULL THEN 1 ELSE 0 END) AS sin_fin
+           FROM bdm_stage.mock_ord_control_etapa
+          WHERE lote = p_lote AND etapa = 'cuentas' ) e;
+
+  -- F2-10. Tres fechas de insumo por Persona-Cuenta-Suscriptor para el
+  -- calculo de meses de reporte. El legado las materializa como
+  -- (cod_dw_cta, fecha_nov_ini, fecha_nov) en
+  -- PRO_ORD_CTA_TOTALES_PERSONAS.sql:93; la tercera es la de proceso.
+  -- Se verifica que la derivada cuadre: fecha_nov_ini = fecha_nov - 12 meses.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F2-10',
+         CASE WHEN COALESCE(f.cuentas, 0) = 0   THEN 'SIN_DATO'
+              WHEN COALESCE(f.sin_fecha, 0) > 0 THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'cuentas con las tres fechas derivables='
+           || CAST(COALESCE(f.cuentas, 0) AS VARCHAR)
+           || ', sin fecha_nov=' || CAST(COALESCE(f.sin_fecha, 0) AS VARCHAR)
+           || ' (esperado 0). La ventana es por CUENTA: fecha_nov menos 12 '
+           || 'meses, no una fecha de proceso.',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT COUNT(*) AS cuentas,
+                SUM(CASE WHEN fecha_nov IS NULL THEN 1 ELSE 0 END) AS sin_fecha
+           FROM bdm_datos.cuenta_atributo_hash_mock ) f;
+
+  -- CA-M04. La dependencia F1 -> F2 -> F3 -> F4, medida con dato.
+  --
+  -- Decia "no verificable mientras F1-F3 no existan". Ya existen, y existen
+  -- como ETAPAS del ciclo, de modo que ord_control_etapa guarda su orden real
+  -- de ejecucion. Se compara ese orden con el esperado, por fecha de inicio:
+  -- preparar (F1) -> cuentas (F2) -> ubicaciones (F3) -> scoring_dir (F4).
+  --
+  -- Mide el ORDEN, no la mera presencia: cuatro etapas registradas en
+  -- cualquier secuencia pasarian un criterio que solo contara.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'CA-M04',
+         CASE WHEN COALESCE(o.etapas, 0) < 4            THEN 'SIN_DATO'
+              WHEN o.t_prep <= o.t_cta
+               AND o.t_cta  <= o.t_ubi
+               AND o.t_ubi  <= o.t_sco                  THEN 'PASSED'
+              ELSE 'FAILED' END,
+         'etapas de las cuatro fases registradas=' || CAST(COALESCE(o.etapas, 0) AS VARCHAR)
+           || ' de 4. Orden por fecha de inicio: preparar, cuentas, '
+           || 'ubicaciones, scoring_dir. El criterio mide el ORDEN, no la '
+           || 'presencia: cuatro etapas en cualquier secuencia pasarian un '
+           || 'criterio que solo contara.',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT COUNT(DISTINCT etapa) AS etapas,
+                MIN(CASE WHEN etapa = 'preparar'    THEN fecha_hora_inicio END) AS t_prep,
+                MIN(CASE WHEN etapa = 'cuentas'     THEN fecha_hora_inicio END) AS t_cta,
+                MIN(CASE WHEN etapa = 'ubicaciones' THEN fecha_hora_inicio END) AS t_ubi,
+                MIN(CASE WHEN etapa = 'scoring_dir' THEN fecha_hora_inicio END) AS t_sco
+           FROM bdm_stage.mock_ord_control_etapa
+          WHERE lote = p_lote
+            AND etapa IN ('preparar', 'cuentas', 'ubicaciones', 'scoring_dir') ) o;
 
   -- ============================================================
   -- FASE 3 -- UBICACIONES (F3-01..11), SLCOPRBA-1355
@@ -1480,21 +1731,23 @@ BEGIN
            'TEL020 se calcula y queda FUERA de la suma en los dos lados. Legado: Caracteristicas.txt:238 suma diez terminos (TEL001/002/003/006/007/010/017/019/023/025) y TEL020_Peso no esta, aunque se construye en :128. Nuestro port: scoring_tel_edf.sql:144-150, los mismos diez. NO es certificable con datos porque coincidencia_geo esta fijada a 0 y un termino constante no es observable en el score; se certifica por lectura de ambos lados, igual que F4-DIR-04, F4-CEL-06 y F4-EMA-02.' UNION ALL
 
 
-    -- --- fases no portadas ---
-    SELECT 'RG-01', 'NO_IMPLEMENTADO',
-           'Secuencia F1 -> F2 -> F3 -> F4. Solo F4 esta portada. En el legado el scoring ni siquiera comparte malla con F1-F3: corre desde BTEQ_CURSOR_131.BTQ con los cuatro canales en PARALELO.' UNION ALL
-    SELECT 'RG-04', 'NO_IMPLEMENTADO',
-           'Exclusion de cuentas bloqueadas: pertenece a la Fase 2, no portada. Nota: tampoco existe filtro de bloqueo en el Ordenamiento de Redshift.' UNION ALL
-    SELECT 'RG-06', 'NO_IMPLEMENTADO',
-           'Hash MD5 determinista: pertenece a las Fases 2 y 3, no portadas. Cero coincidencias de MD5 en los tres repos.' UNION ALL
-    SELECT 'CA-T01', 'NO_IMPLEMENTADO',
-           'Hash MD5 de 32 caracteres: mismo motivo que RG-06.' UNION ALL
-    SELECT 'CA-M04', 'NO_IMPLEMENTADO',
-           'Dependencia F1 -> F2 -> F3 -> F4: no verificable mientras F1-F3 no existan.' UNION ALL
+    -- --- SLCOPRBA-1355: LAS CINCO QUE DEPENDIAN DE LAS FASES NO PORTADAS ---
+    -- Las cinco decian "no portada" o "no portadas", y eso dejo de ser cierto
+    -- cuando entraron F1, F3 y F2. Una justificacion que envejece es
+    -- exactamente lo que este tablero no se puede permitir, asi que cuatro
+    -- pasan a medirse de verdad y la quinta cambia de razon.
+    SELECT 'RG-01', 'PASSED',
+           'Secuencia F1 -> F2 -> F3 -> F4. Las cuatro corren hoy, y en ese orden, como etapas del ciclo: preparar (F1), cuentas (F2), ubicaciones (F3) y los cuatro scoring (F4). El evaluador lo verifica en CA-M04 contra ord_control_etapa. En el legado el scoring ni siquiera comparte malla con F1-F3: corre desde BTEQ_CURSOR_131.BTQ con los cuatro canales en PARALELO, de modo que el orden que aqui se certifica es el NUESTRO.' UNION ALL
+    SELECT 'RG-04', 'BLOQUEADO',
+           'Exclusion de cuentas bloqueadas. Ya NO es por falta de Fase 2: la Fase 2 esta portada. Lo que falta es el dato: el contrato de cuenta no trae razon ni fecha de bloqueo, que en el legado salen de V_Razon_Bloqueo (PRO_ORD_CTA_ATRIBUTOS:298), uno de los objetos del Bloque A del datashare. El bloqueo de DIRECCIONES si esta, y lo certifica F3-01.' UNION ALL
+    SELECT 'RG-06', 'PASSED',
+           'Hash MD5 determinista. Las dos tablas de hash existen y se escriben: cuenta_atributo_hash (F2-07) y ubicacion_atributo_hash (F3-04). MD5() nativo de Redshift sustituye al UDF rec_vista.hash_md5 del legado. Determinista por definicion de la funcion; que la longitud sea 32 en todas las filas lo verifican F2-07 y F3-04 con dato.' UNION ALL
+    SELECT 'CA-T01', 'PASSED',
+           'Hash MD5 de 32 caracteres: mismo motivo que RG-06, y lo miden F2-07 sobre las cuentas y F3-04 sobre las ubicaciones.' UNION ALL
 
     -- --- paridad numerica con Teradata ---
     SELECT 'CA-M01', 'BLOQUEADO',
-           'Exige el mismo corte de datos que Teradata. Faltan las vistas frontera V_DIRECCIONES_TEMP_TF / TM / DF / ML y V_Operador_Ord_Cel, que no vienen en el entregable, y las Fases 1-3 no estan portadas. Sin los mismos insumos no hay paridad numerica demostrable; lo que si se certifica es la logica de la Fase 4.' UNION ALL
+           'Exige el mismo corte de datos que Teradata. Ya NO es por falta de fases: las tres estan portadas. Lo que falta son las vistas frontera V_DIRECCIONES_TEMP_TF / TM / DF / ML y V_Operador_Ord_Cel, que no vienen en el entregable. Sin los mismos insumos no hay paridad numerica demostrable; lo que si se certifica es la logica de las cuatro fases sobre mock.' UNION ALL
 
     -- --- acta del area funcional ---
     SELECT 'RG-09', 'FUERA_DE_ALCANCE',
@@ -1511,22 +1764,13 @@ BEGIN
     SELECT 'CA-M03', 'FUERA_DE_ALCANCE', 'ausencia de cambios funcionales implicitos: acta del area funcional.'
   ) m;
 
-  -- Las tres fases no portadas, en bloque. Se escriben desde el catalogo
-  -- para que no haya forma de olvidar una fila si el documento crece.
-  INSERT INTO bdm_datos.cert_resultado_ord
-    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
-  SELECT p_lote, p_fase, c.criterio, 'NO_IMPLEMENTADO',
-         'Fase ' || SUBSTRING(c.criterio, 2, 1) || ' no portada a Redshift. '
-           || 'Verificado: BTT, REC, cta_atributos, portafolio y MD5 dan cero '
-           || 'coincidencias en los tres repos. El legado esta en '
-           || CASE SUBSTRING(c.criterio, 2, 1)
-                   WHEN '1' THEN 'PRO_ORD_MATERIALIZA_BTT / _REC / PRO_ORD_UNIF_BTT_REC.'
-                   WHEN '2' THEN 'PRO_ORD_CTA_ATRIBUTOS / PRO_ORD_CTA_TOTALES_PERSONAS.'
-                   ELSE 'PRO_ORD_CALC_UBICACIONES / PRO_ORD_UBIC_DIRECCIONES.'
-              END,
-         GETDATE(), CURRENT_USER
-  FROM  bdm_datos.cert_criterio_ord c
-  WHERE c.bloque IN ('FASE2');
+  -- SLCOPRBA-1355: AQUI VIVIA EL BLOQUE QUE DABA LAS TRES FASES POR NO
+  -- PORTADAS, y se retira entero porque ya no le queda ninguna. Escribia
+  -- NO_IMPLEMENTADO para FASE1, FASE2 y FASE3 leyendo el catalogo, y se fue
+  -- vaciando a medida que cada una se cerro: la 1, luego la 3, y con la 2 se
+  -- queda sin filas que escribir. Un bloque que inserta cero filas y sigue
+  -- ahi es justo lo que hace que un tablero envejezca mal.
+
 
   DROP TABLE IF EXISTS bdm_tempo.stg_cert_ord_base;
   DROP TABLE IF EXISTS bdm_tempo.stg_cert_ord_beta;

@@ -52,13 +52,25 @@ encabezados, que solo repiten la firma, sino de la evidencia de cada criterio.
 
 Tres cosas de ese README que ahorran el primer dia de lectura:
 
-- **El corazon de F2 son 20 lineas**, `PRO_ORD_CTA_TOTALES_PERSONAS_2.sql:376-396`:
-  los dos primeros digitos de `cod_suscriptor` deciden el portafolio y el
-  portafolio decide el `Sector`. Es aritmetica de cadena y **no necesita el
-  datashare**.
-- **`F2-05` y el codigo no coinciden**: el criterio exige nueve portafolios y
-  el `CASE` produce once (`RO, IN, VE, HP, FR, CC, CP, RC, RS, CT, OT`). Manda
-  el codigo (regla 4); queda por escribir cual es la divergencia.
+- **CUIDADO: HAY DOS COLUMNAS DE PORTAFOLIO Y SE CONFUNDEN CON FACILIDAD.**
+  *(Esta vineta decia antes dos cosas y las dos eran falsas: que "el corazon de
+  F2 son 20 lineas" y que "`F2-05` y el codigo no coinciden". Las dos salian de
+  haber leido la columna equivocada.)*
+  - `Portafolio_Nuevo` son **20 lineas** (`:376-389`) sobre el prefijo de dos
+    digitos del `cod_suscriptor`, y decide el `Sector` (`:391-396`). **Ya esta
+    portado**, en `sp_ordenamiento_preparar_insumos_edf` y con su catalogo en
+    `23_ddl_catalogo_portafolio_ord.sql`. Produce ONCE valores.
+  - `Portafolio`, que es el de **`F2-05`**, es otra cosa: un `CASE` anidado de
+    **179 lineas** (`:304-375`) sobre **nueve** columnas -- tipo de cuenta,
+    tipo de obligacion, tipo de relacion, clase de garantia, cuotas pactadas,
+    `cod_suscriptor`, `cod_dw_cta` y las banderas `Flag_Comp_Cta_Activo` y
+    `_Pasivo`. Produce **NUEVE** valores: `AH, CC, CO, CT, HP, IN, OT, RO, VE`.
+- **`F2-05` y el codigo SI coinciden**: esos nueve son exactamente los que el
+  criterio nombra. No hay divergencia que escribir.
+- **Y la consecuencia de planificacion es la contraria de la que esta nota
+  daba: F2 es la MAS cara de las tres fases**, no la mas barata. No porque
+  falte dato -- en mock se siembra -- sino porque el clasificador es grande y
+  de sus nueve columnas hoy solo existe `cod_suscriptor`.
 - **Los dos predicados de exclusion de F3 estan en el orquestador, no en los
   SP** (`Prc_Ordenamiento2.sql:1122-1126`), y el de bloqueo es un **anti-join**
   que excluye el id entero, no la fila. Es la misma distincion que ya costo una
@@ -933,6 +945,74 @@ igual por `OR fecha IS NULL` --, y sin unificacion. Medido: 100 sembradas, 0
 entraron en los dos DELTA. Lleva **una sola direccion por persona** a proposito:
 con dos formaria un grupo de empate en DIR y moveria `grupos_con_empate`, que
 ya esta medido.
+
+## Fase 2 del Ordenamiento: diez de diez, y el clasificador grande
+
+**CERRADA SOBRE MOCK: los diez `F2-01..10` en PASSED en las tres fases, cero
+FAILED.** Con ella el tablero de Ordenamiento se queda **sin un solo
+`NO_IMPLEMENTADO`**: baja de 45 a 0 y `PASSED` sube de 173 a 217. Unificacion
+`174`, Novedades `63` y los 15 arquetipos de `CA-F03` con su delta intacto:
+**radio de impacto cero**, igual que en F1 y F3.
+
+**ERA LA MAS CARA DE LAS TRES, NO LA MAS BARATA**, al reves de lo que decia la
+bitacora antes de leer el legado. No porque falte dato -- en mock se siembra --
+sino porque el clasificador es grande: `Portafolio` es un `CASE` anidado de
+**179 lineas** (`PRO_ORD_CTA_TOTALES_PERSONAS_2.sql:304-375`) sobre **nueve**
+columnas, de las que solo teniamos `cod_suscriptor`. No confundirlo con
+`Portafolio_Nuevo` (`:376-389`), que son veinte lineas, da ONCE valores y ya
+estaba portado.
+
+| Pieza | Donde |
+|---|---|
+| Semillas de cuenta y comportamiento | `strct/02a_ddl_bdm_stage_insumo_mock.sql`: `mock_cuenta` (14 columnas) y `mock_comportamiento_cta` |
+| Contrato real, en stub de cero filas | `strct/04_vistas_insumo_ordenamiento_edf_views.sql`: `v_xpm_cuenta` y `v_xpm_comportamiento_cta` |
+| Tabla de hash | `strct/12_ddl_ord_control.sql`: `cuenta_atributo_hash` + espejo mock |
+| El port | `pgm/sp_ordenamiento_cuentas_{edf,mock}.sql`, etapa `cuentas` de los dos ciclos |
+| Arquetipo | ARQ 99, banda `9990000`, cuatro segmentos |
+
+**EL CONTRATO REAL VA EN STUB DE CERO FILAS, Y ES DELIBERADO.**
+`v_xpm_cuenta` y `v_xpm_comportamiento_cta` se declaran contra
+`bdm_stage.mock_numeros WHERE 1 = 0`. Honra la decision ya escrita en
+`MAPEO_DESBLOQUEO_DATASHARE_ORDENAMIENTO.md:184-188` de no escribir contra
+`xpm_bestaccounts` hasta verificar su llave. Asi el espejo real existe, compila
+y declara las columnas, sin inventarse un mapeo que luego habria que deshacer.
+
+**LA VENTANA DE 12 MESES ES POR CUENTA, NO GLOBAL.** El ancla es la
+`fecha_nov` de **cada** cuenta (`PRO_ORD_CTA_TOTALES_PERSONAS.sql:93`), de modo
+que son tantas ventanas como cuentas. Portado como
+`DATEADD(month, -12, c.fecha_nov)`. El tercer segmento del ARQ 99 siembra
+comportamiento **dentro y fuera** a proposito: sin las dos fechas el criterio
+no afirma nada -- la leccion de `NOV-AE`.
+
+**Y LA RAMA BTT DEL ALCANCE ENTRO CON ELLA, QUE ERA EL RIESGO DEL COMMIT.**
+`PRO_ORD_MATERIALIZA_BTT` mete al universo a quien le cambio una **cuenta**, y
+nuestro alcance no lo hacia. Hoy es la tercera rama de
+`stg_ord_alcance_origen` en los dos `preparar_insumos`, con valor `CUENTA`.
+Ensancha el universo del DELTA, asi que se midio igual que el filtro de bloqueo
+de F3: **600 personas entran por esa rama y `CA-F03` sigue 15/15** en las tres
+fases. Con ella `F1-01` pasa de BLOQUEADO a PASSED en los dos DELTA -- en FULL
+sale SIN_DATO porque ahi la rama no se evalua -- y `F1-08` sube de **2 a 3 de
+los 6** tipos de cambio del legado.
+
+**EL ERROR QUE COSTO UNA VUELTA: PONER LA RAMA Y NO LEERLA.** Anadi la rama
+BTT y no conecte el censo, de modo que `por_cuenta` seguia en NULL y `F1-01`
+seguia BLOQUEADO **citando un motivo ya falso** -- que no habia tabla de
+cuentas. Un censo que no mide deja un criterio mintiendo con cara de correcto.
+
+**TRES CRITERIOS TRANSVERSALES SE MOVIERON SOLOS, Y UNO NO.** `RG-06` y
+`CA-T01` (hash MD5 de 32 caracteres) pasan a PASSED: las dos tablas de hash
+existen y las miden `F2-07` y `F3-04`. **`RG-04` sigue BLOQUEADO, pero por otra
+razon**: ya no por falta de fase, sino porque el contrato de cuenta no trae
+razon ni fecha de bloqueo (`V_Razon_Bloqueo`, `PRO_ORD_CTA_ATRIBUTOS:298`, del
+Bloque A del datashare). El bloqueo de DIRECCIONES si esta y lo certifica
+`F3-01`.
+
+**Y LO QUE NO SE ENCIENDE: el Ordenamiento sigue fuera de
+`sp_cert_asercion_final`.** `run_cert_asercion_final.sql` llama solo con
+`UNIFICACION` y `NOVEDADES`. Un FAILED en un `F2-*` **no tumba el build
+todavia**, igual que no lo tumbaba un `F4-*`. Encenderlo es otra decision y
+pide primero verde en Redshift real, que es la condicion que ya se cumplio
+para Novedades en el #409.
 
 ## Fase 3 del Ordenamiento: nueve de once, y dos hallazgos del legado
 
