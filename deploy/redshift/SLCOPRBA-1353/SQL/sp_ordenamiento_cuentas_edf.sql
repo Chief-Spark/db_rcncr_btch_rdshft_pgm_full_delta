@@ -64,6 +64,7 @@ LANGUAGE plpgsql
 AS $$
 BEGIN
 
+  DROP TABLE IF EXISTS bdm_tempo.stg_ord_cta_vector;
   DROP TABLE IF EXISTS bdm_tempo.stg_ord_cta_hash;
   DROP TABLE IF EXISTS bdm_tempo.stg_ord_cta_base;
 
@@ -225,6 +226,46 @@ BEGIN
   ) x;
 
   ANALYZE bdm_tempo.stg_ord_cta_hash;
+
+  -- ------------------------------------------------------------
+  -- EL VECTOR DE CUENTA, QUE ES EL CTA_TOTALES_PERSONAS_TMP3 DEL LEGADO.
+  --
+  -- Existe porque el scoring del legado lo une a la ubicacion POR CUENTA:
+  --   PASO_INICIAL_DIRC = V_DIRECCIONES_TEMP_DF A
+  --                       LEFT JOIN CTA_TOTALES_PERSONAS_TMP3 CTP3
+  --                            ON A.Cod_DW_Cta = CTP3.Cod_DW_Cta
+  -- (Caracteristicas.txt:226). Hasta ahora la Fase 2 solo publicaba su tabla
+  -- de hash, de modo que no habia un nombre al que unirse.
+  --
+  -- EN LA FASE A NADIE LO LEE TODAVIA, y es deliberado: publicar el contrato
+  -- es inerte -- no cambia una sola fila de score -- y la union por cuenta es
+  -- la fase B, que si lo mueve. Separarlas es lo que permite exigir que la
+  -- fase A deje score_ordenamiento byte a byte igual.
+  --
+  -- portafolio_nuevo y sector NO se calculan aqui todavia. Hoy los deriva
+  -- preparar_insumos del cod_suscriptor del REPORTE, no de la cuenta, y
+  -- moverlos es cambio de contenido: va en la fase B junto con la rama 'CO',
+  -- que es la unica que necesita las dos banderas de comportamiento.
+  -- ------------------------------------------------------------
+  CREATE TABLE bdm_tempo.stg_ord_cta_vector
+  DISTSTYLE KEY
+  DISTKEY (id_buro_persona)
+  SORTKEY (cod_dw_cta)
+  AS
+  SELECT h.cod_dw_cta,
+         h.cod_pin_persona,
+         h.id_buro_persona,
+         b.cod_suscriptor,
+         h.portafolio,
+         b.flag_comp_cta_activo,
+         b.flag_comp_cta_pasivo,
+         h.fecha_nov,
+         h.cod_hash
+    FROM bdm_tempo.stg_ord_cta_hash h
+    INNER JOIN bdm_tempo.stg_ord_cta_base b
+            ON b.cod_dw_cta = h.cod_dw_cta;
+
+  ANALYZE bdm_tempo.stg_ord_cta_vector;
 
   -- F2-07. Lo nuevo entra. Anti-join de CUATRO columnas, hash incluido
   -- (PRO_ORD_FINAL_CTA_ATRIBUTOS:110-133): una cuenta cuyo hash cambio no
