@@ -251,8 +251,12 @@ que ya tiene `pgm` encima -- hoy, `./banco.sh ciclo strct`.
 prueba que no admite lectura alternativa: **STRCT desplego verde un dia y al
 siguiente fallo identico, con el mismo paquete y sin un commit de por medio.**
 Cuatro hipotesis mias cayeron por buscar la causa en el repo. Escalado a
-DevSecOps. El paquete esta verificado contra el remoto de Bitbucket: 151
-archivos bajo `deploy/redshift/SLCOPRBA-1353/`.
+DevSecOps. El paquete esta verificado contra el remoto: **204 archivos** bajo
+`deploy/redshift/SLCOPRBA-1353/` (101 en `SQL/`, otros tantos en `RevSQL/` y los
+dos `.par`). *(Esta linea decia 151 y era falso en los tres repos: ese numero
+era el de `pgm` en una medicion vieja, y hoy `pgm` va por 204. Un conteo de
+verificacion que no cuadra asusta en el peor momento, que es durante el
+traslado.)*
 
 **EL CLUSTER DE DEV YA NO SE PAUSA: ESTA SIEMPRE ARRIBA (SLCOPRBA-1355).**
 Hasta ahora esta seccion decia que se pausaba a diario sobre las 19:00 de
