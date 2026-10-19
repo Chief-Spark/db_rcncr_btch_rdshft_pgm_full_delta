@@ -357,6 +357,57 @@ else
   ok "ninguna subconsulta en la lista de un SELECT"
 fi
 
+# ------------------------------------------------------------
+# 11. Todo objeto que SQL/ crea tiene su DROP en RevSQL/
+# ------------------------------------------------------------
+# POR QUE EXISTE: el pipeline fotografia el esquema antes de desplegar (DDL_1)
+# y despues del rollback final (DDL_3) y exige que sean IGUALES. Un objeto que
+# el deploy crea y el rollback no borra rompe esa comparacion con
+# [REDSHIFT:335]. Tumbo el job QA/DATABASE #122 con cuatro tablas y un esquema.
+#
+# EN DEV NO SE VE, y por eso hace falta este chequeo: alli los objetos ya
+# existen de despliegues anteriores, de modo que salen en las dos fotos por
+# igual. Solo un ambiente limpio -- QA -- lo destapa.
+#
+# SE IGNORA LO QUE ESTA DENTRO DE UN CUERPO $$...$$: son las bdm_tempo.stg_*
+# que los procedimientos crean y borran EN EJECUCION. No existen cuando se
+# toma la foto y el comparador no las ve; en pgm son 277 y pedirles un DROP en
+# RevSQL/ seria ruido.
+echo "11) simetria de objetos: todo CREATE de SQL/ con su DROP en RevSQL/"
+SIM=$(python3 -I - "$ROOT" <<'PYEOF'
+import re, sys, os, glob
+raiz = sys.argv[1]
+# bdm_datos y bdm_tempo alojan los SP de pgm: DROP SCHEMA CASCADE los arrasa
+# (incidente strct #256). La funcion no se dropea porque Redshift no admite
+# DROP FUNCTION IF EXISTS (leccion #10) y reventaria el precheck en limpio.
+EXC = {("SCHEMA", "bdm_datos"), ("SCHEMA", "bdm_tempo"),
+       ("FUNCTION", "bdm_datos.convert_epoch_to_date")}
+CREA  = re.compile(r"CREATE\s+(?:OR\s+REPLACE\s+)?(TABLE|VIEW|PROCEDURE|FUNCTION|SCHEMA)"
+                   r"(?:\s+IF\s+NOT\s+EXISTS)?\s+([A-Za-z_][\w.]*)", re.I)
+BORRA = re.compile(r"DROP\s+(TABLE|VIEW|PROCEDURE|FUNCTION|SCHEMA)"
+                   r"(?:\s+IF\s+EXISTS)?\s+([A-Za-z_][\w.]*)", re.I)
+def limpia(t):
+    t = "\n".join(re.sub(r"--.*$", "", l) for l in t.split("\n"))
+    return re.sub(r"\$\$.*?\$\$", " ", t, flags=re.S)   # fuera los cuerpos
+creados, borrados = {}, set()
+for f in sorted(glob.glob(raiz + "/SQL/*.sql")):
+    for tipo, obj in CREA.findall(limpia(open(f, encoding="utf-8", errors="replace").read())):
+        creados.setdefault((tipo.upper(), obj.lower()), os.path.basename(f))
+for f in glob.glob(raiz + "/RevSQL/*.sql"):
+    for tipo, obj in BORRA.findall(limpia(open(f, encoding="utf-8", errors="replace").read())):
+        borrados.add((tipo.upper(), obj.lower()))
+for (tipo, obj), arch in sorted(creados.items()):
+    if (tipo, obj) not in borrados and (tipo, obj) not in EXC:
+        print("%s %s  (lo crea %s)" % (tipo, obj, arch))
+PYEOF
+)
+if [ -n "$SIM" ]; then
+  bad "objetos sin DROP en RevSQL/ (rompen DDL_1 vs DDL_3):"
+  printf '%s\n' "$SIM" | head -15 | sed 's|^|        |'
+else
+  ok "todo objeto desplegado tiene su reverso"
+fi
+
 echo
 if [ $FAIL -ne 0 ]; then echo "RESULTADO: FALLA"; exit 1; fi
 [ $WARN -ne 0 ] && echo "RESULTADO: OK (con avisos)" || echo "RESULTADO: OK"
