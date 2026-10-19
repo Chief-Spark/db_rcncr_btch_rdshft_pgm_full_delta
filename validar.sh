@@ -377,10 +377,18 @@ echo "11) simetria de objetos: todo CREATE de SQL/ con su DROP en RevSQL/"
 SIM=$(python3 -I - "$ROOT" <<'PYEOF'
 import re, sys, os, glob
 raiz = sys.argv[1]
-# bdm_datos y bdm_tempo alojan los SP de pgm: DROP SCHEMA CASCADE los arrasa
-# (incidente strct #256). La funcion no se dropea porque Redshift no admite
-# DROP FUNCTION IF EXISTS (leccion #10) y reventaria el precheck en limpio.
+# NINGUN ESQUEMA SE DROPEA, Y LOS TRES POR EL MISMO MOTIVO DE FONDO: SON
+# COMPARTIDOS.
+#   bdm_datos y bdm_tempo alojan los SP de pgm y un DROP SCHEMA ... CASCADE
+#   los arrasa (incidente strct #256).
+#   bdm_stage aloja los tres wrappers GEO de pgm -- sp_geo_ciclo_lote,
+#   sp_geo_exportar_insumo, sp_geo_reenganchar_r3 -- y una veintena de objetos
+#   ajenos del sandbox PP9999, de modo que un DROP SIN CASCADE no arrasa pero
+#   ABORTA el rollback: 2BP01, y es lo que tumbo el job DEV/DATABASE #422.
+# La funcion no se dropea porque Redshift no admite DROP FUNCTION IF EXISTS
+# (leccion #10) y reventaria el precheck en limpio.
 EXC = {("SCHEMA", "bdm_datos"), ("SCHEMA", "bdm_tempo"),
+       ("SCHEMA", "bdm_stage"),
        ("FUNCTION", "bdm_datos.convert_epoch_to_date")}
 CREA  = re.compile(r"CREATE\s+(?:OR\s+REPLACE\s+)?(TABLE|VIEW|PROCEDURE|FUNCTION|SCHEMA)"
                    r"(?:\s+IF\s+NOT\s+EXISTS)?\s+([A-Za-z_][\w.]*)", re.I)
@@ -406,6 +414,40 @@ if [ -n "$SIM" ]; then
   printf '%s\n' "$SIM" | head -15 | sed 's|^|        |'
 else
   ok "todo objeto desplegado tiene su reverso"
+fi
+
+# ------------------------------------------------------------
+# 12. Ningun DROP SCHEMA, con CASCADE o sin el
+# ------------------------------------------------------------
+# POR QUE EXISTE, Y ES LA MAS CARA DE LAS LECCIONES QUE CODIFICA ESTE SCRIPT:
+# los tres esquemas son COMPARTIDOS y ningun repo puede borrarlos. Los dos
+# incidentes son el mismo error por extremos opuestos:
+#
+#   DEV #256   DROP SCHEMA bdm_datos CASCADE desde strct arraso los SP de pgm
+#              y dejo a dt cayendo con 42883.
+#   DEV #422   DROP SCHEMA bdm_stage SIN CASCADE no arraso nada, pero ABORTO
+#              el rollback con 2BP01 -- bdm_stage tiene los tres wrappers GEO
+#              de pgm y los objetos del sandbox PP9999 -- y mato el build en
+#              RLLBCK_FINAL, donde no hay catchError.
+#
+# El argumento de que "sin CASCADE falla en vez de arrasar, que es la
+# propiedad que se quiere de un rollback" es FALSO: un rollback que aborta es
+# un build rojo. Las dos variantes son malas y la buena es no borrar el
+# esquema.
+#
+# Y NO HACIA FALTA PARA LA SIMETRIA: la guarda CREATE SCHEMA IF NOT EXISTS de
+# RevSQL/02a corre en el RLLBCK_PRECHECK, antes de que se tome DDL_1, asi que
+# el esquema aparece en las dos fotos y DDL_1 vs DDL_3 cuadra sin dropearlo.
+#
+# Solo mira sentencias: el patron ancla a principio de linea, de modo que las
+# decenas de comentarios que citan los dos incidentes no avisan.
+echo "12) ningun DROP SCHEMA (DEV #256 con CASCADE, DEV #422 sin CASCADE)"
+SCH=$(grep -rnE '^[[:space:]]*DROP[[:space:]]+SCHEMA' "$ROOT" --include='*.sql' 2>/dev/null)
+if [ -n "$SCH" ]; then
+  bad "DROP SCHEMA prohibido: los tres esquemas son compartidos"
+  printf '%s\n' "$SCH" | sed 's|^|        |'
+else
+  ok "ningun esquema se borra"
 fi
 
 echo

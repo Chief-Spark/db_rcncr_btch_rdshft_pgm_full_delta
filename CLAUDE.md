@@ -158,6 +158,41 @@ le faltaban el diccionario de via, el censo de escenarios, los siete
 mantenerlas: el `diff` de los `TRUNCATE` de los dos archivos tiene que salir
 vacio.
 
+**QUINTO PUNTO CIEGO, Y YA ESTA TAPADO: EL BANCO NO CORRIA `RevSQL/` NUNCA.**
+Corria `deploy.par` y nada mas, de modo que los dos stages de rollback del
+pipeline -- `RLLBCK_PRECHECK` y `RLLBCK_FINAL` -- no tenian prueba local. Ahi
+murieron los dos ultimos builds: el QA #122 por asimetria (`[REDSHIFT:335]`,
+`DDL_1 != DDL_3`) y el DEV #422 por un `DROP SCHEMA` que aborta (`2BP01`).
+
+`./banco.sh ciclo <fase>` replica el ciclo entero -- `PRECHECK -> DDL_1 ->
+DPLY -> RLLBCK_FINAL -> DDL_3 -> compare -> DPLY` -- y termina en una linea,
+`CICLO VERDE` o `CICLO ROJO`. **Reproduce el #422 literalmente**: con el
+`DROP SCHEMA` puesto, Postgres da el mismo
+`cannot drop schema bdm_stage because other objects depend on it`. Hay que
+correr `fase pgm` ANTES, porque son sus tres wrappers GEO los que hacen que el
+esquema no este vacio -- sin ellos el ciclo sale verde y la trampa no se ve.
+
+**Y CLASIFICA, PORQUE SIN CLASIFICAR NO SE USA.** Seis archivos de `RevSQL/`
+fallan en Postgres con `cannot drop table|view ... because other objects
+depend on it` y en Redshift no fallan: las vistas van
+`WITH NO SCHEMA BINDING` y no crean dependencia -- para eso existe la
+clausula. Salen como `HUECO`, no como `FALLA`. La prueba de que es hueco y no
+defecto es el log del #422: de los 37 archivos del precheck fallo UNO.
+**El caso del ESQUEMA no se perdona**, porque ahi los dos motores coinciden.
+
+Dos cosas que ese modo enseno de paso y conviene no volver a investigar:
+el `DROP TABLE IF EXISTS bdm_datos.insumo_direccion` de
+`RevSQL/01_rollback_ddl_ordenamiento.sql:4` es un **no-op** -- `SQL/04:50-56`
+borra las cuatro tablas `insumo_*` y las repone como vistas, y es `RevSQL/04:9`
+quien las borra --; y correr el reverso con `ON_ERROR_STOP=1` **arrastra
+fallos en cascada que el pipeline no tiene**, porque corta el archivo del
+hueco antes de sus sentencias de abajo.
+
+**Lo que sigue sin verse:** `DROP TABLE IF EXISTS x.y` con el ESQUEMA ausente
+es `3F000` en Redshift y un simple NOTICE en Postgres. Ese es el otro fallo
+del #122, y por eso las guardas `CREATE SCHEMA IF NOT EXISTS` de `RevSQL/` se
+sostienen en el log de Jenkins y no en el banco.
+
 ## Politicas del pipeline
 
 | Codigo | Causa | Como se evita |
@@ -177,6 +212,40 @@ mio y es un error**: ensucia el diff que alguien tiene que revisar. Decision
 del equipo, SLCOPRBA-1355. Consecuencia asumida: los chequeos de `validar.sh`
 viven solo en el repo de trabajo; si alguna vez hacen falta del lado de
 Bitbucket, el sitio es un paso del pipeline, no el repo.
+
+**`strct` NO BORRA ESQUEMAS, Y EL MOTIVO YA NO ES SOLO EL `CASCADE`
+(DEV #422).** Esta bitacora llego a decir que `bdm_stage` "es nuestro y solo
+tiene semillas mock" y que un `DROP SCHEMA` **sin** `CASCADE` era seguro porque
+"falla en vez de arrasar, que es la propiedad que se quiere de un rollback".
+**Las dos cosas eran falsas** y juntas tumbaron el #422 con
+`2BP01: cannot drop schema bdm_stage because other objects depend on it`, en
+`RLLBCK_PRECHECK` y otra vez en `RLLBCK_FINAL`, que es donde no hay
+`catchError`.
+
+| Quien vive en `bdm_stage` | Que deja |
+|---|---|
+| **nuestro propio `pgm`** | `sp_geo_ciclo_lote`, `sp_geo_exportar_insumo` y `sp_geo_reenganchar_r3` (`sp_geo_ciclo_lote_wrapper.sql:42`) |
+| sandbox PP9999 | `pp9999_pgm_deploy_marker` y 17 funciones `sp_pp9999_*` |
+| trabajo ajeno | `sp_ordenamiento_cargar_seed_mock`, `_validar_mock`, `_ejecucion_mock` |
+
+**Un rollback que aborta es un build rojo.** Sin `CASCADE` no arrasa pero deja
+el pipeline en rojo; con `CASCADE` es el incidente #256. Las dos salidas son
+malas y la buena es no borrar el esquema. `validar.sh` lleva el **chequeo 12**,
+que prohibe `DROP SCHEMA` en `SQL/` y en `RevSQL/` y **falla**.
+
+**Y NO HACIA FALTA PARA LA SIMETRIA, que es lo que mas escuece.** La guarda
+`CREATE SCHEMA IF NOT EXISTS bdm_stage;` de `RevSQL/02a` corre en el
+`RLLBCK_PRECHECK`, o sea **antes de que se tome `DDL_1`**, de modo que el
+esquema sale en las dos fotos y `DDL_1 vs DDL_3` cuadra sin borrar nada. El
+`[REDSHIFT:335]` del #122 lo arreglaron los seis `DROP` de OBJETO, no este.
+Hoy esa guarda esta en los **seis** archivos de `RevSQL/` que nombran
+`bdm_stage`, y no solo en los dos que el log citaba: los otros cuatro corren
+ANTES en `rollback.par` y no pueden apoyarse en la guarda de aquellos.
+
+**La leccion de metodo: una prueba en ambiente limpio no modela un ambiente
+con objetos ajenos.** El chequeo de simetria tampoco los ve, porque lee el
+repo y no la base. Lo unico que los ve es correr el reverso contra una base
+que ya tiene `pgm` encima -- hoy, `./banco.sh ciclo strct`.
 
 **EL `[REDSHIFT:419]` NO SALE: ES DEL PIPELINE, NO DEL REPO.** Lo cierra una
 prueba que no admite lectura alternativa: **STRCT desplego verde un dia y al
