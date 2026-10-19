@@ -933,3 +933,59 @@ igual por `OR fecha IS NULL` --, y sin unificacion. Medido: 100 sembradas, 0
 entraron en los dos DELTA. Lleva **una sola direccion por persona** a proposito:
 con dos formaria un grupo de empate en DIR y moveria `grupos_con_empate`, que
 ya esta medido.
+
+## Fase 3 del Ordenamiento: nueve de once, y dos hallazgos del legado
+
+**LA TABLA DE HASH ES INSERT-ONLY, Y ESO CAMBIA UN CRITERIO.** El legado tiene
+DOS versiones del mismo paso: `PRO_ORD_FINAL_UBIC_DIRECCIONES`, con el `UPDATE`
+**comentado**, y `PRO_ORD_FINAL_UBIC_DIRECCIONES1`, con el `UPDATE` vivo. El
+comentario que lo desactiva no es basura de edicion: *"Por solicitud de Experian
+se deja en comentario esta parte del codigo Puesto no se va a necesitar"*
+(`FINAL_UBIC_DIRECCIONES.sql:216`), y **la misma frase esta en
+`FINAL_CTA_ATRIBUTOS.sql:200`**, que es la tabla de hash de la Fase 2. Dos
+archivos, la misma decision: es una peticion real del negocio. Ademas solo el
+primero lleva entrada de mantenimiento (2018-09-26).
+
+Se porta la version sin `UPDATE`. **`F3-06` dice "los registros modificados se
+deben actualizar" y esa rama es codigo muerto en el AS-IS**, igual que
+`NOV-UB-13` y `NOV-UB-15`: el criterio se evalua contra la paridad REAL -- el
+cambio deja una SEGUNDA fila con el hash nuevo y la anterior no se toca -- y no
+contra una conducta que Teradata no ejecuta. **No es prueba cerrada**: el `CALL`
+vive en la malla, que no esta en el material entregado. Si aparece, se revisa.
+
+**Y EL ORDENAMIENTO NO FILTRABA BLOQUEADAS.** El catalogo ya lo decia en redondo
+-- *"NO existe filtro de bloqueo en el Ordenamiento de Redshift"* -- y nadie lo
+habia medido: las 100 del ARQ 59 llegaban al hash y al scoring. Corregido en los
+dos `preparar_insumos`. **Va como `NOT EXISTS` y no como
+`COALESCE(bloqueado,0)=0`**, porque el legado usa un anti-join
+(`Prc_Ordenamiento2.sql:1122-1126`) que excluye el `cod_dw_persona_ubic`
+ENTERO. En el mock da igual -- el id es unico --, en el datashare no: 568.657
+filas para 142.067 ids. Es la misma distincion que ya costo una divergencia en
+la etapa 1 de Novedades. Medido: `CA-F03` sigue con los 15 arquetipos en su
+delta, de modo que sacar las bloqueadas **no movio el scoring**.
+
+**`F3-09` Y `F3-10` NO ESTAN EN EL LEGADO.** Buscados `ICBDIR` y `'NO VALIDA'`
+en los 13.826 renglones de `dt/docs/legado_ordenamiento_f1_f3/`: cero
+coincidencias. Los dos enunciados salen del RF y la regla 4 dice que manda el
+codigo. (`'NO VALIDA'` si existe, pero en `Caracteristicas.txt`, que es la Fase
+4 y otro grano: el divisor de `DIR010FI` y `DIR013OT`.) Quedan BLOQUEADO: sin
+saber que columna lleva la fuente ni cual la validez, un filtro nuestro seria
+una divergencia disfrazada de criterio cumplido.
+
+**Tres cosas de implementacion que conviene no volver a descubrir:**
+
+| Que | Por que |
+|---|---|
+| El `MD5` no puede leer el alias `concatena` de su propio `SELECT` | el legado escribe `rec_vista.hash_md5(concatena)` referenciando la columna de al lado; Teradata lo resuelve y Redshift **no**. Misma trampa que `FLAG_OP` (`Novedad.sql:8392-8396`). El concatena va en subconsulta |
+| De las 12 columnas del concatena, 7 llevan dato y 5 el centinela `'0'` | se quedan **en su sitio y en su orden** para que el dia que el dato exista el hash cambie en una linea y se vea en el diff. Faltan gestion de registro, tipo de cuenta (Fase 2), barrio, departamento |
+| La llave del anti-join son CUATRO columnas; la de la entidad, TRES | `F3-07` nombra tres. El hash es la cuarta, la que decide si la COMBINACION es nueva. Confundirlas haria que una direccion cambiada no se registrara |
+
+**LOS ARQUETIPOS VAN EN PAREJA Y POR ESO SON DOS.** `ARQ 97` cambia de texto
+antes del DELTA2 (lo hace el paso 3b del e2e) y tiene que acabar con **dos**
+hashes; `ARQ 98` no cambia nunca y con **uno**. Con solo el que cambia no se
+distingue "registro el cambio" de "reinserta en cada corrida"; con solo el que
+no cambia no se prueba que detecte nada. Los dos se siembran en el Watermark
+`2026-03-01` -- el predicado es inclusivo -- para que entren en todas las
+corridas, que es lo contrario del `ARQ 96`, sembrado fuera a proposito. **El
+cambio es del TEXTO, nunca de la fecha**: mover la fecha mide la ventana, que
+es `F1-04`; aqui se mide que el hash reaccione a un atributo.

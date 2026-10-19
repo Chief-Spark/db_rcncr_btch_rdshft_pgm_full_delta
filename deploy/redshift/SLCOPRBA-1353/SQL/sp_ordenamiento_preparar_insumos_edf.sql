@@ -130,7 +130,26 @@ BEGIN
   INNER JOIN bdm_tempo.stg_ord_personas_alcance alc
     ON alc.id_buro_persona = rpu.id_buro_persona
   LEFT JOIN bdm_datos.unificacion_direccion u
-    ON u.cod_dw_persona_ubic = rpu.cod_dw_persona_ubic;
+    ON u.cod_dw_persona_ubic = rpu.cod_dw_persona_ubic
+  -- SLCOPRBA-1355 -- F3-01: las direcciones bloqueadas NO se ordenan.
+  --
+  -- Faltaba, y el catalogo de criterios ya lo decia en redondo: "NO existe
+  -- filtro de bloqueo en el Ordenamiento de Redshift". Medido en el banco
+  -- antes de ponerlo: las 100 bloqueadas del ARQ 59 llegaban al hash de la
+  -- Fase 3 y al scoring.
+  --
+  -- El legado lo hace con un ANTI-JOIN contra la tabla bloqueo
+  -- (Prc_Ordenamiento2.sql:1122-1126), no con un filtro de fila, de modo que
+  -- excluye el cod_dw_persona_ubic ENTERO. En el mock da igual porque el id
+  -- es unico por construccion, pero en el datashare NO lo es -- 568.657 filas
+  -- para 142.067 ids -- y ahi la diferencia importa: es la misma que ya costo
+  -- una divergencia en la etapa 1 de Novedades. Por eso va como NOT EXISTS y
+  -- no como COALESCE(rpu.bloqueado, 0) = 0.
+  WHERE NOT EXISTS ( SELECT 1
+                       FROM bdm_tempo.v_xpm_relacion_persona_ubicacion bl
+                      WHERE bl.cod_dw_persona_ubic = rpu.cod_dw_persona_ubic
+                        AND COALESCE(bl.bloqueado, 0) = 1 )
+  ;
 
   ANALYZE bdm_tempo.stg_rpu_post_unificacion;
 

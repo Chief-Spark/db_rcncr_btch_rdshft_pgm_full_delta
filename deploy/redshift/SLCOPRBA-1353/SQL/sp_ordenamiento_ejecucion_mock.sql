@@ -147,6 +147,20 @@ BEGIN
            filas_entrada = v_personas, filas_salida = v_contactos
      WHERE corrida_id = v_corrida AND etapa = 'preparar';
 
+    -- ---- ubicaciones (Fase 3) ---------------------------------------------
+    -- Va DESPUES de preparar porque lee stg_insumo_direccion, y ANTES del
+    -- scoring porque es la fase que la precede en el legado.
+    v_etapa_actual := 'ubicaciones';
+    INSERT INTO bdm_stage.mock_ord_control_etapa
+        (corrida_id, lote, etapa, estado, fecha_hora_inicio, usuario_bd)
+    VALUES (v_corrida, v_lote, 'ubicaciones', 'enproceso', GETDATE(), CURRENT_USER);
+
+    CALL bdm_datos.sp_ordenamiento_ubicaciones_mock(v_lote);
+
+    UPDATE bdm_stage.mock_ord_control_etapa
+       SET estado = 'completado', fecha_hora_fin = GETDATE()
+     WHERE corrida_id = v_corrida AND etapa = 'ubicaciones';
+
     -- ---- scoring por canal (SP REALES, sin modificacion) -------------------
     v_etapa_actual := 'scoring_dir';
     INSERT INTO bdm_stage.mock_ord_control_etapa
@@ -263,7 +277,8 @@ BEGIN
 
     CALL bdm_datos.sp_ordenamiento_drop_staging_edf();
 
-    -- F1-05: despues del drop no puede quedar ninguna de las catorce.
+    -- F1-05: despues del drop no puede quedar ninguna de las quince.
+    -- (catorce hasta que la Fase 3 anadio stg_ord_ubic_hash).
     --
     -- EL CONTEO VA A UNA VARIABLE ANTES DEL UPDATE, y no dentro de el.
     -- pg_tables vive en el leader node y Redshift NO admite mezclar un
@@ -279,7 +294,8 @@ BEGIN
              'stg_contacto_canal','stg_contacto_direccion_rpu','stg_dir_conteo_persona',
                      'stg_insumo_celular','stg_insumo_direccion','stg_insumo_email',
                      'stg_insumo_telefono','stg_ord_alcance_origen',
-                     'stg_ord_personas_alcance','stg_persona_dir_ganadora',
+                     'stg_ord_personas_alcance','stg_ord_ubic_hash',
+                     'stg_persona_dir_ganadora',
                      'stg_persona_dir_ref','stg_reporte_rpu','stg_rpu_dir_ref',
                      'stg_rpu_post_unificacion' );
 

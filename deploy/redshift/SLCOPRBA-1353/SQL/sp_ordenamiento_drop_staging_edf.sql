@@ -8,6 +8,8 @@ BEGIN
   -- SLCOPRBA-1355: el desglose por rama del alcance (Fase 1). Nadie la une;
   -- la lee el censo, que ya la agrego antes de llegar aqui.
   DROP TABLE IF EXISTS bdm_tempo.stg_ord_alcance_origen;
+  -- SLCOPRBA-1355: el staging del hash de la Fase 3.
+  DROP TABLE IF EXISTS bdm_tempo.stg_ord_ubic_hash;
   DROP TABLE IF EXISTS bdm_tempo.stg_insumo_email;
   DROP TABLE IF EXISTS bdm_tempo.stg_insumo_celular;
   DROP TABLE IF EXISTS bdm_tempo.stg_insumo_telefono;

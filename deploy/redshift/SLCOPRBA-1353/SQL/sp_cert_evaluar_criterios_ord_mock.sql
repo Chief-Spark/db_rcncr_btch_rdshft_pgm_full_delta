@@ -852,6 +852,208 @@ BEGIN
           WHERE lote = p_lote ) c;
 
   -- ============================================================
+  -- FASE 3 -- UBICACIONES (F3-01..11), SLCOPRBA-1355
+  --
+  -- Todo sale de bdm_datos.ubicacion_atributo_hash_mock, que es permanente;
+  -- el staging ya lo borro el cleanup. Los arquetipos son el 97 (su direccion
+  -- CAMBIA de texto antes del DELTA2) y el 98 (no cambia nunca).
+  -- ============================================================
+
+  -- F3-01. Las direcciones bloqueadas no se ordenan. El universo mock las
+  -- tiene: las siembra el ARQ 59. El predicado vive en los insumos de la
+  -- cascada y aqui se verifica el efecto: ninguna llega al hash.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F3-01',
+         CASE WHEN COALESCE(b.sembradas, 0) = 0  THEN 'SIN_DATO'
+              WHEN COALESCE(b.en_hash, 0) > 0    THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'direcciones bloqueadas en el universo=' || CAST(COALESCE(b.sembradas, 0) AS VARCHAR)
+           || ', de esas llegaron al hash=' || CAST(COALESCE(b.en_hash, 0) AS VARCHAR)
+           || ' (esperado 0). Sin ninguna sembrada el criterio no prueba nada '
+           || 'y sale SIN_DATO.',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT COUNT(*) AS sembradas,
+                COUNT(h.cod_dw_persona_ubic) AS en_hash
+           FROM bdm_tempo.v_mock_relacion_persona_ubicacion rpu
+           LEFT JOIN bdm_datos.ubicacion_atributo_hash_mock h
+                  ON h.cod_dw_persona_ubic = rpu.cod_dw_persona_ubic
+          WHERE COALESCE(rpu.bloqueado, 0) = 1 ) b;
+
+  -- F3-02 y F3-11. Las hijas de unificacion no se ordenan. Son el mismo
+  -- predicado -- ind_unificacion IS NULL -- y por eso comparten evaluacion.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, m.criterio,
+         CASE WHEN COALESCE(MAX(u.hijas), 0) = 0     THEN 'SIN_DATO'
+              WHEN COALESCE(MAX(u.en_hash), 0) > 0   THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'direcciones hijas de unificacion=' || CAST(COALESCE(MAX(u.hijas), 0) AS VARCHAR)
+           || ', de esas llegaron al hash=' || CAST(COALESCE(MAX(u.en_hash), 0) AS VARCHAR)
+           || ' (esperado 0)',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT CAST('F3-02' AS VARCHAR(12)) AS criterio UNION ALL
+         SELECT 'F3-11' ) m
+  CROSS JOIN ( SELECT COUNT(*) AS hijas,
+                      COUNT(h.cod_dw_persona_ubic) AS en_hash
+                 FROM bdm_datos.unificacion_direccion_mock ud
+                 LEFT JOIN bdm_datos.ubicacion_atributo_hash_mock h
+                        ON h.cod_dw_persona_ubic = ud.cod_dw_persona_ubic ) u
+  GROUP BY m.criterio;
+
+  -- F3-03. Ninguna fila con tipo_persona nula, y las DOS ramas ejercitadas:
+  -- el ARQ 97 entra como NATURAL y el 98 como JURIDICA. Con una sola rama el
+  -- criterio pasaria sin haber probado la clasificacion.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F3-03',
+         CASE WHEN COALESCE(t.filas, 0) = 0     THEN 'SIN_DATO'
+              WHEN COALESCE(t.nulas, 0) > 0     THEN 'FAILED'
+              WHEN COALESCE(t.naturales, 0) = 0
+                OR COALESCE(t.juridicas, 0) = 0 THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'filas en el hash=' || CAST(COALESCE(t.filas, 0) AS VARCHAR)
+           || ', con tipo_persona nula=' || CAST(COALESCE(t.nulas, 0) AS VARCHAR)
+           || ' (esperado 0), NATURAL=' || CAST(COALESCE(t.naturales, 0) AS VARCHAR)
+           || ', JURIDICA=' || CAST(COALESCE(t.juridicas, 0) AS VARCHAR)
+           || '. Las dos ramas tienen que estar: una sola no prueba la '
+           || 'clasificacion.',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT COUNT(*) AS filas,
+                SUM(CASE WHEN tipo_persona IS NULL          THEN 1 ELSE 0 END) AS nulas,
+                SUM(CASE WHEN tipo_persona = 'NATURAL'      THEN 1 ELSE 0 END) AS naturales,
+                SUM(CASE WHEN tipo_persona = 'JURIDICA'     THEN 1 ELSE 0 END) AS juridicas
+           FROM bdm_datos.ubicacion_atributo_hash_mock ) t;
+
+  -- F3-04. MD5 de 32 caracteres exactos. El legado usa un UDF propio
+  -- (rec_vista.hash_md5); Redshift trae MD5() nativo.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F3-04',
+         CASE WHEN COALESCE(h.filas, 0) = 0      THEN 'SIN_DATO'
+              WHEN COALESCE(h.malos, 0) > 0      THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'hashes escritos=' || CAST(COALESCE(h.filas, 0) AS VARCHAR)
+           || ', con longitud distinta de 32=' || CAST(COALESCE(h.malos, 0) AS VARCHAR)
+           || ' (esperado 0)',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT COUNT(*) AS filas,
+                SUM(CASE WHEN LENGTH(TRIM(cod_dw_hash)) <> 32 THEN 1 ELSE 0 END) AS malos
+           FROM bdm_datos.ubicacion_atributo_hash_mock ) h;
+
+  -- F3-05. Lo nuevo entra. En FULL la tabla parte vacia -- el reset la
+  -- trunca -- asi que todo el universo ordenable tiene que estar.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F3-05',
+         CASE WHEN COALESCE(h.filas, 0) = 0 THEN 'FAILED' ELSE 'PASSED' END,
+         'filas en ubicacion_atributo_hash tras la corrida='
+           || CAST(COALESCE(h.filas, 0) AS VARCHAR)
+           || ', llaves distintas=' || CAST(COALESCE(h.llaves, 0) AS VARCHAR),
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT COUNT(*) AS filas,
+                COUNT(DISTINCT cod_dw_persona_ubic) AS llaves
+           FROM bdm_datos.ubicacion_atributo_hash_mock ) h;
+
+  -- F3-06. EL CRITERIO SE EVALUA CONTRA LA PARIDAD REAL, NO CONTRA SU LETRA.
+  -- Dice "los registros modificados se deben actualizar", y esa rama es
+  -- CODIGO MUERTO en el AS-IS: el UPDATE de
+  -- PRO_ORD_FINAL_UBIC_DIRECCIONES.sql:216 esta comentado con
+  -- "Por solicitud de Experian... no se va a necesitar", y la misma frase
+  -- aparece en FINAL_CTA_ATRIBUTOS.sql:200. Es el caso de NOV-UB-13 y
+  -- NOV-UB-15: verificar una rama que el legado no puede tomar no certifica
+  -- nada. Lo que SI es paridad: el cambio queda registrado -- segunda fila
+  -- con hash nuevo -- y la fila anterior no se toca.
+  --
+  -- Solo se puede afirmar despues de la mutacion, o sea en DELTA2.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F3-06',
+         CASE WHEN p_fase <> 'DELTA2'                 THEN 'SIN_DATO'
+              WHEN COALESCE(c.arq97_pers, 0) = 0
+                OR COALESCE(c.arq98_pers, 0) = 0      THEN 'SIN_DATO'
+              WHEN COALESCE(c.arq97_hashes, 0) <> 2   THEN 'FAILED'
+              WHEN COALESCE(c.arq98_hashes, 0) <> 1   THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'ARQ 97 (su direccion cambia de texto): personas='
+           || CAST(COALESCE(c.arq97_pers, 0) AS VARCHAR)
+           || ', hashes distintos por direccion=' || CAST(COALESCE(c.arq97_hashes, 0) AS VARCHAR)
+           || ' (esperado 2). ARQ 98 (no cambia): personas='
+           || CAST(COALESCE(c.arq98_pers, 0) AS VARCHAR)
+           || ', hashes=' || CAST(COALESCE(c.arq98_hashes, 0) AS VARCHAR)
+           || ' (esperado 1)'
+           || CASE WHEN p_fase <> 'DELTA2'
+                   THEN '. La mutacion ocurre antes del DELTA2: en las demas '
+                     || 'fases no hay cambio que medir y SIN_DATO es correcto.'
+                   ELSE '' END,
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT COUNT(DISTINCT CASE WHEN banda = 997 THEN cod_dw_persona_ubic END) AS arq97_pers,
+                COUNT(DISTINCT CASE WHEN banda = 998 THEN cod_dw_persona_ubic END) AS arq98_pers,
+                MAX(CASE WHEN banda = 997 THEN hashes END) AS arq97_hashes,
+                MAX(CASE WHEN banda = 998 THEN hashes END) AS arq98_hashes
+           FROM ( SELECT h.cod_dw_persona_ubic,
+                         h.id_buro_persona / 10000 AS banda,
+                         COUNT(DISTINCT h.cod_dw_hash) AS hashes
+                    FROM bdm_datos.ubicacion_atributo_hash_mock h
+                   WHERE h.id_buro_persona BETWEEN 9970000 AND 9989999
+                   GROUP BY h.cod_dw_persona_ubic, h.id_buro_persona / 10000 ) g ) c;
+
+  -- F3-07. La llave de deteccion es de TRES columnas y el hash es la cuarta
+  -- del anti-join. Se verifica por su consecuencia: no puede haber dos filas
+  -- con la misma llave Y el mismo hash. Si las hubiera, el anti-join estaria
+  -- mal escrito y cada corrida duplicaria la tabla.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F3-07',
+         CASE WHEN COALESCE(d.filas, 0) = 0       THEN 'SIN_DATO'
+              WHEN COALESCE(d.repetidas, 0) > 0   THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'combinaciones (cod_pin, id_buro, cod_dw_persona_ubic, hash) repetidas='
+           || CAST(COALESCE(d.repetidas, 0) AS VARCHAR) || ' (esperado 0), sobre '
+           || CAST(COALESCE(d.filas, 0) AS VARCHAR) || ' filas',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT SUM(n)   AS filas,
+                SUM(CASE WHEN n > 1 THEN 1 ELSE 0 END) AS repetidas
+           FROM ( SELECT COUNT(*) AS n
+                    FROM bdm_datos.ubicacion_atributo_hash_mock
+                   GROUP BY cod_pin_persona, id_buro_persona,
+                            cod_dw_persona_ubic, cod_dw_hash ) q ) d;
+
+  -- F3-08. Inicio y fin de la fase en el log. La etapa es 'ubicaciones'.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F3-08',
+         CASE WHEN COALESCE(e.n, 0) = 0        THEN 'FAILED'
+              WHEN COALESCE(e.sin_fin, 0) > 0  THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'etapa ubicaciones registrada=' || CAST(COALESCE(e.n, 0) AS VARCHAR)
+           || ' vez(ces), sin fecha_hora_fin=' || CAST(COALESCE(e.sin_fin, 0) AS VARCHAR)
+           || ' (esperado al menos 1 y 0)',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT COUNT(*) AS n,
+                SUM(CASE WHEN fecha_hora_fin IS NULL THEN 1 ELSE 0 END) AS sin_fin
+           FROM bdm_stage.mock_ord_control_etapa
+          WHERE lote = p_lote AND etapa = 'ubicaciones' ) e;
+
+  -- F3-09 y F3-10. BLOQUEADO, y el motivo es que NO ESTAN EN EL LEGADO que
+  -- tenemos. Buscados ICBDIR y 'NO VALIDA' en los 13.826 renglones de
+  -- dt/docs/legado_ordenamiento_f1_f3/: cero coincidencias. Los dos
+  -- enunciados salen del RF, no del codigo, y la regla 4 dice que manda el
+  -- codigo. 'NO VALIDA' si aparece, pero en Caracteristicas.txt, que es la
+  -- Fase 4 y otro grano (el divisor de DIR010FI y DIR013OT).
+  --
+  -- No se inventa un predicado para que pasen: sin saber que columna del
+  -- datashare lleva la fuente ni cual la validez de estandarizacion, un
+  -- filtro nuestro seria una divergencia disfrazada de criterio cumplido.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, m.criterio, 'BLOQUEADO', m.detalle, GETDATE(), CURRENT_USER
+  FROM ( SELECT CAST('F3-09' AS VARCHAR(12)) AS criterio,
+                CAST('solo se ordenan ubicaciones con cuenta activa para la fuente ICBDIR: ICBDIR no aparece ni una vez en los 17 SP del legado de F1-F3. El enunciado sale del RF y no del codigo. Ademas exige cuentas, que son la Fase 2.' AS VARCHAR(512)) AS detalle UNION ALL
+         SELECT 'F3-10',
+                'no se ordenan ubicaciones no validas: la validez del estandarizador no aparece en el legado de F1-F3. El unico NO VALIDA del legado esta en Caracteristicas.txt, que es la Fase 4 y otro grano (divisor de DIR010FI y DIR013OT).' ) m;
+
+  -- ============================================================
   -- LOS ARQUETIPOS DEL ORDENAMIENTO (ARQ 80..84)
   -- ============================================================
 
@@ -1324,7 +1526,7 @@ BEGIN
               END,
          GETDATE(), CURRENT_USER
   FROM  bdm_datos.cert_criterio_ord c
-  WHERE c.bloque IN ('FASE2', 'FASE3');
+  WHERE c.bloque IN ('FASE2');
 
   DROP TABLE IF EXISTS bdm_tempo.stg_cert_ord_base;
   DROP TABLE IF EXISTS bdm_tempo.stg_cert_ord_beta;

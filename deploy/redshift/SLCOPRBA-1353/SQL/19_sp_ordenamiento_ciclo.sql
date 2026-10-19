@@ -82,6 +82,13 @@ BEGIN
         );
         CALL bdm_datos.ord_traza_fin(v_corrida_id, 'preparar', 'completado', 0, 0);
 
+        -- Fase 3. Despues de preparar, que es quien deja el insumo, y antes
+        -- del scoring, que es el orden del legado.
+        v_etapa_actual := 'ubicaciones';
+        CALL bdm_datos.ord_traza_inicio(v_corrida_id, v_lote, 'ubicaciones');
+        CALL bdm_datos.sp_ordenamiento_ubicaciones_edf(v_lote);
+        CALL bdm_datos.ord_traza_fin(v_corrida_id, 'ubicaciones', 'completado', 0, 0);
+
         v_etapa_actual := 'scoring_dir';
         CALL bdm_datos.ord_traza_inicio(v_corrida_id, v_lote, 'scoring_dir');
         CALL bdm_datos.sp_ordenamiento_scoring_dir_edf();
@@ -163,7 +170,8 @@ BEGIN
 
         CALL bdm_datos.sp_ordenamiento_drop_staging_edf();
 
-        -- F1-05: despues del drop no puede quedar ninguna de las catorce.
+        -- F1-05: despues del drop no puede quedar ninguna de las quince.
+        -- (catorce hasta que la Fase 3 anadio stg_ord_ubic_hash).
         --
         -- EL CONTEO VA A UNA VARIABLE ANTES DEL UPDATE, y no dentro de el.
         -- pg_tables vive en el leader node y Redshift NO admite mezclar un
@@ -179,7 +187,8 @@ BEGIN
                  'stg_contacto_canal','stg_contacto_direccion_rpu','stg_dir_conteo_persona',
                      'stg_insumo_celular','stg_insumo_direccion','stg_insumo_email',
                      'stg_insumo_telefono','stg_ord_alcance_origen',
-                     'stg_ord_personas_alcance','stg_persona_dir_ganadora',
+                     'stg_ord_personas_alcance','stg_ord_ubic_hash',
+                     'stg_persona_dir_ganadora',
                      'stg_persona_dir_ref','stg_reporte_rpu','stg_rpu_dir_ref',
                      'stg_rpu_post_unificacion' );
 
