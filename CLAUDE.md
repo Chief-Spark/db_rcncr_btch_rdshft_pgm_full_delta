@@ -598,6 +598,18 @@ certificada.** No se toca aqui: se anota y se eleva.
   ancha de una version anterior, el `INSERT` pasa en DEV y falla en el primer
   despliegue sobre ambiente limpio. Encontrado asi con la evidencia de `R2-07`
   (688 caracteres contra `VARCHAR(500)`), que nunca llego a desplegarse.
+- **Una comilla simple sin escapar dentro de un literal del catalogo de
+  criterios deja la tabla VACIA, y NADA de lo que corremos lo caza.** Pasa al
+  redactar una `evidencia` o un `enunciado` que cita un valor -- la etapa
+  `'preparar'`, la columna `'bloqueado'` -- dentro de una cadena que ya va
+  entre comillas simples. `validar.sh` da OK: las comillas vienen en pares y
+  el balance cuadra. El conteo de objetos del banco da OK: verifica que la
+  tabla **existe**, no que tenga filas. Y la fase no se marca en rojo.
+  **Lo unico que lo detecta es contar las filas despues de desplegar**, y
+  conviene hacerlo siempre que se toque un catalogo:
+  `SELECT COUNT(*) FROM bdm_datos.cert_criterio_ord;`. Costo una vuelta
+  entera al cablear la Fase 1 (SLCOPRBA-1355). La salida es no citar valores
+  entre comillas en esos textos, o doblarlas.
 
 ## Lecciones numeradas (estaban dispersas en cabeceras)
 
@@ -862,3 +874,62 @@ Lo unico que deja: el par solo difiere **cuando `FNV_HASH` colisiona**, y ahi el
 nuestro fusionaria dos personas en un ranking. Es el riesgo del gate de colision
 que se documento en `01d_ddl_direccion_generada.sql:54` y nunca se construyo.
 Queda en la bitacora, no es trabajo abierto.
+
+## Fase 1 del Ordenamiento: certificada, y seis de ocho (SLCOPRBA-1355)
+
+**NO ES UN PORT: ES UNA RE-ESPECIFICACION, y conviene no volver a abrirlo.**
+Los 46 pasos de `PRO_ORD_MATERIALIZA_BTT` / `_REC` detectan el delta con
+`bdm_mtdat.MetadataCargaLog` y `dbc.tables`, plomeria de Teradata sin
+contraparte en Redshift. El equivalente **ya existia**: el alcance por
+`p_lote` / `p_watermark` de `sp_ordenamiento_preparar_insumos_edf.sql:36-67`.
+Lo que faltaba no era codigo de negocio, era **poder medirlo**.
+
+**LA PIEZA NUEVA ES EL CENSO, y existe por un motivo concreto:**
+`sp_ordenamiento_drop_staging_edf` borra `stg_ord_personas_alcance` al final de
+cada corrida, de modo que cuando el evaluador corre el universo ya no existe.
+`ord_alcance_censo` (+ `mock_ord_alcance_censo`, `12_ddl_ord_control.sql:109`)
+guarda una fila por corrida con lo que los ocho criterios necesitan.
+
+| Pieza | Donde | Para que |
+|---|---|---|
+| `ord_alcance_censo` + espejo mock | `strct/12_ddl_ord_control.sql` | una fila por corrida |
+| `stg_ord_alcance_origen` | los dos `preparar_insumos` | por que rama entro cada persona |
+| El censo y los residuales | los dos ciclos, en la etapa `cleanup` | se escribe antes del drop; los residuales, despues |
+| ARQ 96 (banda `9960000`) | `seed_mock_matriz_ord.sql` | la persona que NO cambia |
+
+**`stg_ord_alcance_origen` ES TABLA APARTE Y NO UNA COLUMNA DEL ALCANCE.** Una
+persona puede entrar por las dos ramas; con el origen dentro, el
+`SELECT DISTINCT` dejaria de dar una fila por persona y **cada INNER JOIN de
+los insumos se multiplicaria**. Es el mismo fan-out que ya se pago al derivar
+la clase de ubicacion de `v_xpm_contacto_canal`. Nadie la une: la lee solo el
+censo.
+
+**RESULTADO: SEIS PASSED, DOS BLOQUEADO, CERO FAILED.** `NO_IMPLEMENTADO` del
+tablero de Ordenamiento baja de 102 a 78 y `PASSED` sube de 131 a 148 -- cuadra
+exacto, 8 criterios por 3 fases. Unificacion `174`, Novedades `63` y los 15
+arquetipos de `CA-F03` con su delta intacto: **radio de impacto cero**.
+
+**LOS DOS QUE NO PASAN NO SON UN DEFECTO DEL ALCANCE: FALTAN COLUMNAS.** El
+legado detecta **seis** tipos de cambio y nuestro alcance cubre **dos** -- la
+ventana por `fecha_relacion_persona_ubicaci` y la unificacion por lote/fecha.
+Los otros cuatro no dejan rastro temporal que una ventana pueda pescar:
+`bdm_stage.ubicacion_estandarizada` no tiene fecha ni lote, `bloqueado` es una
+bandera sin fecha, y no hay tabla de cuentas. Por eso `F1-01` y `F1-08` salen
+**BLOQUEADO y no FAILED**: es trabajo de modelo, no un predicado que falte.
+`F1-01` se desbloquea solo cuando la Fase 2 traiga `bdm_stage.mock_cuenta`; el
+evaluador ya tiene su rama y no hay que tocarlo.
+
+**Y EL `NULL` DE LAS CUATRO COLUMNAS `por_*` ES DELIBERADO.** `NULL` dice "no
+hay senal con la que medir"; `0` diria "la busque y no habia". Esa diferencia
+**es** la evidencia de `F1-08`, y un censo que pusiera 0 en las cuatro mentiria
+igual que un DELTA en cero -- la leccion de `NOV-UB-12`.
+
+**ARQ 96 ES EL PRIMER ARQUETIPO QUE CERTIFICA UNA AUSENCIA.** Los ARQ 80..95
+se siembran todos con `fecha = 2026-03-01`, que es el Watermark, y el predicado
+es inclusivo: los dieciseis entran en todas las corridas y ninguno puede decir
+que pasa con una persona que el DELTA **no** debe tocar. El 96 va a
+`2026-01-15`, estrictamente anterior y **no nula** -- una fecha nula lo meteria
+igual por `OR fecha IS NULL` --, y sin unificacion. Medido: 100 sembradas, 0
+entraron en los dos DELTA. Lleva **una sola direccion por persona** a proposito:
+con dos formaria un grupo de empate en DIR y moveria `grupos_con_empate`, que
+ya esta medido.

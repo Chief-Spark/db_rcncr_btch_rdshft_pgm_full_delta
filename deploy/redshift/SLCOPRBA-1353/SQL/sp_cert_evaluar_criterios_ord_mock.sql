@@ -8,11 +8,20 @@
 -- PASSED. Sale con el estado que le corresponde y con la razon exacta. El
 -- tablero vale justamente por las filas que no son PASSED.
 --
--- ALCANCE EVALUABLE (45 de los 90):
---   los 30 de la Fase 4 (scoring), los 6 CA-F, y de los transversales
---   RG-02, RG-03, RG-05, RG-07, RG-08 y CA-T02..CA-T05.
---   Los otros 45 salen con estado explicito:
---     FASE1/FASE2/FASE3 y lo que depende de ellas -> NO_IMPLEMENTADO (29+5)
+-- ALCANCE EVALUABLE (53 de los 90):
+--   los 30 de la Fase 4 (scoring), los 6 CA-F, los 8 de la FASE 1, y de los
+--   transversales RG-02, RG-03, RG-05, RG-07, RG-08 y CA-T02..CA-T05.
+--   Los otros 37 salen con estado explicito:
+--     FASE2/FASE3 y lo que depende de ellas      -> NO_IMPLEMENTADO (21+5)
+--
+-- LA FASE 1 ENTRO AQUI EN SLCOPRBA-1355, y conviene saber por que no fue un
+-- port: sus 46 pasos del legado detectan el delta con MetadataCargaLog y
+-- dbc.tables, plomeria de Teradata sin contraparte. Se re-especifico sobre el
+-- alcance por lote y watermark que ya existia. De los ocho, SEIS se pueden
+-- afirmar y DOS no: F1-01 y F1-08 salen BLOQUEADO porque el mock no tiene
+-- tabla de cuentas y porque cuatro de los seis tipos de cambio del legado no
+-- dejan rastro temporal en nuestro modelo. Estan BLOQUEADO y no FAILED a
+-- proposito: es trabajo de modelo, no un defecto del alcance.
 --     GOBERNANZA y CA_MIGR de acta                -> FUERA_DE_ALCANCE
 --     CA-M01 (paridad numerica con Teradata)      -> BLOQUEADO
 --     los cuatro donde el RF y el legado NO dicen
@@ -645,6 +654,204 @@ BEGIN
            FROM bdm_stage.mock_ord_control ) c;
 
   -- ============================================================
+  -- FASE 1 -- MATERIALIZACION (F1-01..08), SLCOPRBA-1355
+  --
+  -- LA FASE 1 NO SE PORTA: SE RE-ESPECIFICA, y conviene no volver a abrirlo.
+  -- Los 46 pasos de PRO_ORD_MATERIALIZA_BTT / _REC existen para detectar el
+  -- delta con bdm_mtdat.MetadataCargaLog y dbc.tables, que son plomeria de
+  -- Teradata sin contraparte en Redshift. El equivalente aqui es el alcance
+  -- por lote y watermark de sp_ordenamiento_preparar_insumos (:36-67). Estos
+  -- ocho criterios miden ESE alcance, no un port inexistente.
+  --
+  -- TODO SALE DEL CENSO, no del staging: sp_ordenamiento_drop_staging_edf ya
+  -- borro bdm_tempo.stg_ord_personas_alcance cuando este gate corre.
+  -- ============================================================
+
+  -- F1-01. Delta del modelo BTT (cuentas y comportamiento crediticio).
+  -- BLOQUEADO, y no FAILED: no es que el alcance se deje fuera las cuentas,
+  -- es que no hay ninguna tabla de cuentas en el mock contra la que mirar.
+  -- PRO_ORD_MATERIALIZA_BTT lee V_CUENTA, V_COMPORTAMIENTO_CUENTA,
+  -- V_COMPORT_CTA_ACTIVO, V_COMPORT_CTA_PASIVO y V_BURO_PERSONA; la semilla
+  -- equivalente (bdm_stage.mock_cuenta) llega con la Fase 2. Cuando llegue,
+  -- el ciclo llenara por_cuenta y este criterio pasa a medir sin tocarse.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F1-01',
+         CASE WHEN c.filas = 0            THEN 'SIN_DATO'
+              WHEN c.por_cuenta IS NULL   THEN 'BLOQUEADO'
+              WHEN c.por_cuenta > 0       THEN 'PASSED'
+              ELSE 'FAILED' END,
+         CASE WHEN c.filas = 0
+              THEN 'no hay censo de alcance para el lote=' || CAST(p_lote AS VARCHAR)
+              WHEN c.por_cuenta IS NULL
+              THEN 'rama BTT sin medir: el mock no tiene tabla de cuentas. '
+                || 'El legado la saca de V_CUENTA y V_COMPORTAMIENTO_CUENTA '
+                || '(PRO_ORD_MATERIALIZA_BTT). Llega con la Fase 2 como '
+                || 'bdm_stage.mock_cuenta; hasta entonces por_cuenta es NULL '
+                || 'a proposito, que es distinto de medir cero.'
+              ELSE 'personas que entraron por la rama BTT='
+                || CAST(c.por_cuenta AS VARCHAR) END,
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT COUNT(*) AS filas, MAX(por_cuenta) AS por_cuenta
+           FROM bdm_stage.mock_ord_alcance_censo
+          WHERE lote = p_lote ) c;
+
+  -- F1-02. Delta del modelo REC (ubicaciones). Es la rama que SI existe:
+  -- fecha_relacion_persona_ubicaci >= watermark, o fecha nula.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F1-02',
+         CASE WHEN c.filas = 0                  THEN 'SIN_DATO'
+              WHEN COALESCE(c.por_ubic, 0) = 0  THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'personas que entraron por la rama de ubicacion='
+           || CAST(COALESCE(c.por_ubic, 0) AS VARCHAR)
+           || ', por la de unificacion=' || CAST(COALESCE(c.por_unif, 0) AS VARCHAR)
+           || ', alcance total=' || CAST(COALESCE(c.personas, 0) AS VARCHAR)
+           || '. En FULL entra todo el universo por la rama de ubicacion; '
+           || 'en DELTA solo lo que cae en la ventana.',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT COUNT(*) AS filas, MAX(por_ubicacion) AS por_ubic,
+                MAX(por_unificacion) AS por_unif, MAX(alcance_personas) AS personas
+           FROM bdm_stage.mock_ord_alcance_censo
+          WHERE lote = p_lote ) c;
+
+  -- F1-03. La union de los dos modelos no genera duplicados: una fila por
+  -- persona en el alcance. Lo garantiza el SELECT DISTINCT, y este criterio
+  -- lo verifica en vez de confiar en el.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F1-03',
+         CASE WHEN c.filas = 0                                  THEN 'SIN_DATO'
+              WHEN COALESCE(c.alc_filas, 0) = 0                 THEN 'SIN_DATO'
+              WHEN c.alc_filas <> c.alc_personas                THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'filas del alcance=' || CAST(COALESCE(c.alc_filas, 0) AS VARCHAR)
+           || ', personas distintas=' || CAST(COALESCE(c.alc_personas, 0) AS VARCHAR)
+           || ' (tienen que coincidir)',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT COUNT(*) AS filas, MAX(alcance_filas) AS alc_filas,
+                MAX(alcance_personas) AS alc_personas
+           FROM bdm_stage.mock_ord_alcance_censo
+          WHERE lote = p_lote ) c;
+
+  -- F1-04. Sin lotes nuevos no hay reproceso. El ARQ 96 es la persona
+  -- sembrada con fecha 2026-01-15, ANTERIOR al watermark y no nula, y sin
+  -- unificacion: las dos ramas la dejan fuera. En FULL entra a proposito
+  -- (en FULL entra el universo entero) y por eso ahi sale SIN_DATO.
+  --
+  -- Y SI NO HAY ARQUETIPO SEMBRADO, TAMBIEN SALE SIN_DATO. Un criterio que
+  -- afirma "cero entraron" sobre cero candidatos no prueba nada: es la
+  -- leccion que dejo NOV-UB-12.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F1-04',
+         CASE WHEN c.filas = 0                            THEN 'SIN_DATO'
+              WHEN p_fase IN ('FULL', 'FULL2')            THEN 'SIN_DATO'
+              WHEN COALESCE(c.fv_total, 0) = 0            THEN 'SIN_DATO'
+              WHEN COALESCE(c.fv_dentro, 0) > 0           THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'personas sembradas fuera de la ventana (ARQ 96)='
+           || CAST(COALESCE(c.fv_total, 0) AS VARCHAR)
+           || ', de esas entraron al alcance=' || CAST(COALESCE(c.fv_dentro, 0) AS VARCHAR)
+           || ' (esperado 0 en DELTA)'
+           || CASE WHEN p_fase IN ('FULL', 'FULL2')
+                   THEN '. En FULL entra el universo entero: SIN_DATO es correcto.'
+                   ELSE '' END,
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT COUNT(*) AS filas, MAX(fuera_ventana_total) AS fv_total,
+                MAX(fuera_ventana_dentro) AS fv_dentro
+           FROM bdm_stage.mock_ord_alcance_censo
+          WHERE lote = p_lote ) c;
+
+  -- F1-05. Las tablas intermedias se borran solas al terminar. El censo las
+  -- cuenta DESPUES de sp_ordenamiento_drop_staging_edf; son catorce desde
+  -- que stg_ord_alcance_origen se sumo a la lista.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F1-05',
+         CASE WHEN c.filas = 0                       THEN 'SIN_DATO'
+              WHEN c.residuales IS NULL              THEN 'SIN_DATO'
+              WHEN c.residuales > 0                  THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'tablas stg_* del Ordenamiento vivas tras el cleanup='
+           || CAST(COALESCE(c.residuales, -1) AS VARCHAR) || ' de 14 (esperado 0)',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT COUNT(*) AS filas, MAX(stg_residuales) AS residuales
+           FROM bdm_stage.mock_ord_alcance_censo
+          WHERE lote = p_lote ) c;
+
+  -- F1-06. Inicio y fin de la fase en el log, con timestamp. La etapa que
+  -- representa a la Fase 1 es 'preparar'.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F1-06',
+         CASE WHEN COALESCE(e.n, 0) = 0        THEN 'FAILED'
+              WHEN COALESCE(e.sin_fin, 0) > 0  THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'etapa preparar registrada=' || CAST(COALESCE(e.n, 0) AS VARCHAR)
+           || ' vez(ces), sin fecha_hora_fin=' || CAST(COALESCE(e.sin_fin, 0) AS VARCHAR)
+           || ' (esperado al menos 1 y 0)',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT COUNT(*) AS n,
+                SUM(CASE WHEN fecha_hora_fin IS NULL THEN 1 ELSE 0 END) AS sin_fin
+           FROM bdm_stage.mock_ord_control_etapa
+          WHERE lote = p_lote AND etapa = 'preparar' ) e;
+
+  -- F1-07. El universo se acota por fecha parametrica o por la fecha del
+  -- ultimo ordenamiento guardada en la tabla de control. Nuestro ciclo usa
+  -- la segunda via: MAX(watermark_nuevo) de mock_ord_control, y BOOTSTRAP
+  -- cuando no hay corrida previa, que es el caso legitimo de frontera nula.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F1-07',
+         CASE WHEN c.filas = 0                                        THEN 'SIN_DATO'
+              WHEN c.origen NOT IN ('BOOTSTRAP', 'CONTROL')           THEN 'FAILED'
+              WHEN c.origen = 'CONTROL' AND c.wm IS NULL              THEN 'FAILED'
+              ELSE 'PASSED' END,
+         'origen del watermark=' || COALESCE(c.origen, 'sin dato')
+           || ', valor usado=' || COALESCE(CAST(c.wm AS VARCHAR), 'NULL')
+           || '. BOOTSTRAP con watermark nulo es correcto: es la primera '
+           || 'corrida y no hay frontera anterior.',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT COUNT(*) AS filas, MAX(watermark_origen) AS origen,
+                MAX(watermark_usado) AS wm
+           FROM bdm_stage.mock_ord_alcance_censo
+          WHERE lote = p_lote ) c;
+
+  -- F1-08. Los seis tipos de cambio que el legado detecta. BLOQUEADO con el
+  -- desglose exacto, que es lo unico honesto: nuestro alcance cubre DOS.
+  --
+  -- NO ES QUE FALTE UN PREDICADO: faltan columnas. bdm_stage.ubicacion_
+  -- estandarizada no tiene fecha ni lote, 'bloqueado' es una bandera sin
+  -- fecha, y no hay tabla de cuentas. Un cambio en esas cuatro no deja rastro
+  -- temporal que una ventana pueda pescar. Es trabajo de modelo, no de SQL,
+  -- y por eso el criterio no sale FAILED.
+  INSERT INTO bdm_datos.cert_resultado_ord
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'F1-08',
+         CASE WHEN c.filas = 0 THEN 'SIN_DATO'
+              WHEN c.por_estand IS NULL OR c.por_bloq IS NULL
+                OR c.por_cta IS NULL OR c.por_comp IS NULL THEN 'BLOQUEADO'
+              ELSE 'PASSED' END,
+         'tipos de cambio detectados 2 de 6. Cubiertos: ubicacion='
+           || CAST(COALESCE(c.por_ubic, 0) AS VARCHAR)
+           || ', unificacion=' || CAST(COALESCE(c.por_unif, 0) AS VARCHAR)
+           || '. Sin senal de delta en el modelo: estandarizacion '
+           || '(ubicacion_estandarizada no tiene fecha ni lote), bloqueo '
+           || '(bloqueado es bandera sin fecha), cuentas y comportamiento '
+           || '(no hay tabla de cuentas). El legado los saca de '
+           || 'V_UBICACION_ESTANDARIZADA, V_BLOQUEO, V_CUENTA y '
+           || 'V_COMPORTAMIENTO_CUENTA.',
+         GETDATE(), CURRENT_USER
+  FROM ( SELECT COUNT(*) AS filas, MAX(por_ubicacion) AS por_ubic,
+                MAX(por_unificacion) AS por_unif,
+                MAX(por_estandarizacion) AS por_estand, MAX(por_bloqueo) AS por_bloq,
+                MAX(por_cuenta) AS por_cta, MAX(por_comportamiento) AS por_comp
+           FROM bdm_stage.mock_ord_alcance_censo
+          WHERE lote = p_lote ) c;
+
+  -- ============================================================
   -- LOS ARQUETIPOS DEL ORDENAMIENTO (ARQ 80..84)
   -- ============================================================
 
@@ -1117,7 +1324,7 @@ BEGIN
               END,
          GETDATE(), CURRENT_USER
   FROM  bdm_datos.cert_criterio_ord c
-  WHERE c.bloque IN ('FASE1', 'FASE2', 'FASE3');
+  WHERE c.bloque IN ('FASE2', 'FASE3');
 
   DROP TABLE IF EXISTS bdm_tempo.stg_cert_ord_base;
   DROP TABLE IF EXISTS bdm_tempo.stg_cert_ord_beta;

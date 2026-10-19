@@ -28,6 +28,7 @@ BEGIN
   DROP TABLE IF EXISTS bdm_tempo.stg_persona_dir_ganadora;
   DROP TABLE IF EXISTS bdm_tempo.stg_rpu_post_unificacion;
   DROP TABLE IF EXISTS bdm_tempo.stg_ord_personas_alcance;
+  DROP TABLE IF EXISTS bdm_tempo.stg_ord_alcance_origen;
 
   -- Universo de personas a (re)ordenar.
   -- FULL: todas las personas con RPU en el datashare.
@@ -66,6 +67,50 @@ BEGIN
   ) x;
 
   ANALYZE bdm_tempo.stg_ord_personas_alcance;
+
+  -- ------------------------------------------------------------
+  -- SLCOPRBA-1355 -- Fase 1: por que rama entro cada persona.
+  --
+  -- TABLA APARTE, Y NO UNA COLUMNA EN stg_ord_personas_alcance. Una persona
+  -- puede entrar por las DOS ramas; si el origen viviera en el alcance, el
+  -- SELECT DISTINCT dejaria de dar una fila por persona y cada INNER JOIN de
+  -- los insumos se multiplicaria. Es el mismo fan-out que ya se pago al
+  -- derivar la clase de ubicacion de v_xpm_contacto_canal.
+  --
+  -- NADIE LA UNE: la lee solo el censo de alcance, que la agrega antes de que
+  -- sp_ordenamiento_drop_staging_edf borre el staging. Sin ella los criterios
+  -- F1-01, F1-02 y F1-08 no tienen con que desglosar las ramas, y un criterio
+  -- que no las separa deja pasar una rama vacia -- la leccion de NOV-UB-12.
+  --
+  -- En FULL todo entra por UBICACION: la rama de unificacion exige
+  -- p_modo = 'DELTA' y no se evalua.
+  -- ------------------------------------------------------------
+  CREATE TABLE bdm_tempo.stg_ord_alcance_origen
+  DISTSTYLE KEY
+  DISTKEY (id_buro_persona)
+  SORTKEY (id_buro_persona)
+  AS
+  SELECT rpu.id_buro_persona,
+         CAST('UBICACION' AS VARCHAR(20)) AS origen
+  FROM bdm_tempo.v_xpm_relacion_persona_ubicacion rpu
+  WHERE COALESCE(p_modo, 'FULL') = 'FULL'
+     OR rpu.fecha_relacion_persona_ubicaci >= p_watermark
+     OR rpu.fecha_relacion_persona_ubicaci IS NULL
+  UNION ALL
+  SELECT rpu.id_buro_persona,
+         CAST('UNIFICACION' AS VARCHAR(20))
+  FROM bdm_tempo.v_xpm_relacion_persona_ubicacion rpu
+  INNER JOIN bdm_datos.unificacion_direccion u
+    ON u.cod_dw_persona_ubic = rpu.cod_dw_persona_ubic
+  WHERE COALESCE(p_modo, 'FULL') = 'DELTA'
+    AND (
+          u.lote = p_lote
+       OR u.lote_actualizacion = p_lote
+       OR (p_watermark IS NOT NULL AND u.fecha_unificacion >= p_watermark)
+       OR (p_watermark IS NOT NULL AND u.fecha_modificacion >= p_watermark)
+        );
+
+  ANALYZE bdm_tempo.stg_ord_alcance_origen;
 
   -- 1) RPU post-unificacion (sin join orden_prioridad - evita fan-out en staging)
   CREATE TABLE bdm_tempo.stg_rpu_post_unificacion
