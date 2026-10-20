@@ -105,6 +105,10 @@ DECLARE
     -- Etapa en curso: permite cerrar 'fallido' exactamente la etapa que aborto
     -- dentro del bloque EXCEPTION del encadenado (Task 4.3, Req 13.8).
     v_etapa_actual  VARCHAR(20);
+
+    -- GEO no bloqueante (2026-10-20): resultado de la etapa y error, si hubo.
+    v_geo_ok        BOOLEAN;
+    v_geo_error     VARCHAR(500);
 BEGIN
     -- ========================================================
     -- (1) RESOLUCION DE PARAMETROS (Req 1.1, 1.2, 6.1, 14.1, 14.2) -- Task 4.1
@@ -335,13 +339,43 @@ BEGIN
     -- Exportador_GEO alineado al modo (Task 8.1): en DELTA intersecta candidatos
     -- "sin coordenadas" con stg_unif_delta_ubic; en FULL barrido completo. Los
     -- conteos GEO (exportados/cargados) se consolidan en la Task 4.3.
+    --
+    -- 2026-10-20: GEO NO ES BLOQUEANTE (regla del negocio: ArcGIS todavia no
+    -- procesa). Antes un RAISE del export -- configuracion ausente, cuenta
+    -- AWS distinta, maxfilesize no numerico -- caia en el EXCEPTION del
+    -- encadenado y abortaba la corrida entera. Ahora cada paso va en su
+    -- propio bloque: un fallo deja RAISE INFO, la traza 'geo' en 'fallido' y
+    -- la corrida sigue con la Regla 3. Los dos pasos son independientes: si
+    -- el envio falla, igual se revisa si ArcGIS dejo resultados de Lotes
+    -- anteriores, y lo que se cargue entra en esta misma R3.
     v_etapa_actual := 'geo';
     CALL bdm_datos.unif_traza_inicio(v_corrida_id, v_lote, 'geo');
-    CALL bdm_datos.sp_geo_exportar_insumo(
-        in_solicitud, in_nit_suscriptor, in_path_archivo,
-        v_modo_efectivo, v_lote::VARCHAR, v_wm_anterior::VARCHAR
-    );
-    CALL bdm_datos.unif_traza_fin(v_corrida_id, 'geo', 'completado', 0, 0, 0, 0, 0);
+    v_geo_ok := TRUE;
+
+    BEGIN
+        CALL bdm_datos.sp_geo_exportar_insumo(
+            in_solicitud, in_nit_suscriptor, in_path_archivo,
+            v_modo_efectivo, v_lote::VARCHAR, v_wm_anterior::VARCHAR
+        );
+    EXCEPTION WHEN OTHERS THEN
+        v_geo_ok    := FALSE;
+        v_geo_error := LEFT(SQLERRM, 500);
+        RAISE INFO 'sp_unificacion_ciclo: el envio a GEO fallo y se omite; la corrida sigue (GEO no bloqueante): %', v_geo_error;
+    END;
+
+    BEGIN
+        CALL bdm_datos.sp_rcn_geo_02_buscar_resultados();
+    EXCEPTION WHEN OTHERS THEN
+        v_geo_ok    := FALSE;
+        v_geo_error := LEFT(SQLERRM, 500);
+        RAISE INFO 'sp_unificacion_ciclo: la busqueda de resultados GEO fallo y se omite; la corrida sigue (GEO no bloqueante): %', v_geo_error;
+    END;
+
+    IF v_geo_ok THEN
+        CALL bdm_datos.unif_traza_fin(v_corrida_id, 'geo', 'completado', 0, 0, 0, 0, 0);
+    ELSE
+        CALL bdm_datos.unif_traza_fin(v_corrida_id, 'geo', 'fallido', 0, 0, 0, 0, 0);
+    END IF;
 
     -- ---- Etapa R3: regla3 ----------------------------------------------------
     v_etapa_actual := 'regla3';

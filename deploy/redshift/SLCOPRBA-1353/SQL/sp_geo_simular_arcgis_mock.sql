@@ -84,23 +84,26 @@ BEGIN
   DELETE FROM bdm_stage.mock_geo_respuesta
   WHERE BTRIM(col02) = in_lote::VARCHAR;
 
-  -- Una fila por candidato del Lote, en el contrato de 32 columnas. Solo
-  -- cinco llevan dato; las otras 27 existen para que la forma coincida con
-  -- la del archivo real.
+  -- Una fila por candidato del Lote, en el contrato de 32 columnas de
+  -- Salida_Geo.pdf (2026-10-20): col01 Cod_DW_Ubic, col02 Lote, col05
+  -- Descripcion_Proceso, col12 Latitud, col13 Longitud, col26 Status. Las
+  -- demas existen para que la forma coincida con la del archivo real. Hasta
+  -- esa fecha el Status iba en col03 y las coordenadas en col05/col06, que
+  -- no es el contrato (D-EDF-05).
   -- En modo 'M' vuelve geocodificada SOLO la ubicacion que ya tiene
   -- coordenadas en el mock, y con esas mismas coordenadas; las demas vuelven
   -- 'U'. En modo 'U' vuelven todas 'U'. El LEFT JOIN decide la rama por fila.
-  INSERT INTO bdm_stage.mock_geo_respuesta (col01, col02, col03, col04, col05, col06)
+  INSERT INTO bdm_stage.mock_geo_respuesta (col01, col02, col05, col12, col13, col26)
   SELECT
     g.cod_dw_ubic::VARCHAR,
     in_lote::VARCHAR,
-    CASE WHEN v_modo = 'M' AND u.latitud IS NOT NULL AND u.longitud IS NOT NULL
-         THEN 'M' ELSE 'U' END,
-    NULL,
+    'GEOCODE',
     CASE WHEN v_modo = 'M' AND u.latitud IS NOT NULL AND u.longitud IS NOT NULL
          THEN CAST(CAST(u.latitud AS DECIMAL(10,6)) AS VARCHAR) END,
     CASE WHEN v_modo = 'M' AND u.latitud IS NOT NULL AND u.longitud IS NOT NULL
-         THEN CAST(CAST(u.longitud AS DECIMAL(10,6)) AS VARCHAR) END
+         THEN CAST(CAST(u.longitud AS DECIMAL(10,6)) AS VARCHAR) END,
+    CASE WHEN v_modo = 'M' AND u.latitud IS NOT NULL AND u.longitud IS NOT NULL
+         THEN 'M' ELSE 'U' END
   FROM bdm_datos.geo_atributos_mock g
   LEFT JOIN bdm_tempo.v_mock_ubicacion_estandarizada u
     ON u.cod_dw_ubic = g.cod_dw_ubic

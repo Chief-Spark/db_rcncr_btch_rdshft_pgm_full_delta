@@ -11,6 +11,15 @@
 -- entrega la referencia de Lote y de archivo; NO descubre archivos ni hace
 -- polling del bucket (Req 3.1).
 --
+-- 2026-10-20 (GEO no bloqueante): DOS ORIGENES para el mismo contrato.
+--   in_s3_path = 's3://...'  -> COPY, como siempre (ruta del orquestador).
+--                              Puede ser un prefijo con varios Lotes: tras
+--                              el COPY se descartan las filas de otro Lote.
+--   cualquier otro valor     -> lee bdm_tempo.stg_geo_resultado_crudo, que
+--                              ya cargo sp_rcn_geo_02_buscar_resultados, y
+--                              toma solo las filas del Lote. Es lo que hace
+--                              el espejo mock desde bdm_stage.mock_geo_respuesta.
+--
 -- Objeto en bdm_datos; idempotente (CREATE OR REPLACE PROCEDURE).
 -- NONATOMIC (el COPY no admite transaccion implicita) y consistente con la
 -- cadena de CALL. UTF-8 sin BOM. Nunca GRANT ... TO PUBLIC.
@@ -22,7 +31,7 @@
 --                  7.5 (gate de estado del Lote).
 --
 -- Estructura:
---   Pasos 1-6 : gate de estado, DROP/CREATE staging (32 columnas VARCHAR
+--   Pasos 1-6 : gate de estado, DROP/CREATE staging (33 columnas VARCHAR
 --               crudas), COPY dinamico, gate de conteo cargado vs esperado
 --               con aislamiento por Lote (task 4.1).
 --   SECCION APLICACION STATUS M/U (task 4.2): conciliacion de tipos,
@@ -137,17 +146,17 @@ BEGIN
   CREATE TABLE bdm_tempo.stg_arcgis_georeferenciacion (
     col01  VARCHAR(500),   -- Cod_DW_Ubic
     col02  VARCHAR(500),   -- Lote
-    col03  VARCHAR(500),   -- Status (M | U)
-    col04  VARCHAR(500),   -- Descripcion_Proceso (GEOCODE)
-    col05  VARCHAR(500),   -- Latitud
-    col06  VARCHAR(500),   -- Longitud
+    col03  VARCHAR(500),   -- Direccion
+    col04  VARCHAR(500),   -- Cod_Dane_Ciudad
+    col05  VARCHAR(500),   -- Descripcion_Proceso (GEOCODE)
+    col06  VARCHAR(500),   -- Zona
     col07  VARCHAR(500),
     col08  VARCHAR(500),
     col09  VARCHAR(500),
     col10  VARCHAR(500),
     col11  VARCHAR(500),
-    col12  VARCHAR(500),
-    col13  VARCHAR(500),
+    col12  VARCHAR(500),   -- Latitud
+    col13  VARCHAR(500),   -- Longitud
     col14  VARCHAR(500),
     col15  VARCHAR(500),
     col16  VARCHAR(500),
@@ -160,13 +169,18 @@ BEGIN
     col23  VARCHAR(500),
     col24  VARCHAR(500),
     col25  VARCHAR(500),
-    col26  VARCHAR(500),
-    col27  VARCHAR(500),
+    col26  VARCHAR(500),   -- Status (M | U) segun la tabla del contrato
+    col27  VARCHAR(500),   -- Match_Addr; Status en el registro de ejemplo
     col28  VARCHAR(500),
     col29  VARCHAR(500),
     col30  VARCHAR(500),
     col31  VARCHAR(500),
-    col32  VARCHAR(500)
+    col32  VARCHAR(500),
+    -- 2026-10-20: columna 33. Salida_Geo.pdf declara 32 columnas, pero su
+    -- registro de ejemplo trae 33 (sobra un campo tras Segmento_Numerico y
+    -- el Status cae en la 27). Hasta tener un archivo real se aceptan las
+    -- dos formas: con FILLRECORD, un archivo de 32 deja esta en NULL.
+    col33  VARCHAR(500)
   )
   DISTSTYLE EVEN;
 
@@ -193,10 +207,25 @@ BEGIN
     || ' IGNOREHEADER 1'
     || ' GZIP'
     || ' ACCEPTINVCHARS'
-    || ' TRIMBLANKS';
+    || ' TRIMBLANKS'
+    || ' FILLRECORD';
 
   BEGIN
-    EXECUTE v_copy_sql;
+    IF LOWER(LEFT(BTRIM(in_s3_path), 5)) = 's3://' THEN
+      EXECUTE v_copy_sql;
+      -- Contrato 1:1 por Lote: si la ruta trae varios Lotes, solo entran las
+      -- filas del Lote en proceso (igual que el filtro del espejo mock).
+      DELETE FROM bdm_tempo.stg_arcgis_georeferenciacion
+      WHERE COALESCE(BTRIM(col02), '') <> in_lote::VARCHAR;
+    ELSE
+      INSERT INTO bdm_tempo.stg_arcgis_georeferenciacion
+      SELECT col01, col02, col03, col04, col05, col06, col07, col08,
+             col09, col10, col11, col12, col13, col14, col15, col16,
+             col17, col18, col19, col20, col21, col22, col23, col24,
+             col25, col26, col27, col28, col29, col30, col31, col32, col33
+      FROM bdm_tempo.stg_geo_resultado_crudo
+      WHERE BTRIM(col02) = in_lote::VARCHAR;
+    END IF;
   EXCEPTION WHEN OTHERS THEN
     UPDATE bdm_datos.geo_lote_control
     SET estado              = 'fallido',
@@ -265,11 +294,17 @@ BEGIN
   -- 'pendiente de geocodificacion' de sus candidatos (Req 5.6, 10.3).
   --
   -- Contrato de tipos (Req 5.1, 5.2, 5.3):
-  --   col01 Cod_DW_Ubic -> INTEGER  (rango [-2147483648, 2147483647], Req 5.7)
+  --   col01 Cod_DW_Ubic -> BIGINT (rango de 64 bits, Req 5.7). Era INTEGER, pero
+  --         desde D-EDF-07 la llave es FNV_HASH, de 64 bits y con signo, y el
+  --         rango de INTEGER rechazaba casi todas las filas reales (D-GEO-04)
   --   col02 Lote        -> VARCHAR (se compara como texto con in_lote)
-  --   col03 Status      -> {M, U}
-  --   col05 Latitud     -> VARCHAR(100) -> DECIMAL, rango [-90, 90]   (Req 5.3, 5.7)
-  --   col06 Longitud    -> VARCHAR(100) -> DECIMAL, rango [-180, 180] (Req 5.3, 5.7)
+  --   col26 Status      -> {M, U}; si col26 no es M/U se toma col27 (las dos
+  --                        formas de Salida_Geo.pdf; Match_Addr, que es la col27
+  --                        de la tabla, nunca vale exactamente M ni U)
+  --   col12 Latitud     -> VARCHAR(100) -> DECIMAL, rango [-90, 90]   (Req 5.3, 5.7)
+  --   col13 Longitud    -> VARCHAR(100) -> DECIMAL, rango [-180, 180] (Req 5.3, 5.7)
+  -- Posiciones segun Salida_Geo.pdf (2026-10-20). Antes se leia Status en
+  -- col03 y lat/long en col05/col06, que no es el contrato (D-EDF-05).
   -- El separador decimal debe ser punto; la coma se rechaza (Req 5.4). Los
   -- patrones ^[+-]?[0-9]+(\.[0-9]+)?$ NO admiten coma, por lo que un valor con
   -- coma decimal cae en el conjunto de "no convertibles" y se descarta.
@@ -286,13 +321,14 @@ BEGIN
   SELECT
     BTRIM(col01)          AS cod_dw_ubic_raw,
     BTRIM(col02)          AS lote_raw,
-    UPPER(BTRIM(col03))   AS status_raw,
-    BTRIM(col05)          AS latitud_raw,
-    BTRIM(col06)          AS longitud_raw
+    CASE WHEN UPPER(BTRIM(col26)) IN ('M', 'U') THEN UPPER(BTRIM(col26))
+         ELSE UPPER(BTRIM(col27)) END AS status_raw,
+    BTRIM(col12)          AS latitud_raw,
+    BTRIM(col13)          AS longitud_raw
   FROM bdm_tempo.stg_arcgis_georeferenciacion;
 
   -- 7.2) Clasificacion de filas conciliadas. Una fila es CONCILIABLE cuando:
-  --      - Cod_DW_Ubic es entero con signo opcional y cabe en INTEGER (Req 5.1, 5.7).
+  --      - Cod_DW_Ubic es entero con signo opcional y cabe en BIGINT (Req 5.1, 5.7).
   --      - El Lote del archivo coincide con el Lote en proceso (contrato 1:1 por Lote).
   --      - Status es exactamente 'M' o 'U' (Req 3.7).
   --      - Para Status 'M': lat/long tienen formato decimal con punto (no coma,
@@ -312,10 +348,10 @@ BEGIN
     -- (^...$) y el punto decimal se representa con la clase [.] para NO depender
     -- del escape de backslash dentro del literal dollar-quoted de Redshift.
     (REGEXP_COUNT(n.cod_dw_ubic_raw, '^[+-]?[0-9]+$') = 1)         AS cod_es_entero,
-    -- rango INTEGER (se evalua solo si es entero, con CASE para no castear basura)
+    -- rango BIGINT (se evalua solo si es entero, con CASE para no castear basura)
     (CASE WHEN REGEXP_COUNT(n.cod_dw_ubic_raw, '^[+-]?[0-9]+$') = 1
-            AND LENGTH(REGEXP_REPLACE(n.cod_dw_ubic_raw, '[+-]', '')) <= 10
-            AND n.cod_dw_ubic_raw::BIGINT BETWEEN -2147483648 AND 2147483647
+            AND LENGTH(REGEXP_REPLACE(n.cod_dw_ubic_raw, '[+-]', '')) <= 19
+            AND n.cod_dw_ubic_raw::DECIMAL(38,0) BETWEEN -9223372036854775808 AND 9223372036854775807
           THEN TRUE ELSE FALSE END)                                AS cod_en_rango,
     (n.lote_raw = v_lote_str)                                      AS lote_coincide,
     (n.status_raw IN ('M','U'))                                    AS status_valido,
@@ -342,7 +378,7 @@ BEGIN
   CREATE TABLE bdm_tempo.stg_geo_valida AS
   SELECT
     CASE WHEN c.cod_es_entero AND c.cod_en_rango
-         THEN c.cod_dw_ubic_raw::INTEGER END AS cod_dw_ubic,
+         THEN c.cod_dw_ubic_raw::BIGINT END AS cod_dw_ubic,
     c.status_raw                             AS status_match,
     CASE WHEN c.es_match AND c.lat_formato_ok AND c.lat_en_rango
          THEN c.latitud_raw::DECIMAL(10,6)  END AS latitud,

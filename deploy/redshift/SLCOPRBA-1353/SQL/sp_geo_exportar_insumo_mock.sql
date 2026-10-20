@@ -86,6 +86,10 @@ DECLARE
   v_unload_select   VARCHAR(2000);
   v_unload_sql      VARCHAR(8000);
   v_dbg             VARCHAR(500);
+  -- 2026-10-20 (GEO no bloqueante): espera maxima por la respuesta de ArcGIS.
+  v_dias_espera_txt VARCHAR(500);
+  v_dias_espera     INTEGER;
+  v_vencidos        INTEGER;
   v_s3_enabled      VARCHAR(500);
 BEGIN
   v_usuario       := LEFT(CURRENT_USER, 100);
@@ -179,8 +183,42 @@ BEGIN
   END IF;
 
   -- ----------------------------------------------------------
+  -- 2026-10-20 (GEO no bloqueante, defecto D). Un Lote que sigue en
+  -- 'exportado' mas de dias_espera_arcgis dias sin respuesta de ArcGIS pasa a
+  -- 'vencido', y sus candidatos vuelven a salir en este mismo envio. Sin esto,
+  -- con ArcGIS caido, cada envio dejaba sus ubicaciones excluidas para
+  -- siempre. El parametro es opcional: si falta o no es numerico vale 7, y
+  -- nunca hace fallar el envio.
+  -- ----------------------------------------------------------
+  SELECT valor INTO v_dias_espera_txt
+  FROM bdm_datos.geo_config_mock
+  WHERE ambiente = v_ambiente AND parametro = 'dias_espera_arcgis';
+  IF REGEXP_COUNT(COALESCE(BTRIM(v_dias_espera_txt), ''), '^[0-9]{1,4}$') = 1 THEN
+    v_dias_espera := BTRIM(v_dias_espera_txt)::INTEGER;
+  ELSE
+    v_dias_espera := 7;
+  END IF;
+
+  UPDATE bdm_datos.geo_lote_control_mock
+  SET estado              = 'vencido',
+      ultimo_error        = LEFT('Sin respuesta de ArcGIS en ' || v_dias_espera::VARCHAR
+                                 || ' dias; sus candidatos se reexportan.', 500),
+      fecha_actualizacion = GETDATE()
+  WHERE estado = 'exportado'
+    AND fecha_exportacion < DATEADD(day, -v_dias_espera, GETDATE());
+
+  GET DIAGNOSTICS v_vencidos = ROW_COUNT;
+  IF v_vencidos > 0 THEN
+    RAISE INFO 'sp_geo_exportar_insumo_mock: % Lote(s) sin respuesta de ArcGIS en % dias pasan a vencido; sus candidatos vuelven a exportarse.',
+      v_vencidos, v_dias_espera;
+  END IF;
+
+  -- ----------------------------------------------------------
   -- Ubicacion_Candidata = ubicacion mock sin coordenadas disponibles, excluidas
-  -- las que ya estan en un Lote cuyo estado no es 'cargado' (Req 1.5).
+  -- las que ya estan en un Lote EN CURSO: exportado o procesado por ArcGIS
+  -- (Req 1.5). 2026-10-20 (defecto D): antes se excluia todo Lote no
+  -- 'cargado'; ahora 'fallido', 'fallido definitivo' y 'vencido' vuelven a
+  -- exportarse, igual que en el real.
   -- En DELTA se intersecta con el universo delta mock materializado por el
   -- orquestador tras R2 (Req 8.2); en FULL es barrido completo (Req 8.1).
   -- Orden estable por cod_dw_ubic para que el corte por max_records sea
@@ -213,7 +251,7 @@ BEGIN
         JOIN bdm_datos.geo_lote_control_mock lc
           ON ga.lote = lc.lote
         WHERE ga.cod_dw_ubic = ubi.cod_dw_ubic
-          AND lc.estado <> 'cargado'
+          AND lc.estado IN ('exportado', 'procesado por ArcGIS_Externo')
       )
   ) q
   WHERE q.rn <= v_max_records;
@@ -263,7 +301,13 @@ BEGIN
   );
 
   -- MAXFILESIZE valido en Redshift: [1, 6144] MB (Req 2.5).
-  v_maxfilesize_int := NULLIF(BTRIM(v_maxfilesize_mb), '')::INTEGER;
+  -- 2026-10-20 (defecto F): solo se castea si es numerico. Antes un valor no
+  -- numerico abortaba el CAST antes de llegar a este control no bloqueante.
+  IF REGEXP_COUNT(COALESCE(BTRIM(v_maxfilesize_mb), ''), '^[0-9]{1,9}$') = 1 THEN
+    v_maxfilesize_int := BTRIM(v_maxfilesize_mb)::INTEGER;
+  ELSE
+    v_maxfilesize_int := NULL;
+  END IF;
   IF v_maxfilesize_int IS NULL OR v_maxfilesize_int < 1 OR v_maxfilesize_int > 6144 THEN
     -- RAISE INFO en Redshift solo admite variables, no expresiones COALESCE.
     v_dbg := COALESCE(v_maxfilesize_mb, '<null>');

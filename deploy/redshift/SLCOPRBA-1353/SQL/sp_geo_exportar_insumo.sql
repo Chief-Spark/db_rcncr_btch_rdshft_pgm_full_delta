@@ -88,6 +88,10 @@ DECLARE
   v_unload_select   VARCHAR(2000);
   v_unload_sql      VARCHAR(8000);
   v_dbg             VARCHAR(500);
+  -- 2026-10-20 (GEO no bloqueante): espera maxima por la respuesta de ArcGIS.
+  v_dias_espera_txt VARCHAR(500);
+  v_dias_espera     INTEGER;
+  v_vencidos        INTEGER;
 BEGIN
 
   v_usuario       := LEFT(CURRENT_USER, 100);
@@ -211,6 +215,37 @@ BEGIN
   END IF;
 
   -- ----------------------------------------------------------
+  -- 2026-10-20 (GEO no bloqueante, defecto D). Un Lote que sigue en
+  -- 'exportado' mas de dias_espera_arcgis dias sin respuesta de ArcGIS pasa a
+  -- 'vencido', y sus candidatos vuelven a salir en este mismo envio. Sin esto,
+  -- con ArcGIS caido, cada envio dejaba sus ubicaciones excluidas para
+  -- siempre. El parametro es opcional: si falta o no es numerico vale 7, y
+  -- nunca hace fallar el envio.
+  -- ----------------------------------------------------------
+  SELECT valor INTO v_dias_espera_txt
+  FROM bdm_datos.geo_config
+  WHERE ambiente = v_ambiente AND parametro = 'dias_espera_arcgis';
+  IF REGEXP_COUNT(COALESCE(BTRIM(v_dias_espera_txt), ''), '^[0-9]{1,4}$') = 1 THEN
+    v_dias_espera := BTRIM(v_dias_espera_txt)::INTEGER;
+  ELSE
+    v_dias_espera := 7;
+  END IF;
+
+  UPDATE bdm_datos.geo_lote_control
+  SET estado              = 'vencido',
+      ultimo_error        = LEFT('Sin respuesta de ArcGIS en ' || v_dias_espera::VARCHAR
+                                 || ' dias; sus candidatos se reexportan.', 500),
+      fecha_actualizacion = GETDATE()
+  WHERE estado = 'exportado'
+    AND fecha_exportacion < DATEADD(day, -v_dias_espera, GETDATE());
+
+  GET DIAGNOSTICS v_vencidos = ROW_COUNT;
+  IF v_vencidos > 0 THEN
+    RAISE INFO 'sp_geo_exportar_insumo: % Lote(s) sin respuesta de ArcGIS en % dias pasan a vencido; sus candidatos vuelven a exportarse.',
+      v_vencidos, v_dias_espera;
+  END IF;
+
+  -- ----------------------------------------------------------
   -- 4) Seleccionar Ubicacion_Candidata y particionar por max_records.
   --    Candidata = ubicacion sin coordenadas disponibles: no existe fila en
   --    geo_atributos, o existe con latitud/longitud NULL (Req 1.1).
@@ -267,14 +302,19 @@ BEGIN
               FROM bdm_tempo.stg_unif_delta_ubic d
               WHERE d.cod_dw_ubic = ubi.cod_dw_ubic
             ) )
-      -- Excluir ubicaciones cuyo Lote registrado no esta 'cargado' (Req 1.5)
+      -- Excluir solo las ubicaciones de un Lote EN CURSO (Req 1.5): exportado
+      -- o procesado por ArcGIS y aun sin cargar. 2026-10-20 (defecto D):
+      -- antes se excluia todo Lote no 'cargado', de modo que un Lote
+      -- 'fallido' (un UNLOAD sin permisos, por ejemplo) dejaba sus
+      -- candidatos fuera para siempre. Ahora 'fallido', 'fallido definitivo'
+      -- y 'vencido' vuelven a exportarse.
       AND NOT EXISTS (
         SELECT 1
         FROM bdm_datos.geo_atributos ga
         JOIN bdm_datos.geo_lote_control lc
           ON ga.lote = lc.lote
         WHERE ga.cod_dw_ubic = ubi.cod_dw_ubic
-          AND lc.estado <> 'cargado'
+          AND lc.estado IN ('exportado', 'procesado por ArcGIS_Externo')
       )
   ) q
   WHERE q.rn <= v_max_records;   -- limitar a max_records (Req 1.3, 1.4)
@@ -362,7 +402,13 @@ BEGIN
   --     se trata como fallo de exportacion (no bloqueante) mas abajo, por lo
   --     que aqui solo lo parseamos y validamos, marcando el Lote 'fallido'
   --     si esta fuera de rango.
-  v_maxfilesize_int := NULLIF(BTRIM(v_maxfilesize_mb), '')::INTEGER;
+  -- 2026-10-20 (defecto F): solo se castea si es numerico. Antes un valor no
+  -- numerico abortaba el CAST antes de llegar a este control no bloqueante.
+  IF REGEXP_COUNT(COALESCE(BTRIM(v_maxfilesize_mb), ''), '^[0-9]{1,9}$') = 1 THEN
+    v_maxfilesize_int := BTRIM(v_maxfilesize_mb)::INTEGER;
+  ELSE
+    v_maxfilesize_int := NULL;
+  END IF;
   IF v_maxfilesize_int IS NULL OR v_maxfilesize_int < 1 OR v_maxfilesize_int > 6144 THEN
     -- RAISE INFO en Redshift solo admite variables (no expresiones COALESCE).
     v_dbg := COALESCE(v_maxfilesize_mb, '<null>');

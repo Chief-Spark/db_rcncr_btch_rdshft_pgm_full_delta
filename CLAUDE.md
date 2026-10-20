@@ -303,6 +303,23 @@ tablero**, nunca dentro del e2e. El cargador mueve el Lote a `cargado` y CA-01
 exige verlo en `exportado`: metido dentro, CA-01 se caeria por un efecto de
 orden y no por un defecto.
 
+**GEO NO ES BLOQUEANTE (2026-10-20, regla del negocio: ArcGIS todavia no
+procesa).** El ciclo de Unificacion hace dos cosas, cada una en su propio
+bloque de excepcion: exporta los candidatos (`sp_geo_exportar_insumo`) y busca
+resultados (`sp_rcn_geo_02_buscar_resultados`, que hace COPY de
+`reconocer_output/geo_result_*` y `distancias_result_*` y carga los Lotes en
+`exportado` que tengan filas). Un fallo deja la traza `geo` en `fallido` y la
+corrida sigue con la R3; un Lote sin respuesta se queda en `exportado`, no en
+`fallido`. Antes un `RAISE` del export abortaba la Unificacion entera.
+**Los candidatos de un Lote `fallido` o `vencido` vuelven a salir** (vencido =
+sin respuesta en `dias_espera_arcgis` dias, 7 por defecto); antes quedaban
+fuera para siempre. **Los cargadores leen el contrato de `Salida_Geo.pdf`**
+(Status en la 26 o la 27, latitud 12, longitud 13; distancias en su orden) con
+la llave en BIGINT: hasta esa fecha leian otras columnas y rechazaban el
+100 % (D-EDF-05, D-GEO-03/04/06/07). En la bateria la busqueda mock no
+encuentra nada -- `mock_geo_respuesta` esta vacia hasta `run_geo_ciclo_mock.sql`
+y la trunca el reset --, de modo que CA-01..05 no cambian.
+
 **Al generar un espejo por sustitucion, anclar el corte de cabecera a
 principio de linea.** Un `t.index('CREATE OR REPLACE PROCEDURE')` engancha la
 primera aparicion, que esta **dentro de un comentario** (`-- Objeto en

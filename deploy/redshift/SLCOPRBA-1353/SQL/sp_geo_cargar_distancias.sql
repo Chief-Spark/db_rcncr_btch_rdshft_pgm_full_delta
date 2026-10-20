@@ -14,6 +14,21 @@
 -- entrega la referencia de Lote y de archivo; NO descubre archivos ni hace
 -- polling del bucket (Req 4.1).
 --
+-- 2026-10-20 (GEO no bloqueante), tres cambios:
+--   * POSICIONES DEL CONTRATO (Salida_Geo.pdf, seccion 3; D-GEO-03). Antes se
+--     leia Descripcion_Proceso en col03, tipo y host en col04/col05,
+--     coordenadas en col06-col09 y distancia en col10, que no es el
+--     contrato: con el archivo real col06 trae 'DISTANCIAS' y se rechazaba
+--     el 100 %.
+--   * DOS ORIGENES, como sp_geo_cargar_georreferenciacion: 's3://...' hace
+--     COPY y se queda con las filas del Lote; cualquier otro valor lee
+--     bdm_tempo.stg_geo_distancias_crudo, que carga
+--     sp_rcn_geo_02_buscar_resultados.
+--   * EL GATE ADMITE TAMBIEN 'cargado' (defecto A): la georreferenciacion
+--     corre antes y deja el Lote en 'cargado', de modo que con el gate
+--     anterior las distancias no se cargaban nunca. Y ya no pisa
+--     conteo_cargado, que es el conteo de la georreferenciacion.
+--
 -- Objeto en bdm_datos; idempotente (CREATE OR REPLACE PROCEDURE).
 -- NONATOMIC (el COPY no admite transaccion implicita) y consistente con la
 -- cadena de CALL. UTF-8 sin BOM. Nunca GRANT ... TO PUBLIC.
@@ -92,8 +107,8 @@ BEGIN
     RETURN;
   END IF;
 
-  IF v_estado <> 'procesado por ArcGIS_Externo' THEN
-    RAISE INFO 'sp_geo_cargar_distancias: Lote % en estado invalido "%" (se requiere "procesado por ArcGIS_Externo"); carga rechazada, geo_distancias sin cambios.',
+  IF v_estado NOT IN ('procesado por ArcGIS_Externo', 'cargado') THEN
+    RAISE INFO 'sp_geo_cargar_distancias: Lote % en estado invalido "%" (se requiere "procesado por ArcGIS_Externo" o "cargado"); carga rechazada, geo_distancias sin cambios.',
       in_lote, v_estado;
     RETURN;
   END IF;
@@ -136,33 +151,36 @@ BEGIN
   --    el staging (Req 4.1, 5.x). Staging temporal y efimero en bdm_tempo
   --    (patron DROP-CREATE-usar-DROP, Req 4.8): se recrea en cada corrida y
   --    no persiste entre ejecuciones.
-  --    Mapeo de columnas crudas al contrato Salida_Distancias:
+  --    Mapeo de columnas crudas al contrato Salida_Distancias
+  --    (Salida_Geo.pdf, seccion 3):
   --      col01 Cod_DW_Ubic              -> BIGINT
   --      col02 Lote                     -> INTEGER
-  --      col03 Descripcion_Proceso      (DISTANCIAS)
-  --      col04 Tipo_Punto_Interes       (clave 1:N)
-  --      col05 Cod_Punto_Interes_Host   (clave 1:N)
-  --      col06 Latitud                  -> DECIMAL(38,8) [-90, 90]
-  --      col07 Longitud                 -> DECIMAL(38,8) [-180, 180]
-  --      col08 Latitud_Punto_Interes    -> DECIMAL(38,8) [-90, 90]
-  --      col09 Longitud_Punto_Interes   -> DECIMAL(38,8) [-180, 180]
-  --      col10 Distancia_Punto_Interes  -> INTEGER metros [0, 2147483647]
-  --      col11 col12                    reservadas del contrato (12 columnas)
+  --      col03 Direccion                (no se guarda)
+  --      col04 Latitud                  -> DECIMAL(38,8) [-90, 90]
+  --      col05 Longitud                 -> DECIMAL(38,8) [-180, 180]
+  --      col06 Descripcion_Proceso      (DISTANCIAS)
+  --      col07 Tipo_Punto_Interes       (clave 1:N)
+  --      col08 Nombre_Punto_Interes     (no se guarda: geo_distancias no
+  --                                      tiene columna; va con Novedades d7)
+  --      col09 Latitud_Punto_Interes    -> DECIMAL(38,8) [-90, 90]
+  --      col10 Longitud_Punto_Interes   -> DECIMAL(38,8) [-180, 180]
+  --      col11 Distancia_Punto_Interes  -> INTEGER metros [0, 2147483647]
+  --      col12 Cod_Punto_Interes_Host   (clave 1:N)
   -- ----------------------------------------------------------
   DROP TABLE IF EXISTS bdm_tempo.stg_arcgis_distancias;
   CREATE TABLE bdm_tempo.stg_arcgis_distancias (
     col01  VARCHAR(500),   -- Cod_DW_Ubic
     col02  VARCHAR(500),   -- Lote
-    col03  VARCHAR(500),   -- Descripcion_Proceso (DISTANCIAS)
-    col04  VARCHAR(500),   -- Tipo_Punto_Interes
-    col05  VARCHAR(500),   -- Cod_Punto_Interes_Host
-    col06  VARCHAR(500),   -- Latitud
-    col07  VARCHAR(500),   -- Longitud
-    col08  VARCHAR(500),   -- Latitud_Punto_Interes
-    col09  VARCHAR(500),   -- Longitud_Punto_Interes
-    col10  VARCHAR(500),   -- Distancia_Punto_Interes
-    col11  VARCHAR(500),
-    col12  VARCHAR(500)
+    col03  VARCHAR(500),   -- Direccion
+    col04  VARCHAR(500),   -- Latitud
+    col05  VARCHAR(500),   -- Longitud
+    col06  VARCHAR(500),   -- Descripcion_Proceso (DISTANCIAS)
+    col07  VARCHAR(500),   -- Tipo_Punto_Interes
+    col08  VARCHAR(500),   -- Nombre_Punto_Interes
+    col09  VARCHAR(500),   -- Latitud_Punto_Interes
+    col10  VARCHAR(500),   -- Longitud_Punto_Interes
+    col11  VARCHAR(500),   -- Distancia_Punto_Interes
+    col12  VARCHAR(500)    -- Cod_Punto_Interes_Host
   )
   DISTSTYLE EVEN;
 
@@ -192,7 +210,19 @@ BEGIN
     || ' TRIMBLANKS';
 
   BEGIN
-    EXECUTE v_copy_sql;
+    IF LOWER(LEFT(BTRIM(in_s3_path), 5)) = 's3://' THEN
+      EXECUTE v_copy_sql;
+      -- Contrato por Lote: si la ruta trae varios Lotes, solo entran las
+      -- filas del Lote en proceso.
+      DELETE FROM bdm_tempo.stg_arcgis_distancias
+      WHERE COALESCE(BTRIM(col02), '') <> in_lote::VARCHAR;
+    ELSE
+      INSERT INTO bdm_tempo.stg_arcgis_distancias
+      SELECT col01, col02, col03, col04, col05, col06,
+             col07, col08, col09, col10, col11, col12
+      FROM bdm_tempo.stg_geo_distancias_crudo
+      WHERE BTRIM(col02) = in_lote::VARCHAR;
+    END IF;
   EXCEPTION WHEN OTHERS THEN
     UPDATE bdm_datos.geo_lote_control
     SET estado              = 'fallido',
@@ -215,15 +245,15 @@ BEGIN
   --    Conciliacion de tipos y validacion por regex ANTES de castear (sin
   --    TRY_CAST): se conservan SOLO las filas validas (Req 4.3, 4.7, 5.6).
   --    Reglas de validacion aplicadas a cada fila del staging crudo:
-  --      - Clave 1:N (col01, col04, col05) no nula ni vacia tras BTRIM (Req 4.2, 4.3).
+  --      - Clave 1:N (col01, col07, col12) no nula ni vacia tras BTRIM (Req 4.2, 4.3).
   --      - Cod_DW_Ubic (col01): entero, convertible a BIGINT en rango
   --        [-9223372036854775808, 9223372036854775807] (Req 5.1, 5.7).
   --      - Lote (col02): entero, convertible a INTEGER en rango
   --        [-2147483648, 2147483647] cuando trae valor (Req 5.2, 5.7).
-  --      - Latitud/Longitud/Lat_POI/Long_POI (col06-col09): decimal con punto
+  --      - Latitud/Longitud (col04-col05) y Lat_POI/Long_POI (col09-col10): decimal con punto
   --        como separador (se rechaza la coma decimal, Req 5.4), en rango
   --        [-90, 90] para latitudes y [-180, 180] para longitudes (Req 5.3).
-  --      - Distancia_Punto_Interes (col10): entero NO negativo en rango
+  --      - Distancia_Punto_Interes (col11): entero NO negativo en rango
   --        [0, 2147483647]; se rechaza negativo o no entero (Req 4.6, 4.7).
   --    Las expresiones regulares (SIMILAR TO):
   --      entero con signo opcional:  [+-]?[0-9]+
@@ -259,23 +289,23 @@ BEGIN
   SELECT
       CAST(BTRIM(s.col01) AS BIGINT)                                  AS cod_dw_ubic,
       in_lote                                                         AS lote,
-      BTRIM(s.col04)                                                  AS tipo_punto_interes,
-      BTRIM(s.col05)                                                  AS cod_punto_interes_host,
-      CASE WHEN s.col06 IS NULL OR BTRIM(s.col06) = '' THEN NULL
-           ELSE CAST(BTRIM(s.col06) AS DECIMAL(38,8)) END             AS latitud,
-      CASE WHEN s.col07 IS NULL OR BTRIM(s.col07) = '' THEN NULL
-           ELSE CAST(BTRIM(s.col07) AS DECIMAL(38,8)) END             AS longitud,
-      CASE WHEN s.col08 IS NULL OR BTRIM(s.col08) = '' THEN NULL
-           ELSE CAST(BTRIM(s.col08) AS DECIMAL(38,8)) END             AS latitud_punto_interes,
+      BTRIM(s.col07)                                                  AS tipo_punto_interes,
+      BTRIM(s.col12)                                                  AS cod_punto_interes_host,
+      CASE WHEN s.col04 IS NULL OR BTRIM(s.col04) = '' THEN NULL
+           ELSE CAST(BTRIM(s.col04) AS DECIMAL(38,8)) END             AS latitud,
+      CASE WHEN s.col05 IS NULL OR BTRIM(s.col05) = '' THEN NULL
+           ELSE CAST(BTRIM(s.col05) AS DECIMAL(38,8)) END             AS longitud,
       CASE WHEN s.col09 IS NULL OR BTRIM(s.col09) = '' THEN NULL
-           ELSE CAST(BTRIM(s.col09) AS DECIMAL(38,8)) END             AS longitud_punto_interes,
-      CAST(BTRIM(s.col10) AS INTEGER)                                 AS distancia_punto_interes
+           ELSE CAST(BTRIM(s.col09) AS DECIMAL(38,8)) END             AS latitud_punto_interes,
+      CASE WHEN s.col10 IS NULL OR BTRIM(s.col10) = '' THEN NULL
+           ELSE CAST(BTRIM(s.col10) AS DECIMAL(38,8)) END             AS longitud_punto_interes,
+      CAST(BTRIM(s.col11) AS INTEGER)                                 AS distancia_punto_interes
   FROM bdm_tempo.stg_arcgis_distancias s
   WHERE
     -- Clave 1:N no nula ni vacia (Req 4.2, 4.3)
         s.col01 IS NOT NULL AND BTRIM(s.col01) <> ''
-    AND s.col04 IS NOT NULL AND BTRIM(s.col04) <> ''
-    AND s.col05 IS NOT NULL AND BTRIM(s.col05) <> ''
+    AND s.col07 IS NOT NULL AND BTRIM(s.col07) <> ''
+    AND s.col12 IS NOT NULL AND BTRIM(s.col12) <> ''
     -- Cod_DW_Ubic entero convertible a BIGINT en rango (Req 5.1, 5.7)
     AND BTRIM(s.col01) SIMILAR TO '[+-]?[0-9]+'
     AND CAST(BTRIM(s.col01) AS DECIMAL(38,0)) BETWEEN -9223372036854775808 AND 9223372036854775807
@@ -284,25 +314,25 @@ BEGIN
          OR (BTRIM(s.col02) SIMILAR TO '[+-]?[0-9]+'
              AND CAST(BTRIM(s.col02) AS DECIMAL(38,0)) BETWEEN -2147483648 AND 2147483647))
     -- Longitud del campo clave dentro del tamano de destino (VARCHAR(60))
-    AND LENGTH(BTRIM(s.col04)) <= 60
-    AND LENGTH(BTRIM(s.col05)) <= 60
+    AND LENGTH(BTRIM(s.col07)) <= 60
+    AND LENGTH(BTRIM(s.col12)) <= 60
     -- Latitud/Longitud opcionales: si tienen valor, decimal con punto y rango (Req 5.3, 5.4)
-    AND (s.col06 IS NULL OR BTRIM(s.col06) = ''
-         OR (BTRIM(s.col06) SIMILAR TO '[+-]?[0-9]+(\.[0-9]+)?'
-             AND CAST(BTRIM(s.col06) AS DECIMAL(38,8)) BETWEEN -90 AND 90))
-    AND (s.col07 IS NULL OR BTRIM(s.col07) = ''
-         OR (BTRIM(s.col07) SIMILAR TO '[+-]?[0-9]+(\.[0-9]+)?'
-             AND CAST(BTRIM(s.col07) AS DECIMAL(38,8)) BETWEEN -180 AND 180))
-    AND (s.col08 IS NULL OR BTRIM(s.col08) = ''
-         OR (BTRIM(s.col08) SIMILAR TO '[+-]?[0-9]+(\.[0-9]+)?'
-             AND CAST(BTRIM(s.col08) AS DECIMAL(38,8)) BETWEEN -90 AND 90))
+    AND (s.col04 IS NULL OR BTRIM(s.col04) = ''
+         OR (BTRIM(s.col04) SIMILAR TO '[+-]?[0-9]+(\.[0-9]+)?'
+             AND CAST(BTRIM(s.col04) AS DECIMAL(38,8)) BETWEEN -90 AND 90))
+    AND (s.col05 IS NULL OR BTRIM(s.col05) = ''
+         OR (BTRIM(s.col05) SIMILAR TO '[+-]?[0-9]+(\.[0-9]+)?'
+             AND CAST(BTRIM(s.col05) AS DECIMAL(38,8)) BETWEEN -180 AND 180))
     AND (s.col09 IS NULL OR BTRIM(s.col09) = ''
          OR (BTRIM(s.col09) SIMILAR TO '[+-]?[0-9]+(\.[0-9]+)?'
-             AND CAST(BTRIM(s.col09) AS DECIMAL(38,8)) BETWEEN -180 AND 180))
+             AND CAST(BTRIM(s.col09) AS DECIMAL(38,8)) BETWEEN -90 AND 90))
+    AND (s.col10 IS NULL OR BTRIM(s.col10) = ''
+         OR (BTRIM(s.col10) SIMILAR TO '[+-]?[0-9]+(\.[0-9]+)?'
+             AND CAST(BTRIM(s.col10) AS DECIMAL(38,8)) BETWEEN -180 AND 180))
     -- Distancia_Punto_Interes entero NO negativo en [0, 2147483647] (Req 4.6, 4.7)
-    AND s.col10 IS NOT NULL AND BTRIM(s.col10) <> ''
-    AND BTRIM(s.col10) SIMILAR TO '[+]?[0-9]+'
-    AND CAST(BTRIM(s.col10) AS DECIMAL(38,0)) BETWEEN 0 AND 2147483647;
+    AND s.col11 IS NOT NULL AND BTRIM(s.col11) <> ''
+    AND BTRIM(s.col11) SIMILAR TO '[+]?[0-9]+'
+    AND CAST(BTRIM(s.col11) AS DECIMAL(38,0)) BETWEEN 0 AND 2147483647;
 
   SELECT COUNT(*) INTO v_conteo_delta
   FROM bdm_tempo.stg_distancias_delta;
@@ -449,10 +479,12 @@ BEGIN
     in_lote, v_conteo_previo, v_conteo_delta, v_conteo_final;
 
   -- 7.5) Marcar el Lote 'cargado' (fase distancias completada, Req 4.4).
+  -- 2026-10-20: ya no escribe conteo_cargado. Es el conteo de la
+  -- georreferenciacion (su gate de conteo); las distancias lo pisaban con su
+  -- propio total de filas, que es otro grano (1:N). Su conteo va al INFO.
   UPDATE bdm_datos.geo_lote_control
   SET estado              = 'cargado',
       fase_fallo          = NULL,
-      conteo_cargado      = v_conteo_final,
       ultimo_error        = NULL,
       fecha_actualizacion = GETDATE()
   WHERE lote = in_lote;

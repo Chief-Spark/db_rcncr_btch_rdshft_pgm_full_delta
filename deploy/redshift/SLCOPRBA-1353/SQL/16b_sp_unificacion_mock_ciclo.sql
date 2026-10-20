@@ -90,6 +90,10 @@ DECLARE
     v_geo_cargados  BIGINT := 0;
 
     v_etapa_actual  VARCHAR(20);
+
+    -- GEO no bloqueante (2026-10-20), igual que el real.
+    v_geo_ok        BOOLEAN;
+    v_geo_error     VARCHAR(500);
 BEGIN
     -- (1) RESOLUCION DE PARAMETROS -------------------------------------------
     -- Se reutiliza el helper real: el parseo de MODO/LOTE/FECHA es identico y
@@ -220,16 +224,38 @@ BEGIN
     -- Solo generacion de candidatos. Se espera que el UNLOAD falle (rol IAM no
     -- asociado al cluster) y que el fallo NO bloquee: el SP marca el Lote
     -- 'fallido' con RAISE INFO y retorna normalmente.
+    --
+    -- 2026-10-20: GEO NO ES BLOQUEANTE, igual que en sp_unificacion_ciclo:
+    -- el envio y la busqueda de resultados van cada uno en su bloque, un
+    -- fallo deja la traza 'geo' en 'fallido' y la corrida sigue con la R3.
+    -- En la bateria la busqueda no encuentra nada (mock_geo_respuesta esta
+    -- vacia hasta run_geo_ciclo_mock.sql), de modo que CA-01 sigue viendo el
+    -- Lote en 'exportado'.
     v_etapa_actual := 'geo';
     CALL bdm_datos.unif_traza_mock_inicio(v_corrida_id, v_lote, 'geo');
+    v_geo_ok := TRUE;
 
     SELECT COALESCE(MAX(lote), 0) INTO v_geo_lote_ini
       FROM bdm_datos.geo_lote_control_mock;
 
-    CALL bdm_datos.sp_geo_exportar_insumo_mock(
-        in_solicitud, in_nit_suscriptor, in_path_archivo,
-        v_modo_efectivo, v_lote::VARCHAR, v_wm_anterior::VARCHAR
-    );
+    BEGIN
+        CALL bdm_datos.sp_geo_exportar_insumo_mock(
+            in_solicitud, in_nit_suscriptor, in_path_archivo,
+            v_modo_efectivo, v_lote::VARCHAR, v_wm_anterior::VARCHAR
+        );
+    EXCEPTION WHEN OTHERS THEN
+        v_geo_ok    := FALSE;
+        v_geo_error := LEFT(SQLERRM, 500);
+        RAISE INFO 'sp_unificacion_mock_ciclo: el envio a GEO fallo y se omite; la corrida sigue (GEO no bloqueante): %', v_geo_error;
+    END;
+
+    BEGIN
+        CALL bdm_datos.sp_rcn_geo_02_buscar_resultados_mock();
+    EXCEPTION WHEN OTHERS THEN
+        v_geo_ok    := FALSE;
+        v_geo_error := LEFT(SQLERRM, 500);
+        RAISE INFO 'sp_unificacion_mock_ciclo: la busqueda de resultados GEO fallo y se omite; la corrida sigue (GEO no bloqueante): %', v_geo_error;
+    END;
 
     SELECT COALESCE(MAX(lote), 0) INTO v_geo_lote_fin
       FROM bdm_datos.geo_lote_control_mock;
@@ -246,8 +272,13 @@ BEGIN
         v_geo_cargados := 0;
     END IF;
 
-    CALL bdm_datos.unif_traza_mock_fin(v_corrida_id, 'geo', 'completado',
-                                       0, 0, 0, v_geo_export, v_geo_cargados);
+    IF v_geo_ok THEN
+        CALL bdm_datos.unif_traza_mock_fin(v_corrida_id, 'geo', 'completado',
+                                           0, 0, 0, v_geo_export, v_geo_cargados);
+    ELSE
+        CALL bdm_datos.unif_traza_mock_fin(v_corrida_id, 'geo', 'fallido',
+                                           0, 0, 0, v_geo_export, v_geo_cargados);
+    END IF;
 
     -- ---- Etapa REGLA 3 -----------------------------------------------------
     -- SLCOPRBA-1355: la etapa se AGREGA al ciclo. Hasta ahora se omitia a
