@@ -40,6 +40,16 @@ correccion de scoring se hace **una vez** y vale para las dos vias.
 ## Fuentes de verdad del negocio
 
 - Unificacion: `PRO_UnificacionR2.sql` (legado Teradata).
+
+**EL LEGADO COMPLETO YA ESTA EN EL REPO (2026-10-20): `dt/docs/legado_teradata/`.**
+Unificacion, Ordenamiento (`Caracteristicas.txt`, `Ordenamiento.sql`), Novedades
+(`Novedad.sql` y los cuatro scripts P0035), GEO, catalogos y el Batch P0033.
+`PRO_UnificacionR2` es `reconocer/unificacion/DB/Unificacion.sql:1740-7958`: las
+citas `PRO_UnificacionR2.sql:N` de este repo son `Unificacion.sql:N+1739`.
+**`Caracteristicas.txt` mezcla CR y LF**: hay dos numeraciones (261 lineas por LF,
+3.170 por CR+LF) y este repo usa las dos con el mismo nombre. Toda cita nueva dice
+cual usa. Hallazgos de la lectura completa y lo que desmiente de esta bitacora:
+`dt/docs/ANALISIS_AS_IS_HOMOLOGACION.md`.
 - Ordenamiento F4: **`Caracteristicas.txt`** (ese archivo *es* el modelo).
   F1-F3: `Prc_Ordenamiento2.sql`.
 
@@ -320,9 +330,11 @@ decision legal, y **no toca Ubicacion**: su predicado aparece una sola vez en
 todo el archivo, en `:2482`, dentro de `Info_Basica`.
 
 **SE EMPIEZA POR UBICACION PORQUE ES PRODUCTOR PURO.** No lee ninguna temporal
-ajena y cinco de los demas dependen de sus dos salidas: `Catalogo` (`:288`),
-`Contact` (`:615`), `Historial` (`:1721`), `PICalculados_Ctls` (`:4808`) y
-`Ubi_Agregada`, que las usa en once puntos. **Por eso las dos salidas son
+ajena y cuatro de los demas leen su etapa 9: `Contact` (`:288`, `:358`, `:433`,
+`:615`), `Indic_Movilidad` (`:1721`), `Punto_Interes` (`:4808`) y
+`Ubi_Agregada`, que la usa en once puntos. *(Decia antes `Catalogo`, `Historial`
+y `PICalculados_Ctls` en esas mismas lineas; verificado contra `Novedad.sql`
+el 2026-10-20, las lineas son de los SP que se nombran ahora.)* **Por eso las dos salidas son
 contrato publico y su DDL esta pinada en `strct`**: `stg_nov_ubica_etapa_9`
 con 42 columnas y `stg_nov_ubica_etapa_2` con 15. Un `CTAS` dejaria que el
 tipo lo infiriera la consulta y el contrato cambiaria sin avisar.
@@ -353,15 +365,20 @@ revisarlo contra el.
 |---|---|
 | `FLAG_OP` referencia el alias de una columna definida **dos lineas despues**. Teradata lo resuelve, **Redshift no**: hay que repetir el `CASE` | `Novedad.sql:8392-8396` |
 | `V_CARGA_FULL` lee `REC_MTDAT.LOG_TD` con el esquema **hardcodeado**, ignorando el parametro | `:7366-7372` |
-| Centinelas de nulo inconsistentes: `''` y `'-1'` en la etapa 9, `'SV'` en las agregaciones, y la etapa 2 une por igualdad en esas tres columnas | `:8354`, `:8374`, `:8502-8504`, `:8649-8651` |
-| La homologacion de fuente **jamas se aplica**: el `COALESCE` interno nunca da NULL, asi que todo sale `'CAM'` | `:8635` |
+| Centinelas de nulo inconsistentes: `''` y `'-1'` en la etapa 9, `'SV'` en las agregaciones, y la etapa 2 une por igualdad en esas tres columnas. **En el legado no rompe**: la etapa 9 ya aplica el `COALESCE`. **En Redshift si**: el port deja CIUDAD y DEPARTAMENTO en NULL | `:8354`, `:8374`, `:8502-8504`, `:8649-8651` |
+| La homologacion de fuente **jamas se aplica**: el `COALESCE` interno nunca da NULL. La fuente sale de `V_FUENTE`, y `'CAM'` solo cuando no hay coincidencia (no "todo sale `'CAM'`", como decia esta fila) | `:8635` |
 | `TMP_UBICA_ETAPA_0` es **codigo muerto**: se crea, se analiza y se borra sin que nadie la lea. No se porta | `:7514`, `:8723` |
 | **`FLAG_OP = 'E'` es codigo muerto, y con el la unica via de BAJA.** La etapa 1 anti-une `V_BLOQUEO` y la etapa 9 vuelve a unirla por la MISMA llave para preguntar por `FECHA_BLOQUEO`: lo que sobrevivio no esta en la tabla, asi que nunca da TRUE | `:7590-7594` contra `:8393`, `:8416` |
 
 **LA SEXTA ARRASTRA AL TPT Y CAMBIA DOS CRITERIOS.** `Severidad = 2` -- el
 borrado -- sale UNICAMENTE de `WHEN STG.FLAG_OP = 'E' THEN 2`
-(`120.TPT:163`), de modo que **el UPSERT de `130.TPT` nunca borra una fila: el
-AS-IS solo inserta y actualiza.** `NOV-UB-13` y `NOV-UB-15` decian "el mock no
+(`120.TPT:163`), de modo que **el UPSERT de `130.TPT` nunca borra una fila.**
+*(Esta frase seguia con "el AS-IS solo inserta y actualiza", y es falso:
+`111.BTQ:817-836` hace `DELETE ... ALL` de las siete `MAT_*` antes de cargar.
+**El AS-IS reconstruye la foto completa en cada corrida** y las novedades
+reales salen de las vistas `*_Delta` contra las copias `BK_*`
+(`120.TPT:455-602`). Decidido el 2026-10-20: el contrato de Novedades es foto
+completa + delta.)* `NOV-UB-13` y `NOV-UB-15` decian "el mock no
 siembra ubicaciones bloqueadas", como si faltara un arquetipo. **Era falso, y
 ningun arquetipo lo desbloquea**: verifican una rama que el legado no puede
 tomar. Ahora exigen cero bajas, que es la paridad real, y estan en PASSED.
