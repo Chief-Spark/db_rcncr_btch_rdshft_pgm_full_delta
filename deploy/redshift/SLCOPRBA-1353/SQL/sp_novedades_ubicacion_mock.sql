@@ -126,7 +126,12 @@ BEGIN
   -- Novedad.sql:7652-7686.
   --
   -- El INNER JOIN con V_GESTION_REGISTRO filtrando 'VALIDA' es del legado y
-  -- descarta filas: se porta como predicado sobre el catalogo del cliente.
+  -- descarta filas (Novedad.sql:7679-7680). Esta frase decia que se portaba
+  -- como predicado y no habia ninguno. 2026-10-20 (D-EDF-12): ahora si, sobre
+  -- la gestion del LUGAR, que sale del score de estandarizacion (>= 0.80).
+  -- DIVERGENCIA DECIDIDA: el legado tambien descarta la ubicacion sin
+  -- gestion, porque es un INNER JOIN; aqui pasa. En EDF las direcciones de
+  -- suscriptor no traen score (C24) y exigirlo las sacaria todas.
   --
   -- DIVERGENCIA 3, primera aparicion. En el legado la ciudad, el departamento
   -- y el codigo DANE salen de V_GEOGRAFIA. Aqui salen del propio datashare:
@@ -192,7 +197,8 @@ BEGIN
   INNER JOIN bdm_tempo.v_mock_ubicacion_estandarizada ue
          ON ue.cod_dw_ubic = e1.cod_dw_ubic
   LEFT JOIN bdm_datos.tipo_ubicacion_dir tud
-         ON tud.cod_dw_tipo_ubicacion_dir = e1.cod_dw_tipo_ubicacion_dir;
+         ON tud.cod_dw_tipo_ubicacion_dir = e1.cod_dw_tipo_ubicacion_dir
+  WHERE  COALESCE(ue.descripcion_gestion_registro, 'VALIDA') = 'VALIDA';
 
   -- ------------------------------------------------------------
   -- Pasos 11 y 12 del legado: la direccion fisica (TMP_UBICA_ETAPA_41 y _4).
@@ -372,7 +378,9 @@ BEGIN
               WHEN e6.descripcion_tipo_ubicacion = 'Geografica' THEN 'DIR'
               WHEN e6.descripcion_tipo_ubicacion = 'Telefono'   THEN 'TEL'
          END AS VARCHAR(5))                             AS clase,
-    CAST(e6.id_buro_persona AS INTEGER)                 AS info_basica,
+    -- 2026-10-20 (D-NOV-04): BIGINT. id_buro_persona es FNV_HASH(pin), de 64
+    -- bits; el CAST a INTEGER abortaba con cualquier dato real.
+    CAST(e6.id_buro_persona AS BIGINT)                  AS info_basica,
     COALESCE(e6.codigo_dane, '-1')                      AS codigo_dane,
     CASE WHEN e6.descripcion_tipo_ubicacion_dir = 'CRR' THEN '1' ELSE '0' END AS es_tipo_crr,
     CASE WHEN e6.descripcion_tipo_ubicacion_dir = 'RES' THEN '1' ELSE '0' END AS es_tipo_res,

@@ -823,11 +823,19 @@ tocar, para no volver a investigarlo:
 |---|---|---|
 | `DIR034FI` | el legado suma un **importe**, `CO00END005` (`:2589`); es de la Fase 2 | 90,32 |
 | `DIR050TO` | grano por direccion y medida `CO00MOR037/038 > 0` (`:3119-3125`): Fase 2 | 75,48 |
-| `DIR010FI` y `DIR013OT` | el divisor del legado excluye `'NO VALIDA'` (`:1950-1954`) | 137,21 |
+| ~~`DIR010FI` y `DIR013OT`~~ **DIVISOR PORTADO (2026-10-20)** | el divisor del legado excluye `'NO VALIDA'` (`:1950-1954`); ya lo hace, con la gestion que sale del score de estandarizacion (D-EDF-12). Queda el numerador, que depende del `Sector` | 137,21 |
 | `TEL023` y `CEL020` | el legado usa `Cod_Suscriptor`; nosotros `id_buro_suscriptor`, que es cubeta de hash | ruido hasta F2 |
 
-**El divisor de DIR NO es portable hoy, aunque lo parezca.**
-`descripcion_gestion` no existe en el lado de direcciones: la unica que hay
+**El divisor de DIR YA ESTA PORTADO (2026-10-20), y no con el heuristico.**
+La gestion de las direcciones sale del score de la libreria de
+estandarizacion de EDF (`contactAsStandardizedScore`): `>= 0.80` VALIDA, menor
+NO VALIDA, sin score NULL, que cuenta como valida igual que en el legado
+(`02_vistas_insumo_edf_views.sql`, `descripcion_gestion_registro`;
+`sp_ordenamiento_scoring_dir_edf.sql`, `cnt_reportes_validos`). En el mock no
+hay score y el tablero no se mueve. En DEV solo el tipo 8 trae score; las
+direcciones de suscriptor llegaran con score cuando EDF publique el de ICBDIR.
+*Lo que sigue es el motivo por el que NO se uso el heuristico, y sigue en pie:*
+`descripcion_gestion` no existia en el lado de direcciones: la unica que hay
 (`preparar_insumos_edf.sql:362-365`) se deriva del heuristico *"son >=7
 digitos numericos?"*, y `stg_insumo_direccion` ni siquiera sale de esa rama
 -- viene de `stg_rpu_post_unificacion` (`:252`). Aplicarla marcaria
@@ -1091,7 +1099,7 @@ una divergencia disfrazada de criterio cumplido.
 | Que | Por que |
 |---|---|
 | El `MD5` no puede leer el alias `concatena` de su propio `SELECT` | el legado escribe `rec_vista.hash_md5(concatena)` referenciando la columna de al lado; Teradata lo resuelve y Redshift **no**. Misma trampa que `FLAG_OP` (`Novedad.sql:8392-8396`). El concatena va en subconsulta |
-| De las 12 columnas del concatena, 7 llevan dato y 5 el centinela `'0'` | se quedan **en su sitio y en su orden** para que el dia que el dato exista el hash cambie en una linea y se vea en el diff. Faltan gestion de registro, tipo de cuenta (Fase 2), barrio, departamento |
+| De las 12 columnas del concatena, 9 llevan dato y 3 el centinela `'0'` | se quedan **en su sitio y en su orden** para que el dia que el dato exista el hash cambie en una linea y se vea en el diff. **La gestion de registro entro el 2026-10-20** (score de estandarizacion, D-EDF-12; sin score sigue en `'0'` y el hash del mock no cambia). Faltan tipo de cuenta (Fase 2), barrio, departamento |
 | La llave del anti-join son CUATRO columnas; la de la entidad, TRES | `F3-07` nombra tres. El hash es la cuarta, la que decide si la COMBINACION es nueva. Confundirlas haria que una direccion cambiada no se registrara |
 
 **LOS ARQUETIPOS VAN EN PAREJA Y POR ESO SON DOS.** `ARQ 97` cambia de texto

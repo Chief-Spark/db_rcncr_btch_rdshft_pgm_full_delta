@@ -47,13 +47,14 @@
 -- El hash es la cuarta del anti-join, la que decide si la COMBINACION es
 -- nueva. Confundirlas haria que una direccion cambiada no se registrara.
 --
--- EL CONCATENA DEL LEGADO TIENE DOCE COLUMNAS Y AQUI HAY SIETE CON DATO.
--- Las otras cinco van con el centinela ''0'' del propio legado, que es lo que
+-- EL CONCATENA DEL LEGADO TIENE DOCE COLUMNAS Y AQUI HAY NUEVE CON DATO.
+-- Las otras tres van con el centinela ''0'' del propio legado, que es lo que
 -- este usa para un nulo. Se mantienen EN SU SITIO y en el ORDEN original para
 -- que el dia que el dato exista el hash cambie en una sola linea y se vea en
--- el diff. Las cinco, y por que:
---   descripcion_gestion_registro -- la nuestra es una sintesis heuristica, no
---                                   el estado de gestion por reporte
+-- el diff. 2026-10-20: entro descripcion_gestion_registro, que sale del score
+-- de estandarizacion (D-EDF-12) con la misma forma del legado
+-- (PRO_ORD_CONCAT_DIRECCIONES.sql:111); sin score sigue siendo ''0'', asi que
+-- el hash del mock no cambia. Las tres que faltan, y por que:
 --   desc_tipo_cta                -- necesita las cuentas de la Fase 2
 --   urbanizacion_barrio          -- no existe en nuestro modelo
 --   cod_dane_departamento        -- solo esta en el mock, no en el datashare
@@ -127,6 +128,10 @@ BEGIN
     cd.complemento,
     tud.descripcion_tipo_ubicacion_dir AS tipo_ubicacion,
     cd.cod_dw_ciudad AS cod_dane_ciudad,
+    -- 2026-10-20 (D-EDF-12): gestion del reporte por el score de la
+    -- libreria (>= 0.80 VALIDA, menor NO VALIDA, sin score NULL). La lee el
+    -- divisor de DIR010FI / DIR013OT y el hash de F3. En el mock es NULL.
+    cd.descripcion_gestion_registro AS descripcion_gestion,
     rep.id_buro_suscriptor,
     rep.fecha_reporte,
     GREATEST(DATEDIFF(month, rep.fecha_reporte, CURRENT_DATE), 0) AS meses_reporte,
@@ -358,7 +363,7 @@ BEGIN
            -- Orden y centinela del legado (PRO_ORD_CONCAT_DIRECCIONES:108-120).
                  COALESCE(CAST(TRIM(d.direccion_fisica) AS VARCHAR(100)), '0')
               || COALESCE(CAST(TRIM(d.tipo_ubicacion)   AS VARCHAR(200)), '0')
-              || '0'                                      -- gestion_registro
+              || COALESCE(CAST(TRIM(d.descripcion_gestion) AS VARCHAR(200)), '0')
               || COALESCE(CAST(TRIM(CAST(d.cod_dane_ciudad AS VARCHAR)) AS VARCHAR(20)), '0')
               || '0'                                      -- dane_departamento
               || COALESCE(CAST(TRIM(CASE WHEN UPPER(TRIM(COALESCE(rpu.cod_tipo_ident_fte, ''))) IN ('2', 'NIT')

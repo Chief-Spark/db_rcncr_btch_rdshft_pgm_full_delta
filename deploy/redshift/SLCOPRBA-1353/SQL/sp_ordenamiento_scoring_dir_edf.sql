@@ -57,6 +57,12 @@ BEGIN
       -- tenemos. Se aisla aqui para que el arreglo de DIR002TO no lo corrompa
       -- en silencio.
       COUNT(*) AS cnt_reportes,
+      -- 2026-10-20 (D-EDF-12): los reportes que cuentan en el divisor del
+      -- legado, Total_Reporte de TM_AGR_DIR_TMP_DEF (Caracteristicas.txt
+      -- LF 160): todo lo que no es 'NO VALIDA', NULL incluido. Sin score la
+      -- gestion es NULL, de modo que en el mock vale lo mismo que cnt_reportes.
+      SUM(CASE WHEN descripcion_gestion <> 'NO VALIDA' OR descripcion_gestion IS NULL
+               THEN 1 ELSE 0 END) AS cnt_reportes_validos,
       -- DIR004RO (:2917-2918): BLOQUEADA. El legado cuenta los reportes con
       -- Portafolio_Nuevo = 'RO' y ventana <= 3 meses, con ELSE NULL exterior
       -- para que la ausencia de 'RO' caiga en la rama IS NULL de la
@@ -142,10 +148,10 @@ BEGIN
     SELECT id_buro_persona,
       SUM(cnt_reportes) AS dir050to,
       -- Total_Reportes_Dirc (:2649 -> TM_AGR_DIR_TMP_DEF :1950-1954):
-      -- reportes de la PERSONA. Comparte expresion con dir050to hoy, pero
-      -- son cosas distintas y el nombre lo dice: dir050to es una
-      -- caracteristica (bloqueada), esto es un divisor.
-      SUM(cnt_reportes) AS total_reportes_dirc,
+      -- reportes de la PERSONA. dir050to es una caracteristica (bloqueada),
+      -- esto es un divisor, y desde 2026-10-20 ya no comparten expresion: el
+      -- divisor deja fuera los 'NO VALIDA', como el legado (D-EDF-12).
+      SUM(cnt_reportes_validos) AS total_reportes_dirc,
       -- DIR009 (:2390-2396): cuantas direcciones de la persona son de
       -- correspondencia, es decir tienen al menos un reporte 'CRR'. Antes era
       -- COUNT(DISTINCT id_buro_suscriptor), que ademas colgaba de la cubeta de
