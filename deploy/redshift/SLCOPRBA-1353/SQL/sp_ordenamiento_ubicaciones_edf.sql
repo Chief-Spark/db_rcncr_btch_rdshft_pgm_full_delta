@@ -246,7 +246,7 @@ BEGIN
   LEFT JOIN bdm_datos.tipo_ubicacion_dir tud
     ON tud.cod_dw_tipo_ubicacion_dir = ctu.cod_dw_tipo_ubicacion_dir
   -- 2026-10-20: el canal lo decide v_xpm_contacto_canal (TEL = 4, 5 y el
-  -- 6 fijo, D-EDF-11). Antes era IN ('4','5','8') y el 8 es direccion
+  -- 6 y 13 fijos, D-EDF-11). Antes era IN ('4','5','8') y el 8 es direccion
   -- (D-EDF-08). El espejo mock sigue filtrando por contact_type sobre
   -- v_mock_contacto_canal: sus semillas solo siembran el 4 como telefono
   -- (seed_mock_matriz.sql:347).
@@ -308,7 +308,7 @@ BEGIN
     ON tcat.prefijo_operador = LEFT(c.valor_contacto, 3)
   LEFT JOIN bdm_tempo.stg_persona_dir_ref ref
     ON ref.id_buro_persona = c.id_buro_persona
-  WHERE c.canal = 'CEL'   -- 2026-10-20: 9 y el 6 celular (D-EDF-11)
+  WHERE c.canal = 'CEL'   -- 2026-10-20: 9 y el 6 y 13 celulares (D-EDF-11)
     AND c.valor_contacto IS NOT NULL;
 
   ANALYZE bdm_tempo.stg_insumo_celular;
