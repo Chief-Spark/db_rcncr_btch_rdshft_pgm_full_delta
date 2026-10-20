@@ -245,11 +245,12 @@ BEGIN
     ON ctu.cod_dw_persona_ubic = c.cod_dw_persona_ubic
   LEFT JOIN bdm_datos.tipo_ubicacion_dir tud
     ON tud.cod_dw_tipo_ubicacion_dir = ctu.cod_dw_tipo_ubicacion_dir
-  -- 2026-10-20 (D-EDF-08): sin el 8, que en el datashare es direccion
-  -- (standardizedtipo VIA, RURAL, MANZANA..., C6b). El espejo mock conserva
-  -- la lista anterior sin efecto: sus semillas solo siembran el 4 como
-  -- telefono (seed_mock_matriz.sql:347).
-  WHERE c.contact_type IN ('4', '5')
+  -- 2026-10-20: el canal lo decide v_xpm_contacto_canal (TEL = 4, 5 y el
+  -- 6 fijo, D-EDF-11). Antes era IN ('4','5','8') y el 8 es direccion
+  -- (D-EDF-08). El espejo mock sigue filtrando por contact_type sobre
+  -- v_mock_contacto_canal: sus semillas solo siembran el 4 como telefono
+  -- (seed_mock_matriz.sql:347).
+  WHERE c.canal = 'TEL'
     AND c.valor_contacto IS NOT NULL;
 
   ANALYZE bdm_tempo.stg_insumo_telefono;
@@ -272,6 +273,11 @@ BEGIN
     -- de operadores y la compuerta CEL018 <> 0 sacaba ese celular del
     -- ranking entero. En el mock no hay celulares con cero inicial, asi que
     -- el cambio es inerte ahi y fiel en datos reales.
+    -- 2026-10-20 (D-EDF-10): sigue sin LTRIM aqui, y sigue siendo correcto.
+    -- Lo que cambio es el insumo: EDF entrega el celular rellenado con ceros
+    -- hasta 12 digitos (C22), y v_xpm_contacto_canal ya lo normaliza a solo
+    -- digitos y sin ese relleno, que es la forma del Texto_Ubicacion del
+    -- AS-IS. Sin eso el operador salia '003' y la compuerta vaciaba el canal.
     c.valor_contacto AS celular,
     COALESCE(ref.dir_ref, c.texto_ubicacion_vinculo) AS texto_ubicacion,
     c.id_buro_suscriptor,
@@ -302,7 +308,7 @@ BEGIN
     ON tcat.prefijo_operador = LEFT(c.valor_contacto, 3)
   LEFT JOIN bdm_tempo.stg_persona_dir_ref ref
     ON ref.id_buro_persona = c.id_buro_persona
-  WHERE c.contact_type = '9'
+  WHERE c.canal = 'CEL'   -- 2026-10-20: 9 y el 6 celular (D-EDF-11)
     AND c.valor_contacto IS NOT NULL;
 
   ANALYZE bdm_tempo.stg_insumo_celular;
@@ -332,7 +338,7 @@ BEGIN
   FROM bdm_tempo.stg_contacto_canal c
   LEFT JOIN bdm_datos.catalogo_sector_financiero sf
     ON sf.id_buro_suscriptor = c.id_buro_suscriptor
-  WHERE c.contact_type = '10'
+  WHERE c.canal = 'EMA'
     AND c.valor_contacto LIKE '%@%';
 
   ANALYZE bdm_tempo.stg_insumo_email;

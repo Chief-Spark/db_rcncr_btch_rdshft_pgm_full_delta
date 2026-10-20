@@ -14,6 +14,7 @@ sp_novedades_cargar_mat_ubicacion_mock.sql
 sp_novedades_cargar_mat_ubicacion_edf.sql
 sp_novedades_ubicacion_mock.sql
 sp_novedades_ubicacion_edf.sql
+sp_rcn_ctl_nov_migrar_info_basica.sql
 sp_nov_control_mock_abrir_cerrar.sql
 sp_nov_control_abrir_cerrar.sql
 sp_cert_asercion_final.sql

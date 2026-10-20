@@ -388,7 +388,9 @@ BEGIN
               WHEN e6.descripcion_tipo_ubicacion = 'Geografica' THEN 'DIR'
               WHEN e6.descripcion_tipo_ubicacion = 'Telefono'   THEN 'TEL'
          END AS VARCHAR(5))                             AS clase,
-    CAST(e6.id_buro_persona AS INTEGER)                 AS info_basica,
+    -- 2026-10-20 (D-NOV-04): BIGINT. id_buro_persona es FNV_HASH(pin), de 64
+    -- bits; el CAST a INTEGER abortaba con cualquier dato real.
+    CAST(e6.id_buro_persona AS BIGINT)                  AS info_basica,
     COALESCE(e6.codigo_dane, '-1')                      AS codigo_dane,
     CASE WHEN e6.descripcion_tipo_ubicacion_dir = 'CRR' THEN '1' ELSE '0' END AS es_tipo_crr,
     CASE WHEN e6.descripcion_tipo_ubicacion_dir = 'RES' THEN '1' ELSE '0' END AS es_tipo_res,

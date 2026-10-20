@@ -149,7 +149,7 @@ sobre el mismo cluster. Todo lo que una corrida escribe y el reset no borra
 sobrevive de una pasada a la otra, de modo que **la primera sale verde y la
 segunda falla**. El banco corre la bateria una sola vez y no ve nada.
 
-Lo pago Novedades: `reset_mock.sql` -- que es el archivo **1 de deploy.par** --
+Lo pago Novedades: `reset_mock.sql` -- que es el archivo **2 de deploy.par** (el 1 es la migracion de `info_basica`, D-NOV-04) --
 no borraba una sola tabla suya. El FULL de la segunda pasada salio con
 `bootstrap=f`, los DELTA siguientes leyeron el `MAX(watermark_nuevo)` de la
 primera (`2026-06-15`) por encima del que ese FULL acababa de sembrar
