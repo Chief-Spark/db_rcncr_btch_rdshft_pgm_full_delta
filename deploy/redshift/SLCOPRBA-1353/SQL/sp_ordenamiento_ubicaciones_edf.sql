@@ -245,7 +245,11 @@ BEGIN
     ON ctu.cod_dw_persona_ubic = c.cod_dw_persona_ubic
   LEFT JOIN bdm_datos.tipo_ubicacion_dir tud
     ON tud.cod_dw_tipo_ubicacion_dir = ctu.cod_dw_tipo_ubicacion_dir
-  WHERE c.contact_type IN ('4', '5', '8')
+  -- 2026-10-20 (D-EDF-08): sin el 8, que en el datashare es direccion
+  -- (standardizedtipo VIA, RURAL, MANZANA..., C6b). El espejo mock conserva
+  -- la lista anterior sin efecto: sus semillas solo siembran el 4 como
+  -- telefono (seed_mock_matriz.sql:347).
+  WHERE c.contact_type IN ('4', '5')
     AND c.valor_contacto IS NOT NULL;
 
   ANALYZE bdm_tempo.stg_insumo_telefono;
