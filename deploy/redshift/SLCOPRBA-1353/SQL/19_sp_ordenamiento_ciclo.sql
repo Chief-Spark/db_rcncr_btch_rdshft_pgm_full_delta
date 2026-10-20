@@ -63,8 +63,12 @@ BEGIN
      WHERE estado = 'completado'
        AND watermark_nuevo IS NOT NULL;
 
+    -- 2026-10-20: misma regla que 16_sp_unificacion_ciclo.sql:167-178. Sin
+    -- Watermark previo la corrida es Bootstrap, se haya pedido FULL o DELTA;
+    -- antes un FULL inicial quedaba con bootstrap = FALSE y el censo lo
+    -- registraba con watermark_origen CONTROL sin haber control que leer.
     v_modo_efectivo := v_modo;
-    IF v_wm_anterior IS NULL AND v_modo = 'DELTA' THEN
+    IF v_wm_anterior IS NULL THEN
         v_modo_efectivo := 'FULL';
         v_bootstrap := TRUE;
     END IF;
@@ -183,8 +187,10 @@ BEGIN
 
         CALL bdm_datos.sp_ordenamiento_drop_staging_edf();
 
-        -- F1-05: despues del drop no puede quedar ninguna de las diecisiete.
-        -- (catorce en el legado; la Fase 3 anadio una y la Fase 2 dos).
+        -- F1-05: despues del drop no puede quedar ninguna de las dieciocho
+        -- que crean preparar, cuentas y ubicaciones. 2026-10-20: faltaba
+        -- stg_ord_cta_vector, que el drop si borra; si sobrevivia, el censo
+        -- no lo veia.
         --
         -- EL CONTEO VA A UNA VARIABLE ANTES DEL UPDATE, y no dentro de el.
         -- pg_tables vive en el leader node y Redshift NO admite mezclar un
@@ -200,7 +206,7 @@ BEGIN
                  'stg_contacto_canal','stg_contacto_direccion_rpu','stg_dir_conteo_persona',
                      'stg_insumo_celular','stg_insumo_direccion','stg_insumo_email',
                      'stg_insumo_telefono','stg_ord_alcance_origen',
-                     'stg_ord_cta_base','stg_ord_cta_hash',
+                     'stg_ord_cta_base','stg_ord_cta_hash','stg_ord_cta_vector',
                      'stg_ord_personas_alcance','stg_ord_ubic_hash',
                      'stg_persona_dir_ganadora',
                      'stg_persona_dir_ref','stg_reporte_rpu','stg_rpu_dir_ref',

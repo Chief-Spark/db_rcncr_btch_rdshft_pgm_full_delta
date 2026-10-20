@@ -191,7 +191,12 @@ BEGIN
     -- en el legado y en el mock; la via real lo exponia como INTEGER y el
     -- CAST abortaba con "Value out of range for 4 bytes" (job #293). TRIM
     -- porque el codigo llega del datashare sin normalizar.
-    AND COALESCE(TRIM(i.cod_tipo_ident_fte), '') = '3';
+    -- 2026-10-20 (D-UNI-01): el NIT del datashare es el codigo 2 de ID Type NH
+    -- (43.735 filas con 2 contra 5 con 3; el 3 es Persona Juridica del
+    -- Extranjero). El legado prueba el NOMBRE, Nombre_Tipo_Ident LIKE '%Nit%'
+    -- (Unificacion.sql:2210 y :2393), no un numero. El espejo mock conserva
+    -- el '3' porque sus semillas lo siembran asi (seed_mock_matriz_r2.sql:43).
+    AND COALESCE(TRIM(i.cod_tipo_ident_fte), '') = '2';
 
   -- (1b) Tmp_Unificacion_E03_B (linea 703): los que tienen con quien
   --      emparejarse. Aqui el PADRE todavia NO esta elegido -- en el legado

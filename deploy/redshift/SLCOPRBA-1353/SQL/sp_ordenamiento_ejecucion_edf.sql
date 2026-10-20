@@ -15,6 +15,12 @@ BEGIN
     CALL bdm_datos.sp_ordenamiento_preparar_insumos_edf(v_modo, p_lote, p_watermark);
   END IF;
 
+  -- 2026-10-20: faltaban la Fase 2 y la Fase 3, y el scoring lee los insumos
+  -- que deja la 3. Mismo orden que 19_sp_ordenamiento_ciclo.sql: cuentas
+  -- antes que ubicaciones, porque el Portafolio es insumo del vector.
+  CALL bdm_datos.sp_ordenamiento_cuentas_edf(p_lote);
+  CALL bdm_datos.sp_ordenamiento_ubicaciones_edf(p_lote);
+
   CALL bdm_datos.sp_ordenamiento_scoring_dir_edf();
   CALL bdm_datos.sp_ordenamiento_scoring_tel_edf();
   CALL bdm_datos.sp_ordenamiento_scoring_cel_edf();
