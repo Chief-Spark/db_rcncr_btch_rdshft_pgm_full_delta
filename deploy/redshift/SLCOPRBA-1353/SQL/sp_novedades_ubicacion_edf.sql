@@ -28,10 +28,16 @@
 -- DOS DECISIONES CERRADAS, Y NO SON DIVERGENCIAS A ELEVAR (SLCOPRBA-1355):
 --   1. Las cinco columnas que el legado emite como literales NULL y 0 se
 --      reproducen tal cual. NO se pueblan desde la etapa 2.
---   2. La fuente sigue saliendo 'CAM' siempre. NO se corrige el COALESCE
---      que deja muerta la homologacion.
---   En las dos el criterio es el mismo: se reproduce el legado. Quedan
---   escritas aqui para que nadie las reabra como si fueran un defecto.
+--   2. ~~La fuente sigue saliendo 'CAM' siempre.~~ **CORREGIDO 2026-10-21
+--      (T5, D-NOV-03).** Esta linea afirmaba que el legado emite 'CAM'
+--      siempre, y es FALSO: el COALESCE interno mata la homologacion de
+--      h2.Descripcion_Hom_Fuente_Linea, pero VFT.DESCRIPCION_FUENTE llega de
+--      V_FUENTE y 'CAM' solo sale cuando no hay coincidencia
+--      (Novedad.sql:8635). Hoy la fuente se deriva del typeOfData en
+--      v_xpm_reporte_relacion_persona_ubica. Lo que SI sigue sin portarse es
+--      la homologacion a Linea, que en el legado es codigo muerto.
+--   La primera se reproduce del legado tal cual y queda escrita aqui para que
+--   nadie la reabra como si fuera un defecto.
 
 CREATE OR REPLACE PROCEDURE bdm_datos.sp_novedades_ubicacion_edf(
     p_modo      VARCHAR,   -- FULL | DELTA (modo efectivo de la corrida)
@@ -447,13 +453,25 @@ BEGIN
   -- esa bandera, de modo que se usan MIN y MAX de fecha_reporte, que es lo
   -- que la bandera marca.
   --
-  -- Y LA FUENTE. El legado escribe
+  -- Y LA FUENTE (T5, D-NOV-03, 2026-10-21). El legado escribe
   --   COALESCE(COALESCE(VFT.DESCRIPCION_FUENTE,'CAM'), h2.Descripcion_Hom...)
-  -- (Novedad.sql:8635): el COALESCE interno nunca devuelve NULL, de modo que
-  -- la homologacion JAMAS se aplica y toda fuente desconocida sale 'CAM'.
-  -- Aqui ademas no hay cod_dw_fuente en la vista de reportes, asi que el
-  -- resultado es 'CAM' siempre -- que es exactamente lo que el legado
-  -- produce. La trampa y el hueco coinciden.
+  -- (Novedad.sql:8635). El COALESCE interno nunca devuelve NULL, de modo que
+  -- la homologacion a Linea JAMAS se aplica -- eso sigue siendo codigo muerto
+  -- y no se porta --, PERO la fuente no sale siempre 'CAM': sale de V_FUENTE
+  -- y 'CAM' solo cuando no hay coincidencia.
+  --
+  -- NO TENEMOS V_FUENTE NI cod_dw_fuente, asi que la fuente se deriva del
+  -- typeOfData en v_xpm_reporte_relacion_persona_ubica: los tipos de
+  -- suscriptor (1, 2, 3 y 17) dan 'SUS' y el resto 'CAM'. Decision del
+  -- usuario del 2026-10-21. Es divergencia de ORIGEN, no de valor.
+  --
+  -- Y ESO DEVUELVE EL GRANO DEL LEGADO, que es lo que de verdad estaba mal.
+  -- El GROUP BY de abajo incluye la fuente en la posicion 11, igual que
+  -- Novedad.sql:8670: con un literal constante el grano colapsaba a una fila
+  -- por RPU, y ahora es UNA FILA POR RPU Y FUENTE.
+  --
+  -- cod_dw_fuente sigue en NULL: es el codigo de la fuente en el catalogo del
+  -- legado y no tiene equivalente en el datashare. No se inventa.
   -- ------------------------------------------------------------
   DROP TABLE IF EXISTS bdm_tempo.stg_nov_ubica_agr;
   CREATE TABLE bdm_tempo.stg_nov_ubica_agr
@@ -489,7 +507,7 @@ BEGIN
          e9.ciudad,
          e9.departamento,
          e9.codigo_dane,
-         CAST('CAM' AS VARCHAR(30))       AS fuente,         -- ver la nota de la fuente, arriba
+         r.fuente                         AS fuente,         -- ver la nota de la fuente, arriba
          MIN(r.fecha_reporte)             AS reportado_desde,
          MAX(r.fecha_reporte)             AS ultimo_reporte,
          MAX(a.numero_entidades)          AS numero_entidades,
