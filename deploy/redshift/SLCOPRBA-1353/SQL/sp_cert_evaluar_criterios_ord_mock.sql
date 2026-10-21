@@ -282,7 +282,17 @@ BEGIN
   FROM ( SELECT DISTINCT cod_dw_persona_ubic
            FROM bdm_tempo.stg_cert_ord_base
           WHERE es_hija = 0 ) s
-  LEFT JOIN bdm_datos.rpu_orden_prioridad o
+  -- SE AGREGA ANTES DE UNIR (D-ORD-10, 2026-10-21). Desde que el ranking es
+  -- por canal, rpu_orden_prioridad tiene una fila por RPU Y CANAL: unir por
+  -- cod_dw_persona_ubic a secas MULTIPLICARIA las filas y el conteo del
+  -- detalle dejaria de ser "RPU con score" para pasar a ser "RPU por canal".
+  -- El veredicto no cambiaria -- un NULL solo aparece si no hay ninguna fila
+  -- --, pero el numero que el criterio imprime si, y un tablero que cuenta
+  -- otra cosa de la que dice miente aunque acierte. El MIN reproduce
+  -- exactamente el valor que esta tabla tenia antes del cambio.
+  LEFT JOIN ( SELECT cod_dw_persona_ubic, MIN(orden_prioridad) AS orden_prioridad
+                FROM bdm_datos.rpu_orden_prioridad
+               GROUP BY 1 ) o
     ON o.cod_dw_persona_ubic = s.cod_dw_persona_ubic;
 
   -- F4-07. Las hijas de Unificacion no reciben score. Dos mitades: que haya
@@ -482,7 +492,17 @@ BEGIN
   FROM ( SELECT DISTINCT cod_dw_persona_ubic
            FROM bdm_tempo.stg_cert_ord_base
           WHERE es_hija = 0 ) s
-  LEFT JOIN bdm_datos.rpu_orden_prioridad o
+  -- SE AGREGA ANTES DE UNIR (D-ORD-10, 2026-10-21). Desde que el ranking es
+  -- por canal, rpu_orden_prioridad tiene una fila por RPU Y CANAL: unir por
+  -- cod_dw_persona_ubic a secas MULTIPLICARIA las filas y el conteo del
+  -- detalle dejaria de ser "RPU con score" para pasar a ser "RPU por canal".
+  -- El veredicto no cambiaria -- un NULL solo aparece si no hay ninguna fila
+  -- --, pero el numero que el criterio imprime si, y un tablero que cuenta
+  -- otra cosa de la que dice miente aunque acierte. El MIN reproduce
+  -- exactamente el valor que esta tabla tenia antes del cambio.
+  LEFT JOIN ( SELECT cod_dw_persona_ubic, MIN(orden_prioridad) AS orden_prioridad
+                FROM bdm_datos.rpu_orden_prioridad
+               GROUP BY 1 ) o
     ON o.cod_dw_persona_ubic = s.cod_dw_persona_ubic;
 
   -- CA-F02. Las hijas no reciben score NI ranking. F4-07 cubre el score;
@@ -507,7 +527,10 @@ BEGIN
            FROM bdm_datos.unificacion_direccion_mock u ) h
   LEFT JOIN ( SELECT DISTINCT cod_dw_persona_ubic FROM bdm_tempo.stg_cert_ord_base ) s
     ON s.cod_dw_persona_ubic = h.cod_dw_persona_ubic
-  LEFT JOIN bdm_datos.rpu_orden_prioridad o
+  -- Agregada antes de unir, por lo mismo que las dos de arriba (D-ORD-10).
+  LEFT JOIN ( SELECT cod_dw_persona_ubic, MIN(orden_prioridad) AS orden_prioridad
+                FROM bdm_datos.rpu_orden_prioridad
+               GROUP BY 1 ) o
     ON o.cod_dw_persona_ubic = h.cod_dw_persona_ubic;
 
   -- CA-F04. Cero scores duplicados por (dato de contacto, canal).
