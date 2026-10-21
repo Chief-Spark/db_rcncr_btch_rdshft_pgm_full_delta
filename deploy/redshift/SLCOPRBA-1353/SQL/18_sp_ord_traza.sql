@@ -2,7 +2,7 @@
 -- 18_sp_ord_traza.sql - traza no bloqueante Ordenamiento
 -- ============================================================
 
-CREATE OR REPLACE PROCEDURE bdm_datos.ord_traza_inicio(
+CREATE OR REPLACE PROCEDURE bdm_datos.sp_rcn_ctl_ord_traza_inicio(
     p_corrida_id BIGINT,
     p_lote       INTEGER,
     p_etapa      VARCHAR
@@ -21,7 +21,7 @@ EXCEPTION
 END;
 $$;
 
-CREATE OR REPLACE PROCEDURE bdm_datos.ord_traza_fin(
+CREATE OR REPLACE PROCEDURE bdm_datos.sp_rcn_ctl_ord_traza_fin(
     p_corrida_id    BIGINT,
     p_etapa         VARCHAR,
     p_estado        VARCHAR,

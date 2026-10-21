@@ -74,58 +74,58 @@ BEGIN
     END IF;
 
     v_corrida_id := NULL;
-    CALL bdm_datos.ord_control_abrir(
+    CALL bdm_datos.sp_rcn_ctl_ord_abrir(
         v_modo_efectivo, v_lote, v_fecha, v_wm_anterior, v_bootstrap, v_corrida_id
     );
 
     BEGIN
         v_etapa_actual := 'preparar';
-        CALL bdm_datos.ord_traza_inicio(v_corrida_id, v_lote, 'preparar');
+        CALL bdm_datos.sp_rcn_ctl_ord_traza_inicio(v_corrida_id, v_lote, 'preparar');
         CALL bdm_datos.sp_ordenamiento_preparar_insumos_edf(
             v_modo_efectivo, v_lote, v_wm_anterior
         );
-        CALL bdm_datos.ord_traza_fin(v_corrida_id, 'preparar', 'completado', 0, 0);
+        CALL bdm_datos.sp_rcn_ctl_ord_traza_fin(v_corrida_id, 'preparar', 'completado', 0, 0);
 
         -- Fase 3. Despues de preparar, que es quien deja el insumo, y antes
         -- del scoring, que es el orden del legado.
         -- Fase 2, antes de la 3: el Portafolio es insumo del vector.
         v_etapa_actual := 'cuentas';
-        CALL bdm_datos.ord_traza_inicio(v_corrida_id, v_lote, 'cuentas');
+        CALL bdm_datos.sp_rcn_ctl_ord_traza_inicio(v_corrida_id, v_lote, 'cuentas');
         CALL bdm_datos.sp_ordenamiento_cuentas_edf(v_lote);
-        CALL bdm_datos.ord_traza_fin(v_corrida_id, 'cuentas', 'completado', 0, 0);
+        CALL bdm_datos.sp_rcn_ctl_ord_traza_fin(v_corrida_id, 'cuentas', 'completado', 0, 0);
 
         v_etapa_actual := 'ubicaciones';
-        CALL bdm_datos.ord_traza_inicio(v_corrida_id, v_lote, 'ubicaciones');
+        CALL bdm_datos.sp_rcn_ctl_ord_traza_inicio(v_corrida_id, v_lote, 'ubicaciones');
         CALL bdm_datos.sp_ordenamiento_ubicaciones_edf(v_lote);
-        CALL bdm_datos.ord_traza_fin(v_corrida_id, 'ubicaciones', 'completado', 0, 0);
+        CALL bdm_datos.sp_rcn_ctl_ord_traza_fin(v_corrida_id, 'ubicaciones', 'completado', 0, 0);
 
         v_etapa_actual := 'scoring_dir';
-        CALL bdm_datos.ord_traza_inicio(v_corrida_id, v_lote, 'scoring_dir');
+        CALL bdm_datos.sp_rcn_ctl_ord_traza_inicio(v_corrida_id, v_lote, 'scoring_dir');
         CALL bdm_datos.sp_ordenamiento_scoring_dir_edf();
-        CALL bdm_datos.ord_traza_fin(v_corrida_id, 'scoring_dir', 'completado', 0, 0);
+        CALL bdm_datos.sp_rcn_ctl_ord_traza_fin(v_corrida_id, 'scoring_dir', 'completado', 0, 0);
 
         v_etapa_actual := 'scoring_tel';
-        CALL bdm_datos.ord_traza_inicio(v_corrida_id, v_lote, 'scoring_tel');
+        CALL bdm_datos.sp_rcn_ctl_ord_traza_inicio(v_corrida_id, v_lote, 'scoring_tel');
         CALL bdm_datos.sp_ordenamiento_scoring_tel_edf();
-        CALL bdm_datos.ord_traza_fin(v_corrida_id, 'scoring_tel', 'completado', 0, 0);
+        CALL bdm_datos.sp_rcn_ctl_ord_traza_fin(v_corrida_id, 'scoring_tel', 'completado', 0, 0);
 
         v_etapa_actual := 'scoring_cel';
-        CALL bdm_datos.ord_traza_inicio(v_corrida_id, v_lote, 'scoring_cel');
+        CALL bdm_datos.sp_rcn_ctl_ord_traza_inicio(v_corrida_id, v_lote, 'scoring_cel');
         CALL bdm_datos.sp_ordenamiento_scoring_cel_edf();
-        CALL bdm_datos.ord_traza_fin(v_corrida_id, 'scoring_cel', 'completado', 0, 0);
+        CALL bdm_datos.sp_rcn_ctl_ord_traza_fin(v_corrida_id, 'scoring_cel', 'completado', 0, 0);
 
         v_etapa_actual := 'scoring_ema';
-        CALL bdm_datos.ord_traza_inicio(v_corrida_id, v_lote, 'scoring_ema');
+        CALL bdm_datos.sp_rcn_ctl_ord_traza_inicio(v_corrida_id, v_lote, 'scoring_ema');
         CALL bdm_datos.sp_ordenamiento_scoring_ema_edf();
-        CALL bdm_datos.ord_traza_fin(v_corrida_id, 'scoring_ema', 'completado', 0, 0);
+        CALL bdm_datos.sp_rcn_ctl_ord_traza_fin(v_corrida_id, 'scoring_ema', 'completado', 0, 0);
 
         v_etapa_actual := 'consolidacion';
-        CALL bdm_datos.ord_traza_inicio(v_corrida_id, v_lote, 'consolidacion');
+        CALL bdm_datos.sp_rcn_ctl_ord_traza_inicio(v_corrida_id, v_lote, 'consolidacion');
         CALL bdm_datos.sp_ordenamiento_consolidacion_edf();
-        CALL bdm_datos.ord_traza_fin(v_corrida_id, 'consolidacion', 'completado', 0, 0);
+        CALL bdm_datos.sp_rcn_ctl_ord_traza_fin(v_corrida_id, 'consolidacion', 'completado', 0, 0);
 
         v_etapa_actual := 'cleanup';
-        CALL bdm_datos.ord_traza_inicio(v_corrida_id, v_lote, 'cleanup');
+        CALL bdm_datos.sp_rcn_ctl_ord_traza_inicio(v_corrida_id, v_lote, 'cleanup');
         -- Conteos antes de dropear staging
         SELECT COUNT(*) INTO v_pers FROM bdm_tempo.stg_ord_personas_alcance;
         SELECT COUNT(*) INTO v_contactos FROM bdm_tempo.stg_insumo_direccion;
@@ -215,7 +215,7 @@ BEGIN
         UPDATE bdm_datos.ord_alcance_censo
            SET stg_residuales = v_stg_vivas
          WHERE corrida_id = v_corrida_id;
-        CALL bdm_datos.ord_traza_fin(v_corrida_id, 'cleanup', 'completado', 0, 0);
+        CALL bdm_datos.sp_rcn_ctl_ord_traza_fin(v_corrida_id, 'cleanup', 'completado', 0, 0);
 
         IF v_modo_efectivo = 'FULL' THEN
             SELECT MAX(rpu.fecha_relacion_persona_ubicaci)
@@ -235,17 +235,17 @@ BEGIN
             END IF;
         END IF;
 
-        CALL bdm_datos.ord_control_cerrar(
+        CALL bdm_datos.sp_rcn_ctl_ord_cerrar(
             v_corrida_id, 'completado', v_wm_nuevo, v_pers, v_contactos, v_scores
         );
     EXCEPTION
         WHEN OTHERS THEN
             IF v_etapa_actual IS NOT NULL THEN
-                CALL bdm_datos.ord_traza_fin(
+                CALL bdm_datos.sp_rcn_ctl_ord_traza_fin(
                     v_corrida_id, v_etapa_actual, 'fallido', 0, 0
                 );
             END IF;
-            CALL bdm_datos.ord_control_cerrar(
+            CALL bdm_datos.sp_rcn_ctl_ord_cerrar(
                 v_corrida_id, 'fallido', NULL, 0, 0, 0
             );
             RAISE;

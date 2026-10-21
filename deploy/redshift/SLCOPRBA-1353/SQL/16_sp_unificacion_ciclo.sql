@@ -25,8 +25,8 @@
 --   * TRUNCATE condicional al modo efectivo (solo FULL/Bootstrap, una vez al
 --     inicio) sobre bdm_datos.unificacion_direccion (Req 5.3, 10.2).
 --   * Encadenado R1 -> R2 -> GEO -> R3 propagando (v_modo_efectivo, v_lote,
---     v_fecha, v_wm_anterior) y envolviendo cada etapa con unif_traza_inicio /
---     unif_traza_fin, incluida una subfila por escenario de R2 (regla2_escN,
+--     v_fecha, v_wm_anterior) y envolviendo cada etapa con sp_rcn_ctl_unif_traza_inicio /
+--     sp_rcn_ctl_unif_traza_fin, incluida una subfila por escenario de R2 (regla2_escN,
 --     Req 13.3) (Req 1.4, 13.2, 13.3, 13.4, 13.5).
 --   * Materializacion de bdm_tempo.stg_unif_delta_ubic tras R2 (patron
 --     DROP-CREATE) con las cod_dw_ubic distintas del universo delta (Req 1.4).
@@ -43,7 +43,7 @@
 --     anterior (Req 3.4, 3.5).
 --   * Conteos globales (relaciones_entrada, personas_distintas via DISTINCT
 --     id_buro_persona, total_unificaciones por parejas de la Clave_Unificacion
---     del lote) y CALL unif_control_cerrar(..., 'completado', ...) (Req 4.3, 14.4).
+--     del lote) y CALL sp_rcn_ctl_unif_cerrar(..., 'completado', ...) (Req 4.3, 14.4).
 --   * Bloque EXCEPTION WHEN OTHERS: cierra la etapa en curso 'fallido' (traza no
 --     bloqueante, Req 13.8), marca la corrida 'fallido' con watermark_nuevo=NULL
 --     (conserva el anterior; el Watermark NO avanza, Req 4.4, 16.1) y RE-lanza el
@@ -93,7 +93,7 @@ DECLARE
     v_bootstrap     BOOLEAN := FALSE; -- TRUE si se forzo Bootstrap FULL (Req 2.3)
 
     -- Corrida (Task 4.2/4.3 la propagan a traza y cierre)
-    v_corrida_id    BIGINT;        -- generado por IDENTITY en unif_control_abrir
+    v_corrida_id    BIGINT;        -- generado por IDENTITY en sp_rcn_ctl_unif_abrir
 
     -- Avance del Watermark y conteos globales -- Task 4.3 (Req 2.2, 3.4, 3.5, 14.4)
     v_wm_maximo     DATE;          -- MAX(fecha) no nula del universo procesado (NULL si no hubo)
@@ -186,12 +186,12 @@ BEGIN
     -- (Req 4.2, 1.5, 2.3, 14.1)
     -- Inserta la fila 'en proceso' con el modo EFECTIVO, el lote, la
     -- Fecha_Proceso, el watermark de partida y la bandera de Bootstrap. El
-    -- corrida_id lo genera la columna IDENTITY(1,1) y unif_control_abrir lo
+    -- corrida_id lo genera la columna IDENTITY(1,1) y sp_rcn_ctl_unif_abrir lo
     -- devuelve por el parametro INOUT p_corrida_id para propagarlo a la traza
     -- por etapa (Task 4.2) y al cierre (Task 4.3).
     -- ========================================================
     v_corrida_id := NULL;
-    CALL bdm_datos.unif_control_abrir(
+    CALL bdm_datos.sp_rcn_ctl_unif_abrir(
         v_modo_efectivo,   -- p_modo (modo aplicado, Req 1.5)
         v_lote,            -- p_lote (Lote_Corrida)
         v_fecha,           -- p_fecha_proceso (Req 14.1)
@@ -225,8 +225,8 @@ BEGIN
     -- ========================================================
     -- (7) ENCADENADO R1 -> R2 -> GEO -> R3 CON TRAZA POR ETAPA -- Task 4.2
     -- (Req 1.4, 13.2, 13.3, 13.4, 13.5)
-    -- Cada etapa se envuelve con unif_traza_inicio (fila 'en proceso') y
-    -- unif_traza_fin (estado final + Metricas_Corrida). La traza es NO bloqueante
+    -- Cada etapa se envuelve con sp_rcn_ctl_unif_traza_inicio (fila 'en proceso') y
+    -- sp_rcn_ctl_unif_traza_fin (estado final + Metricas_Corrida). La traza es NO bloqueante
     -- (Req 13.8): sus procedimientos se tragan cualquier error internamente, por
     -- lo que envolver una etapa nunca aborta la unificacion por si mismo.
     --
@@ -256,7 +256,7 @@ BEGIN
     -- unificaciones, conteos GEO) se calculan/consolidan en la Task 4.3 al cerrar
     -- la corrida; en esta ola se cierran las etapas con conteos en 0 (marcadores)
     -- para dejar la estructura de traza completa. Se pasan 0 (no NULL) para
-    -- respetar el tipo BIGINT de la firma de unif_traza_fin.
+    -- respetar el tipo BIGINT de la firma de sp_rcn_ctl_unif_traza_fin.
 
     -- ========================================================
     -- BLOQUE PROTEGIDO (Task 4.3): encadenado (Task 4.2) + avance de Watermark y
@@ -264,7 +264,7 @@ BEGIN
     -- WHEN OTHERS. NONATOMIC habilita el manejo de excepciones en PLpgSQL, de modo
     -- que el fallo de CUALQUIER etapa (R1/R2/GEO/R3) o del cierre se captura para:
     --   * marcar la corrida 'fallido' SIN avanzar el Watermark (conserva
-    --     v_wm_anterior via unif_control_cerrar con watermark_nuevo=NULL, Req 4.4, 16.1),
+    --     v_wm_anterior via sp_rcn_ctl_unif_cerrar con watermark_nuevo=NULL, Req 4.4, 16.1),
     --   * cerrar la etapa en curso (v_etapa_actual) como 'fallido' (Req 13.6),
     --   * y RE-lanzar el error para propagarlo al Framework_Batch (Req 13.8: la
     --     traza nunca aborta por si misma; el que aborta es la etapa fallida).
@@ -274,12 +274,12 @@ BEGIN
     BEGIN
     -- ---- Etapa R1: regla1 ---------------------------------------------------
     v_etapa_actual := 'regla1';
-    CALL bdm_datos.unif_traza_inicio(v_corrida_id, v_lote, 'regla1');
+    CALL bdm_datos.sp_rcn_ctl_unif_traza_inicio(v_corrida_id, v_lote, 'regla1');
     CALL bdm_datos.sp_unificacion_regla1(
         in_solicitud, in_nit_suscriptor, in_path_archivo,
         v_modo_efectivo, v_lote::VARCHAR, v_wm_anterior::VARCHAR
     );
-    CALL bdm_datos.unif_traza_fin(v_corrida_id, 'regla1', 'completado', 0, 0, 0, NULL, NULL);
+    CALL bdm_datos.sp_rcn_ctl_unif_traza_fin(v_corrida_id, 'regla1', 'completado', 0, 0, 0, NULL, NULL);
 
     -- ---- Etapa R2: regla2 (+ subfila por escenario regla2_escN, Req 13.3) ----
     -- El orquestador R2 encadena internamente sus escenarios (esc1..esc6 +
@@ -288,24 +288,24 @@ BEGIN
     -- el Req 13.3. La subtraza por escenario es un marcador de granularidad en
     -- esta ola; sus metricas por escenario las consolidara la Task 4.3.
     v_etapa_actual := 'regla2';
-    CALL bdm_datos.unif_traza_inicio(v_corrida_id, v_lote, 'regla2');
-    CALL bdm_datos.unif_traza_inicio(v_corrida_id, v_lote, 'regla2_esc1');
-    CALL bdm_datos.unif_traza_inicio(v_corrida_id, v_lote, 'regla2_esc2');
-    CALL bdm_datos.unif_traza_inicio(v_corrida_id, v_lote, 'regla2_esc3');
-    CALL bdm_datos.unif_traza_inicio(v_corrida_id, v_lote, 'regla2_esc4');
-    CALL bdm_datos.unif_traza_inicio(v_corrida_id, v_lote, 'regla2_esc5');
-    CALL bdm_datos.unif_traza_inicio(v_corrida_id, v_lote, 'regla2_esc6');
+    CALL bdm_datos.sp_rcn_ctl_unif_traza_inicio(v_corrida_id, v_lote, 'regla2');
+    CALL bdm_datos.sp_rcn_ctl_unif_traza_inicio(v_corrida_id, v_lote, 'regla2_esc1');
+    CALL bdm_datos.sp_rcn_ctl_unif_traza_inicio(v_corrida_id, v_lote, 'regla2_esc2');
+    CALL bdm_datos.sp_rcn_ctl_unif_traza_inicio(v_corrida_id, v_lote, 'regla2_esc3');
+    CALL bdm_datos.sp_rcn_ctl_unif_traza_inicio(v_corrida_id, v_lote, 'regla2_esc4');
+    CALL bdm_datos.sp_rcn_ctl_unif_traza_inicio(v_corrida_id, v_lote, 'regla2_esc5');
+    CALL bdm_datos.sp_rcn_ctl_unif_traza_inicio(v_corrida_id, v_lote, 'regla2_esc6');
     CALL bdm_datos.sp_unificacion_regla2(
         in_solicitud, in_nit_suscriptor, in_path_archivo,
         v_modo_efectivo, v_lote::VARCHAR, v_wm_anterior::VARCHAR
     );
-    CALL bdm_datos.unif_traza_fin(v_corrida_id, 'regla2_esc1', 'completado', 0, 0, 0, NULL, NULL);
-    CALL bdm_datos.unif_traza_fin(v_corrida_id, 'regla2_esc2', 'completado', 0, 0, 0, NULL, NULL);
-    CALL bdm_datos.unif_traza_fin(v_corrida_id, 'regla2_esc3', 'completado', 0, 0, 0, NULL, NULL);
-    CALL bdm_datos.unif_traza_fin(v_corrida_id, 'regla2_esc4', 'completado', 0, 0, 0, NULL, NULL);
-    CALL bdm_datos.unif_traza_fin(v_corrida_id, 'regla2_esc5', 'completado', 0, 0, 0, NULL, NULL);
-    CALL bdm_datos.unif_traza_fin(v_corrida_id, 'regla2_esc6', 'completado', 0, 0, 0, NULL, NULL);
-    CALL bdm_datos.unif_traza_fin(v_corrida_id, 'regla2', 'completado', 0, 0, 0, NULL, NULL);
+    CALL bdm_datos.sp_rcn_ctl_unif_traza_fin(v_corrida_id, 'regla2_esc1', 'completado', 0, 0, 0, NULL, NULL);
+    CALL bdm_datos.sp_rcn_ctl_unif_traza_fin(v_corrida_id, 'regla2_esc2', 'completado', 0, 0, 0, NULL, NULL);
+    CALL bdm_datos.sp_rcn_ctl_unif_traza_fin(v_corrida_id, 'regla2_esc3', 'completado', 0, 0, 0, NULL, NULL);
+    CALL bdm_datos.sp_rcn_ctl_unif_traza_fin(v_corrida_id, 'regla2_esc4', 'completado', 0, 0, 0, NULL, NULL);
+    CALL bdm_datos.sp_rcn_ctl_unif_traza_fin(v_corrida_id, 'regla2_esc5', 'completado', 0, 0, 0, NULL, NULL);
+    CALL bdm_datos.sp_rcn_ctl_unif_traza_fin(v_corrida_id, 'regla2_esc6', 'completado', 0, 0, 0, NULL, NULL);
+    CALL bdm_datos.sp_rcn_ctl_unif_traza_fin(v_corrida_id, 'regla2', 'completado', 0, 0, 0, NULL, NULL);
 
     -- ---- Materializacion del universo delta tras R2 -------------------------
     -- (Req 1.4; design "Materializacion del universo delta")
@@ -349,7 +349,7 @@ BEGIN
     -- el envio falla, igual se revisa si ArcGIS dejo resultados de Lotes
     -- anteriores, y lo que se cargue entra en esta misma R3.
     v_etapa_actual := 'geo';
-    CALL bdm_datos.unif_traza_inicio(v_corrida_id, v_lote, 'geo');
+    CALL bdm_datos.sp_rcn_ctl_unif_traza_inicio(v_corrida_id, v_lote, 'geo');
     v_geo_ok := TRUE;
 
     BEGIN
@@ -372,19 +372,19 @@ BEGIN
     END;
 
     IF v_geo_ok THEN
-        CALL bdm_datos.unif_traza_fin(v_corrida_id, 'geo', 'completado', 0, 0, 0, 0, 0);
+        CALL bdm_datos.sp_rcn_ctl_unif_traza_fin(v_corrida_id, 'geo', 'completado', 0, 0, 0, 0, 0);
     ELSE
-        CALL bdm_datos.unif_traza_fin(v_corrida_id, 'geo', 'fallido', 0, 0, 0, 0, 0);
+        CALL bdm_datos.sp_rcn_ctl_unif_traza_fin(v_corrida_id, 'geo', 'fallido', 0, 0, 0, 0, 0);
     END IF;
 
     -- ---- Etapa R3: regla3 ----------------------------------------------------
     v_etapa_actual := 'regla3';
-    CALL bdm_datos.unif_traza_inicio(v_corrida_id, v_lote, 'regla3');
+    CALL bdm_datos.sp_rcn_ctl_unif_traza_inicio(v_corrida_id, v_lote, 'regla3');
     CALL bdm_datos.sp_unificacion_regla3(
         in_solicitud, in_nit_suscriptor, in_path_archivo,
         v_modo_efectivo, v_lote::VARCHAR, v_wm_anterior::VARCHAR
     );
-    CALL bdm_datos.unif_traza_fin(v_corrida_id, 'regla3', 'completado', 0, 0, 0, NULL, NULL);
+    CALL bdm_datos.sp_rcn_ctl_unif_traza_fin(v_corrida_id, 'regla3', 'completado', 0, 0, 0, NULL, NULL);
 
     -- ========================================================
     -- (8) CALCULO DEL WATERMARK NUEVO -- Task 4.3 (Req 2.2, 3.4, 3.5)
@@ -428,7 +428,7 @@ BEGIN
 
     -- ========================================================
     -- (9) CONTEOS GLOBALES DE LA CORRIDA -- Task 4.3 (Req 14.4)
-    -- Metricas_Corrida globales que persiste unif_control_cerrar:
+    -- Metricas_Corrida globales que persiste sp_rcn_ctl_unif_cerrar:
     --   * relaciones_entrada  : relaciones del universo procesado (mismo predicado
     --                           de ventana que el Watermark; incluye fecha NULL en
     --                           DELTA por ser parte del delta, Req 3.2).
@@ -460,10 +460,10 @@ BEGIN
     -- ========================================================
     -- (10) CIERRE 'completado' DE LA CORRIDA -- Task 4.3 (Req 4.3, 14.4)
     -- Fija watermark_nuevo (solo se persiste en 'completado', ver
-    -- unif_control_cerrar) y las Metricas_Corrida globales. Firma exacta:
-    -- unif_control_cerrar(BIGINT, VARCHAR, DATE, BIGINT, BIGINT, BIGINT).
+    -- sp_rcn_ctl_unif_cerrar) y las Metricas_Corrida globales. Firma exacta:
+    -- sp_rcn_ctl_unif_cerrar(BIGINT, VARCHAR, DATE, BIGINT, BIGINT, BIGINT).
     -- ========================================================
-    CALL bdm_datos.unif_control_cerrar(
+    CALL bdm_datos.sp_rcn_ctl_unif_cerrar(
         v_corrida_id,      -- p_corrida_id
         'completado',      -- p_estado (Req 4.3)
         v_wm_nuevo,        -- p_watermark_nuevo (sembrado/avanzado/conservado)
@@ -479,9 +479,9 @@ BEGIN
             -- Se llega aqui si CUALQUIER etapa (R1/R2/GEO/R3) o el bloque de
             -- Watermark/cierre lanzo un error. Acciones:
             --   1. Cerrar la etapa en curso (v_etapa_actual) como 'fallido' con
-            --      conteos en 0 (marcadores); unif_traza_fin es NO bloqueante
+            --      conteos en 0 (marcadores); sp_rcn_ctl_unif_traza_fin es NO bloqueante
             --      (Req 13.8), no puede volver a abortar aqui.
-            --   2. Marcar la corrida 'fallido' via unif_control_cerrar con
+            --   2. Marcar la corrida 'fallido' via sp_rcn_ctl_unif_cerrar con
             --      watermark_nuevo = NULL: el procedimiento NO persiste el
             --      watermark en 'fallido', de modo que se CONSERVA el
             --      watermark_anterior y el Watermark NO avanza (Req 4.4, 16.1).
@@ -490,13 +490,13 @@ BEGIN
             --      DELTA reprocesa la misma ventana de forma idempotente (Req 16).
             -- ================================================
             IF v_etapa_actual IS NOT NULL THEN
-                CALL bdm_datos.unif_traza_fin(
+                CALL bdm_datos.sp_rcn_ctl_unif_traza_fin(
                     v_corrida_id, v_etapa_actual, 'fallido',
                     0, 0, 0, NULL, NULL
                 );
             END IF;
 
-            CALL bdm_datos.unif_control_cerrar(
+            CALL bdm_datos.sp_rcn_ctl_unif_cerrar(
                 v_corrida_id,   -- p_corrida_id
                 'fallido',      -- p_estado (Req 4.4)
                 NULL,           -- p_watermark_nuevo NULL => conserva el anterior (Req 4.4, 16.1)

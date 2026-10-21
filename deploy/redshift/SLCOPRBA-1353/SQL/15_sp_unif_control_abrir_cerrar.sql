@@ -1,8 +1,8 @@
 -- ============================================================
 -- 15_sp_unif_control_abrir_cerrar.sql
 -- Procedimientos de control de corrida de la Unificacion FULL/DELTA:
---   bdm_datos.unif_control_abrir  -> abre la fila de corrida 'en proceso'
---   bdm_datos.unif_control_cerrar -> cierra la corrida (completado|fallido)
+--   bdm_datos.sp_rcn_ctl_unif_abrir  -> abre la fila de corrida 'en proceso'
+--   bdm_datos.sp_rcn_ctl_unif_cerrar -> cierra la corrida (completado|fallido)
 -- (repo pgm / db_rcncr_btch_rdshft_pgm)
 -- Cluster consumidor: reconocerbatch / dba_rncr_batch
 -- Objetos permanentes en bdm_datos. Idempotente (CREATE OR REPLACE).
@@ -18,12 +18,12 @@
 -- ============================================================
 
 -- ============================================================
--- bdm_datos.unif_control_abrir
+-- bdm_datos.sp_rcn_ctl_unif_abrir
 -- Inserta la fila de apertura de la corrida en estado 'en proceso' SIN
 -- especificar corrida_id (lo genera la columna IDENTITY(1,1) de unif_control) y
 -- DEVUELVE el corrida_id generado por el parametro de salida p_corrida_id para
 -- que el orquestador lo propague a la traza (unif_traza_*) y al cierre
--- (unif_control_cerrar).
+-- (sp_rcn_ctl_unif_cerrar).
 --
 -- Recuperacion del corrida_id generado por IDENTITY (patron Redshift):
 -- Redshift no expone lastval()/RETURNING utilizable en un OUT de procedimiento,
@@ -36,7 +36,7 @@
 -- Requirements: 4.2 (fila 'en proceso'), 1.5 (modo efectivo), 2.3 (bootstrap),
 --               14.1 (fecha_proceso)
 -- ============================================================
-CREATE OR REPLACE PROCEDURE bdm_datos.unif_control_abrir(
+CREATE OR REPLACE PROCEDURE bdm_datos.sp_rcn_ctl_unif_abrir(
     p_modo               VARCHAR,     -- modo efectivamente aplicado (FULL|DELTA), Req 1.5
     p_lote               INTEGER,     -- Lote_Corrida externo
     p_fecha_proceso      DATE,        -- Fecha_Proceso, Req 14.1
@@ -75,7 +75,7 @@ END;
 $$;
 
 -- ============================================================
--- bdm_datos.unif_control_cerrar
+-- bdm_datos.sp_rcn_ctl_unif_cerrar
 -- Actualiza la fila de la corrida al estado final:
 --   * 'completado' -> fija watermark_nuevo (Req 4.3) y conteos globales.
 --   * 'fallido'    -> conserva el watermark_anterior (NO fija watermark_nuevo),
@@ -87,7 +87,7 @@ $$;
 -- Requirements: 4.3 (completado + watermark_nuevo), 4.4 (fallido conserva
 --               watermark), 4.5 (watermark efectivo), 14.4 (conteos globales)
 -- ============================================================
-CREATE OR REPLACE PROCEDURE bdm_datos.unif_control_cerrar(
+CREATE OR REPLACE PROCEDURE bdm_datos.sp_rcn_ctl_unif_cerrar(
     p_corrida_id          BIGINT,   -- corrida a cerrar (generado por IDENTITY en abrir)
     p_estado              VARCHAR,  -- 'completado' | 'fallido' (Req 4.3, 4.4)
     p_watermark_nuevo     DATE,     -- watermark resultante (solo si 'completado')

@@ -3,6 +3,6 @@
 -- Redshift NO soporta DROP PROCEDURE IF EXISTS (syntax error at or near
 -- "EXISTS"). Firma EXACTA, incluido el INOUT de salida -- lecciones #12 y #14.
 -- Orden INVERSO al de creacion.
-DROP PROCEDURE bdm_datos.nov_control_etapa_marcar(BIGINT, INTEGER, VARCHAR, VARCHAR, BIGINT, BIGINT, BIGINT, BIGINT, BIGINT);
-DROP PROCEDURE bdm_datos.nov_control_cerrar(BIGINT, VARCHAR, DATE, BIGINT, BIGINT, BIGINT);
-DROP PROCEDURE bdm_datos.nov_control_abrir(VARCHAR, INTEGER, DATE, DATE, BOOLEAN, BIGINT);
+DROP PROCEDURE bdm_datos.sp_rcn_ctl_nov_etapa_marcar(BIGINT, INTEGER, VARCHAR, VARCHAR, BIGINT, BIGINT, BIGINT, BIGINT, BIGINT);
+DROP PROCEDURE bdm_datos.sp_rcn_ctl_nov_cerrar(BIGINT, VARCHAR, DATE, BIGINT, BIGINT, BIGINT);
+DROP PROCEDURE bdm_datos.sp_rcn_ctl_nov_abrir(VARCHAR, INTEGER, DATE, DATE, BOOLEAN, BIGINT);

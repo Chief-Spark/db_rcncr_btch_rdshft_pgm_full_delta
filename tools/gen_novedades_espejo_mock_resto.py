@@ -28,9 +28,9 @@ SUST = [
     ("bdm_tempo.stg_nov_ubiagr_sev",                    "bdm_tempo.stg_mock_nov_ubiagr_sev"),
     ("bdm_tempo.stg_nov_acteco_etapa_1",                "bdm_tempo.stg_nov_acteco_etapa_1_mock"),
     ("bdm_datos.mat_info_actividad_economica",          "bdm_datos.mat_info_actividad_economica_mock"),
-    ("bdm_datos.nov_control_etapa_marcar",              "bdm_datos.nov_control_mock_etapa_marcar"),
-    ("bdm_datos.nov_control_abrir",                     "bdm_datos.nov_control_mock_abrir"),
-    ("bdm_datos.nov_control_cerrar",                    "bdm_datos.nov_control_mock_cerrar"),
+    ("bdm_datos.sp_rcn_ctl_nov_etapa_marcar",              "bdm_datos.nov_control_mock_etapa_marcar"),
+    ("bdm_datos.sp_rcn_ctl_nov_abrir",                     "bdm_datos.nov_control_mock_abrir"),
+    ("bdm_datos.sp_rcn_ctl_nov_cerrar",                    "bdm_datos.nov_control_mock_cerrar"),
     # vistas de insumo. El orquestador lee la relacion persona-ubicacion para
     # calcular el watermark nuevo, igual que hace 16_sp_unificacion_ciclo.sql,
     # asi que el espejo tiene que apuntar a la vista mock como el resto.

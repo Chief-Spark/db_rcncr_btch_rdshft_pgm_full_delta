@@ -13,5 +13,5 @@
 -- Orden INVERSO al de creacion: primero cerrar, luego abrir.
 -- ============================================================
 
-DROP PROCEDURE bdm_datos.unif_control_cerrar(BIGINT, VARCHAR, DATE, BIGINT, BIGINT, BIGINT);
-DROP PROCEDURE bdm_datos.unif_control_abrir(VARCHAR, INTEGER, DATE, DATE, BOOLEAN, BIGINT);
+DROP PROCEDURE bdm_datos.sp_rcn_ctl_unif_cerrar(BIGINT, VARCHAR, DATE, BIGINT, BIGINT, BIGINT);
+DROP PROCEDURE bdm_datos.sp_rcn_ctl_unif_abrir(VARCHAR, INTEGER, DATE, DATE, BOOLEAN, BIGINT);

@@ -7,8 +7,8 @@
 -- Spec: unificacion-full-delta (Task 3.3)
 -- Requirements: 13.4, 13.5, 13.6, 13.7, 13.8, 13.9
 -- ------------------------------------------------------------
--- Observabilidad NO bloqueante (Req 13.8): tanto unif_traza_inicio como
--- unif_traza_fin envuelven su INSERT/UPDATE en un bloque EXCEPTION WHEN OTHERS
+-- Observabilidad NO bloqueante (Req 13.8): tanto sp_rcn_ctl_unif_traza_inicio como
+-- sp_rcn_ctl_unif_traza_fin envuelven su INSERT/UPDATE en un bloque EXCEPTION WHEN OTHERS
 -- que se traga silenciosamente cualquier error (NULL, no re-lanza), de modo que
 -- un fallo de traza (contencion, error transitorio) nunca aborta la unificacion.
 -- Los conteos son de monitoreo, no de control de flujo.
@@ -22,23 +22,23 @@
 -- (lecciones #12/#14). El rollback usa DROP PROCEDURE nombre(<firma exacta>);
 -- sin IF EXISTS. Ver rev-sql/14_rollback_traza_procedures.sql.
 -- Firmas exactas de este archivo:
---   bdm_datos.unif_traza_inicio(BIGINT, INTEGER, VARCHAR)
---   bdm_datos.unif_traza_fin(BIGINT, VARCHAR, VARCHAR, BIGINT, BIGINT, BIGINT, BIGINT, BIGINT)
+--   bdm_datos.sp_rcn_ctl_unif_traza_inicio(BIGINT, INTEGER, VARCHAR)
+--   bdm_datos.sp_rcn_ctl_unif_traza_fin(BIGINT, VARCHAR, VARCHAR, BIGINT, BIGINT, BIGINT, BIGINT, BIGINT)
 -- ============================================================
 
 CREATE SCHEMA IF NOT EXISTS bdm_datos;
 
 -- ============================================================
--- bdm_datos.unif_traza_inicio (Task 3.3) -- Req 13.4, 13.8, 13.9
+-- bdm_datos.sp_rcn_ctl_unif_traza_inicio (Task 3.3) -- Req 13.4, 13.8, 13.9
 -- Inserta la fila de una etapa en estado 'en proceso' con su fecha_hora_inicio.
 -- Parametros:
 --   p_corrida_id : corrida a la que pertenece la etapa (FK logico a unif_control)
 --   p_lote       : Lote_Corrida externo (Req 13.1)
 --   p_etapa      : regla1 | regla2 | regla2_escN | geo | regla3 (Req 13.2, 13.3)
--- Las metricas y los conteos GEO se completan al cierre (unif_traza_fin).
+-- Las metricas y los conteos GEO se completan al cierre (sp_rcn_ctl_unif_traza_fin).
 -- NO bloqueante: cualquier fallo del INSERT se traga (Req 13.8).
 -- ============================================================
-CREATE OR REPLACE PROCEDURE bdm_datos.unif_traza_inicio(
+CREATE OR REPLACE PROCEDURE bdm_datos.sp_rcn_ctl_unif_traza_inicio(
     p_corrida_id BIGINT,
     p_lote       INTEGER,
     p_etapa      VARCHAR
@@ -71,7 +71,7 @@ END;
 $$;
 
 -- ============================================================
--- bdm_datos.unif_traza_fin (Task 3.3) -- Req 13.5, 13.6, 13.7, 13.8, 13.9
+-- bdm_datos.sp_rcn_ctl_unif_traza_fin (Task 3.3) -- Req 13.5, 13.6, 13.7, 13.8, 13.9
 -- Actualiza la fila de la etapa con el estado final, su fecha_hora_fin y las
 -- Metricas_Corrida por etapa: relaciones de entrada, personas distintas y
 -- unificaciones producidas (Req 13.6). Cuando la etapa es 'geo' fija tambien
@@ -88,7 +88,7 @@ $$;
 --   p_geo_cargados: candidatos_geo_cargados  (solo etapa 'geo', Req 13.7)
 -- NO bloqueante: cualquier fallo del UPDATE se traga (Req 13.8).
 -- ============================================================
-CREATE OR REPLACE PROCEDURE bdm_datos.unif_traza_fin(
+CREATE OR REPLACE PROCEDURE bdm_datos.sp_rcn_ctl_unif_traza_fin(
     p_corrida_id   BIGINT,
     p_etapa        VARCHAR,
     p_estado       VARCHAR,

@@ -11,10 +11,10 @@
 -- El detalle completo esta en 31_ddl_nov_control.sql.
 
 -- ============================================================
--- bdm_datos.nov_control_abrir
+-- bdm_datos.sp_rcn_ctl_nov_abrir
 -- Abre la corrida en estado 'en proceso' y devuelve su corrida_id.
 -- ============================================================
-CREATE OR REPLACE PROCEDURE bdm_datos.nov_control_abrir(
+CREATE OR REPLACE PROCEDURE bdm_datos.sp_rcn_ctl_nov_abrir(
     p_modo               VARCHAR,     -- modo efectivamente aplicado (FULL|DELTA)
     p_lote               INTEGER,     -- Lote_Corrida externo
     p_fecha_proceso      DATE,
@@ -53,13 +53,13 @@ END;
 $$;
 
 -- ============================================================
--- bdm_datos.nov_control_cerrar
+-- bdm_datos.sp_rcn_ctl_nov_cerrar
 -- Cierra la corrida:
 --   * 'completado' -> fija watermark_nuevo y los conteos globales.
 --   * 'fallido'    -> conserva el watermark anterior y NO fija el nuevo, de
 --                     modo que MAX(watermark_nuevo) no lo tome como avance.
 -- ============================================================
-CREATE OR REPLACE PROCEDURE bdm_datos.nov_control_cerrar(
+CREATE OR REPLACE PROCEDURE bdm_datos.sp_rcn_ctl_nov_cerrar(
     p_corrida_id         BIGINT,
     p_estado             VARCHAR,  -- 'completado' | 'fallido'
     p_watermark_nuevo    DATE,
@@ -85,12 +85,12 @@ END;
 $$;
 
 -- ============================================================
--- bdm_datos.nov_control_etapa_marcar
+-- bdm_datos.sp_rcn_ctl_nov_etapa_marcar
 -- Traza por dominio. Un solo SP para abrir y cerrar: la etapa se identifica
 -- por (corrida_id, etapa) y el UPDATE no encuentra fila la primera vez, de
 -- modo que se inserta. Mismo idioma que la traza de Unificacion.
 -- ============================================================
-CREATE OR REPLACE PROCEDURE bdm_datos.nov_control_etapa_marcar(
+CREATE OR REPLACE PROCEDURE bdm_datos.sp_rcn_ctl_nov_etapa_marcar(
     p_corrida_id         BIGINT,
     p_lote               INTEGER,
     p_etapa              VARCHAR,  -- ubicacion | catalogo | info_basica | ...

@@ -70,11 +70,11 @@ BEGIN
         v_modo := 'FULL';
     END IF;
 
-    CALL bdm_datos.nov_control_abrir(v_modo, v_lote, v_fecha,
+    CALL bdm_datos.sp_rcn_ctl_nov_abrir(v_modo, v_lote, v_fecha,
                                      v_watermark, v_bootstrap, v_corrida_id);
 
     -- ---------- dominio UBICACION ----------
-    CALL bdm_datos.nov_control_etapa_marcar(v_corrida_id, v_lote, 'ubicacion',
+    CALL bdm_datos.sp_rcn_ctl_nov_etapa_marcar(v_corrida_id, v_lote, 'ubicacion',
                                             'en proceso', NULL, NULL, NULL, NULL, NULL);
 
     CALL bdm_datos.sp_novedades_ubicacion_edf(v_modo, v_watermark);
@@ -97,7 +97,7 @@ BEGIN
     v_cambios := COALESCE(v_cambios, 0);
     v_bajas   := COALESCE(v_bajas, 0);
 
-    CALL bdm_datos.nov_control_etapa_marcar(v_corrida_id, v_lote, 'ubicacion',
+    CALL bdm_datos.sp_rcn_ctl_nov_etapa_marcar(v_corrida_id, v_lote, 'ubicacion',
                                             'completado', v_entrada, v_personas,
                                             v_altas, v_cambios, v_bajas);
 
@@ -107,7 +107,7 @@ BEGIN
   -- es parte de lo que se porta. Cuando entren los dominios que SI leen las
   -- salidas de Ubicacion (Catalogo, Contact, Historial, PICalculados_Ctls y
   -- Ubi_Agregada), el orden dejara de ser una convencion y sera un requisito.
-  CALL bdm_datos.nov_control_etapa_marcar(v_corrida_id, v_lote, 'actividad_economica',
+  CALL bdm_datos.sp_rcn_ctl_nov_etapa_marcar(v_corrida_id, v_lote, 'actividad_economica',
                                           'en proceso', NULL, NULL, NULL, NULL, NULL);
 
   CALL bdm_datos.sp_novedades_actividad_economica_edf(v_modo, v_watermark);
@@ -128,7 +128,7 @@ BEGIN
   -- nunca. Su Severidad no tiene rama que devuelva 2 (120.TPT:186-197), de
   -- modo que el DELETE del 130.TPT:753 es codigo muerto. Contar 'E' aqui
   -- sugeriria que puede haberlas.
-  CALL bdm_datos.nov_control_etapa_marcar(v_corrida_id, v_lote, 'actividad_economica',
+  CALL bdm_datos.sp_rcn_ctl_nov_etapa_marcar(v_corrida_id, v_lote, 'actividad_economica',
                                           'completado', v_entrada_ae, v_personas_ae,
                                           v_altas_ae, v_cambios_ae, 0);
 
@@ -139,7 +139,7 @@ BEGIN
   -- defecto, que es la misma leccion del ciclo GEO y de Novedades entera.
   -- Y despues de Actividad Economica, que es el orden en que el 111.BTQ
   -- invoca los diez SP del legado.
-  CALL bdm_datos.nov_control_etapa_marcar(v_corrida_id, v_lote, 'ubi_agregada',
+  CALL bdm_datos.sp_rcn_ctl_nov_etapa_marcar(v_corrida_id, v_lote, 'ubi_agregada',
                                           'en proceso', NULL, NULL, NULL, NULL, NULL);
 
   CALL bdm_datos.sp_novedades_ubi_agregada_edf();
@@ -166,7 +166,7 @@ BEGIN
   -- Las bajas van a 0 LITERAL, igual que en Actividad Economica: la Severidad
   -- de este dominio no tiene rama que devuelva 2 (120.TPT:406-442), de modo
   -- que el DELETE del 130.TPT:1135-1147 es codigo muerto.
-  CALL bdm_datos.nov_control_etapa_marcar(v_corrida_id, v_lote, 'ubi_agregada',
+  CALL bdm_datos.sp_rcn_ctl_nov_etapa_marcar(v_corrida_id, v_lote, 'ubi_agregada',
                                           'completado', v_entrada_ag, v_personas_ag,
                                           v_altas_ag, v_cambios_ag, 0);
 
@@ -214,7 +214,7 @@ BEGIN
     -- ---------- cierre de la corrida ----------
     SELECT COUNT(*) INTO v_escritas FROM bdm_datos.mat_info_ubicacion;
 
-    CALL bdm_datos.nov_control_cerrar(v_corrida_id, 'completado', v_wm_nuevo,
+    CALL bdm_datos.sp_rcn_ctl_nov_cerrar(v_corrida_id, 'completado', v_wm_nuevo,
                                       v_entrada, v_personas, v_escritas);
 
     RAISE INFO 'sp_novedades_ciclo_edf: corrida % lote % modo % completada; entrada %, personas %, altas %, cambios %, bajas %.',

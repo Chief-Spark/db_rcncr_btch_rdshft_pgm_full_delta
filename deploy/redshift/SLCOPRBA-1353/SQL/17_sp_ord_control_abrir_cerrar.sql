@@ -6,7 +6,7 @@
 
 CREATE SCHEMA IF NOT EXISTS bdm_datos;
 
-CREATE OR REPLACE PROCEDURE bdm_datos.ord_control_abrir(
+CREATE OR REPLACE PROCEDURE bdm_datos.sp_rcn_ctl_ord_abrir(
     p_modo               VARCHAR,
     p_lote               INTEGER,
     p_fecha_proceso      DATE,
@@ -50,7 +50,7 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE PROCEDURE bdm_datos.ord_control_cerrar(
+CREATE OR REPLACE PROCEDURE bdm_datos.sp_rcn_ctl_ord_cerrar(
     p_corrida_id         BIGINT,
     p_estado             VARCHAR,
     p_watermark_nuevo    DATE,

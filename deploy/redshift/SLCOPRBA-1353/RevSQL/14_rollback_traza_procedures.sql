@@ -10,10 +10,10 @@
 -- Rollback de PROCEDIMIENTOS: Redshift NO soporta DROP PROCEDURE IF EXISTS
 -- (lecciones #12/#14). Se usa DROP PROCEDURE nombre(<firma exacta>); sin IF EXISTS.
 -- La firma exacta importa: debe coincidir con los tipos declarados en 14_traza_procedures.sql.
--- Orden INVERSO a la creacion: se creo primero unif_traza_inicio y luego
--- unif_traza_fin, por lo que aqui se elimina primero unif_traza_fin.
+-- Orden INVERSO a la creacion: se creo primero sp_rcn_ctl_unif_traza_inicio y luego
+-- sp_rcn_ctl_unif_traza_fin, por lo que aqui se elimina primero sp_rcn_ctl_unif_traza_fin.
 -- NOTA: no se elimina el schema bdm_datos porque es compartido.
 -- ============================================================
 
-DROP PROCEDURE bdm_datos.unif_traza_fin(BIGINT, VARCHAR, VARCHAR, BIGINT, BIGINT, BIGINT, BIGINT, BIGINT);
-DROP PROCEDURE bdm_datos.unif_traza_inicio(BIGINT, INTEGER, VARCHAR);
+DROP PROCEDURE bdm_datos.sp_rcn_ctl_unif_traza_fin(BIGINT, VARCHAR, VARCHAR, BIGINT, BIGINT, BIGINT, BIGINT, BIGINT);
+DROP PROCEDURE bdm_datos.sp_rcn_ctl_unif_traza_inicio(BIGINT, INTEGER, VARCHAR);
