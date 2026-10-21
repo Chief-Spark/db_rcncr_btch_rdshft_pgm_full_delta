@@ -54,6 +54,8 @@ DECLARE
     v_personas_ib BIGINT;
     v_entrada_pi  BIGINT;
     v_ubic_pi     BIGINT;
+    v_entrada_mv  BIGINT;
+    v_personas_mv BIGINT;
 BEGIN
     -- SLCOPRBA-1398: el slot 4 trae el MNEMOTECNICO, no el modo.
     v_modo  := bdm_datos.fw_resolver_param('MODO', in_nemotecnico);
@@ -280,6 +282,38 @@ BEGIN
   --   ejercitando.
   CALL bdm_datos.sp_rcn_ctl_nov_etapa_marcar(v_corrida_id, v_lote, 'punto_interes',
                                           'completado', v_entrada_pi, v_ubic_pi,
+                                          NULL, NULL, NULL);
+
+  -- ---------- MOVILIDAD ----------
+  -- VA AL FINAL, Y NO ES CONVENCION: su universo es la INTERSECCION de la
+  -- etapa 9 de Ubicacion con la tabla de Info Basica, que es el TMP_LUL del
+  -- legado (Novedad.sql:1719-1725). Necesita que las dos esten escritas, y la
+  -- de Info Basica se escribe en la etapa de arriba. Invertido el orden
+  -- saldria vacio por un efecto de secuencia y no por un defecto.
+  --
+  -- SEIS de las ocho columnas se pueblan. Las dos que no: descripcion (falta
+  -- V_INDICADOR_MOVILIDAD) y novedad_2 (falta V_Hom_Ind_Mov_Linea).
+  -- Y se portan TRES de los cuatro indicadores: falta Cambio de Localidad,
+  -- porque LOCALIDAD no existe en EDF. Detalle en
+  -- sp_novedades_movilidad_edf.sql.
+  CALL bdm_datos.sp_rcn_ctl_nov_etapa_marcar(v_corrida_id, v_lote, 'movilidad',
+                                          'en proceso', NULL, NULL, NULL, NULL, NULL);
+
+  CALL bdm_datos.sp_novedades_movilidad_edf(v_lote);
+
+  SELECT COUNT(*), COUNT(DISTINCT info_basica_id)
+    INTO v_entrada_mv, v_personas_mv
+    FROM bdm_datos.mat_info_movilidad;
+
+  -- CERO AQUI ES UN RESULTADO VALIDO Y NO UN FALLO, al contrario que en los
+  -- otros dominios: esta tabla es de EVENTOS y en una corrida donde nadie se
+  -- mudo no hay nada que publicar. En la PRIMERA corrida de un ambiente sale
+  -- cero por construccion -- no hay foto anterior contra la que comparar --, y
+  -- eso es correcto: una persona vista por primera vez no se mudo.
+  --   altas / cambios / bajas en NULL por lo de siempre: foto completa, sin
+  --   estado previo contra el que calcular un delta.
+  CALL bdm_datos.sp_rcn_ctl_nov_etapa_marcar(v_corrida_id, v_lote, 'movilidad',
+                                          'completado', v_entrada_mv, v_personas_mv,
                                           NULL, NULL, NULL);
 
   -- ---------- el watermark nuevo ----------

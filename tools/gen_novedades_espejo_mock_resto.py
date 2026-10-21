@@ -41,6 +41,10 @@ SUST = [
     ("bdm_datos.sp_novedades_punto_interes_edf",        "bdm_datos.sp_novedades_punto_interes_mock"),
     ("bdm_datos.mat_info_punto_interes",                "bdm_datos.mat_info_punto_interes_mock"),
     ("bdm_datos.geo_distancias",                        "bdm_datos.geo_distancias_mock"),
+    # Dominio MOVILIDAD. mat_info_basica va tambien porque el universo es la
+    # interseccion con ella (el TMP_LUL del legado).
+    ("bdm_datos.sp_novedades_movilidad_edf",            "bdm_datos.sp_novedades_movilidad_mock"),
+    ("bdm_datos.mat_info_movilidad",                    "bdm_datos.mat_info_movilidad_mock"),
     ("bdm_datos.mat_info_actividad_economica",          "bdm_datos.mat_info_actividad_economica_mock"),
     ("bdm_datos.sp_rcn_ctl_nov_etapa_marcar",              "bdm_datos.nov_control_mock_etapa_marcar"),
     ("bdm_datos.sp_rcn_ctl_nov_abrir",                     "bdm_datos.nov_control_mock_abrir"),

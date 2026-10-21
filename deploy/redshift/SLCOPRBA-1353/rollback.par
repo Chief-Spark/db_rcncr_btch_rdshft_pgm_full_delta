@@ -1,5 +1,7 @@
 sp_mock_ciclo.sql
 sp_cert_evaluar_criterios_nov_mock.sql
+sp_novedades_movilidad_edf.sql
+sp_novedades_movilidad_mock.sql
 sp_novedades_punto_interes_edf.sql
 sp_novedades_punto_interes_mock.sql
 sp_novedades_info_basica_edf.sql
