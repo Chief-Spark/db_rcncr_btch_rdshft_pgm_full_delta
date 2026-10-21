@@ -1,5 +1,7 @@
 sp_mock_ciclo.sql
 sp_cert_evaluar_criterios_nov_mock.sql
+sp_novedades_punto_interes_edf.sql
+sp_novedades_punto_interes_mock.sql
 sp_novedades_info_basica_edf.sql
 sp_novedades_info_basica_mock.sql
 sp_novedades_contactabilidad_edf.sql
@@ -63,6 +65,8 @@ sp_geo_reenganchar_r3_mock.sql
 sp_geo_reenganchar_r3.sql
 sp_rcn_geo_02_buscar_resultados_mock.sql
 sp_rcn_geo_02_buscar_resultados.sql
+sp_geo_simular_distancias_mock.sql
+sp_geo_cargar_distancias_mock.sql
 sp_geo_cargar_distancias.sql
 sp_geo_cargar_georreferenciacion_mock.sql
 sp_geo_cargar_georreferenciacion.sql

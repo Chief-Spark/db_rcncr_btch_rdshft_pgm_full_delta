@@ -44,6 +44,8 @@ DECLARE
     v_personas_ct BIGINT;
     v_entrada_ib  BIGINT;
     v_personas_ib BIGINT;
+    v_entrada_pi  BIGINT;
+    v_ubic_pi     BIGINT;
 BEGIN
     -- SLCOPRBA-1398: el slot 4 trae el MNEMOTECNICO, no el modo.
     v_modo  := bdm_datos.fw_resolver_param('MODO', in_nemotecnico);
@@ -232,6 +234,44 @@ BEGIN
   --   la vista ya lo garantiza. Si divergen, hay fan-out y es un defecto.
   CALL bdm_datos.nov_control_mock_etapa_marcar(v_corrida_id, v_lote, 'info_basica',
                                           'completado', v_entrada_ib, v_personas_ib,
+                                          NULL, NULL, NULL);
+
+  -- ---------- PUNTO DE INTERES ----------
+  -- VA DESPUES DE UBICACION porque su universo se acota por la etapa 9: el
+  -- legado parte de (SELECT COD_DW_UBIC ... FROM TMP_UBICA_ETAPA_9 GROUP BY 1)
+  -- e INNER JOIN contra la relacion (Novedad.sql:4807-4808).
+  --
+  -- Y DEPENDE DE QUE LAS DISTANCIAS GEO YA ESTEN CARGADAS. En la via REAL lo
+  -- estan: sp_rcn_geo_02_buscar_resultados hace el COPY de
+  -- distancias_result_* dentro del ciclo de Unificacion, que corre antes que
+  -- Novedades. En la via MOCK no, y a proposito: el ciclo GEO mock corre
+  -- ENTRE la convergencia y el tablero, nunca dentro del e2e, porque metido
+  -- dentro tumbaria CA-01 por un efecto de orden. De modo que en mock esta
+  -- etapa registra cero en las tres fases -- que es la verdad en ese
+  -- instante -- y la tabla la puebla run_geo_ciclo_mock.sql despues. Es la
+  -- misma leccion del orden que ya costo el ciclo GEO y Novedades entera.
+  --
+  -- SIETE de las diez columnas se pueblan. Las tres que no: tipo (falta
+  -- V_Hom_Tipo_Pto_Int_Linea), nombre_entidad y nit_entidad (falta
+  -- RELACION_PUNTO_INTERES_X_PERS, que no viaja en el contrato de
+  -- distancias). Detalle en sp_novedades_punto_interes_edf.sql.
+  CALL bdm_datos.nov_control_mock_etapa_marcar(v_corrida_id, v_lote, 'punto_interes',
+                                          'en proceso', NULL, NULL, NULL, NULL, NULL);
+
+  CALL bdm_datos.sp_novedades_punto_interes_mock(v_lote);
+
+  SELECT COUNT(*), COUNT(DISTINCT ubicacion_id)
+    INTO v_entrada_pi, v_ubic_pi
+    FROM bdm_datos.mat_info_punto_interes_mock;
+
+  -- ALTAS, CAMBIOS Y BAJAS EN NULL, igual que en los otros dos dominios de
+  -- foto completa: no hay estado previo contra el que calcular un delta.
+  --   entrada > ubicaciones es LO ESPERADO aqui, al contrario de INFO
+  --   BASICA: el grano es (ubicacion, punto de interes) y una ubicacion
+  --   tiene varios puntos. Si fueran iguales, el 1:N no se estaria
+  --   ejercitando.
+  CALL bdm_datos.nov_control_mock_etapa_marcar(v_corrida_id, v_lote, 'punto_interes',
+                                          'completado', v_entrada_pi, v_ubic_pi,
                                           NULL, NULL, NULL);
 
   -- ---------- el watermark nuevo ----------

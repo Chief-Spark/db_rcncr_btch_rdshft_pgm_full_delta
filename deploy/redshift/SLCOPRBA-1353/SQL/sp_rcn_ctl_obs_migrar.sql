@@ -140,6 +140,34 @@ BEGIN
     ALTER TABLE bdm_stage.mock_nov_control_etapa ALTER COLUMN etapa TYPE VARCHAR(64);
   END IF;
 
+  -- --- 5. nombre_punto_interes en las distancias GEO --------------
+  -- 2026-10-21 (d7). ADITIVA, como las cuatro de arriba. El nombre del punto
+  -- de interes llega en col08 del contrato Salida_Distancias y hasta hoy se
+  -- tiraba al cargar; es la columna NOMBRE de MAT_INFO_PUNTO_INTERES.
+  SELECT column_name INTO v_col
+    FROM information_schema.columns
+   WHERE table_schema = 'bdm_datos' AND table_name = 'geo_distancias'
+     AND column_name = 'nombre_punto_interes';
+  IF v_col IS NULL THEN
+    ALTER TABLE bdm_datos.geo_distancias ADD COLUMN nombre_punto_interes VARCHAR(200);
+    RAISE INFO 'sp_rcn_ctl_obs_migrar: nombre_punto_interes anadida a geo_distancias.';
+  END IF;
+
+  -- El espejo mock se guarda ADEMAS por existencia de la tabla: es nueva en
+  -- este commit y un ALTER sobre una tabla que no esta aborta el paso.
+  SELECT table_name INTO v_col
+    FROM information_schema.tables
+   WHERE table_schema = 'bdm_datos' AND table_name = 'geo_distancias_mock';
+  IF v_col IS NOT NULL THEN
+    SELECT column_name INTO v_col
+      FROM information_schema.columns
+     WHERE table_schema = 'bdm_datos' AND table_name = 'geo_distancias_mock'
+       AND column_name = 'nombre_punto_interes';
+    IF v_col IS NULL THEN
+      ALTER TABLE bdm_datos.geo_distancias_mock ADD COLUMN nombre_punto_interes VARCHAR(200);
+    END IF;
+  END IF;
+
   RAISE INFO 'sp_rcn_ctl_obs_migrar: terminado.';
 END;
 $$;

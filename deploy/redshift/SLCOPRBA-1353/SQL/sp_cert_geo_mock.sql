@@ -171,6 +171,23 @@ BEGIN
            || ' son las que el mock ya servia, para no mover el tablero de Unificacion.',
          v_hoy, v_usuario;
 
+  -- ---------- LAS DISTANCIAS, Y VAN AL FINAL A PROPOSITO ----------
+  -- 2026-10-21 (d7). Las distancias no entran en ninguno de los cinco
+  -- criterios GEO: las alimenta ArcGIS igual que las coordenadas, pero lo
+  -- unico que las consume es la tabla dominio mat_info_punto_interes.
+  --
+  -- VAN DESPUES DE QUE LOS CUATRO CRITERIOS YA ESTEN ESCRITOS, y ese es el
+  -- punto: asi no pueden moverlos, ni ahora ni cuando alguien toque este
+  -- bloque. El cargador de distancias cierra el Lote en 'cargado' con
+  -- fase_fallo y ultimo_error en NULL -- el mismo estado que CA-03 exige --,
+  -- de modo que tampoco lo rompe si algun dia se adelanta; pero el orden lo
+  -- deja fuera de toda duda y no hay que razonarlo cada vez.
+  --   Sin estas dos llamadas la tabla dominio d7 saldria VACIA en la
+  --   bateria, y una tabla vacia no prueba nada: es la leccion de "un DELTA
+  --   en cero no prueba que no haya cambios".
+  CALL bdm_datos.sp_geo_simular_distancias_mock(v_lote);
+  CALL bdm_datos.sp_geo_cargar_distancias_mock(v_lote, 'mock://sin-s3');
+
   RAISE INFO 'sp_cert_geo_mock: Lote % certificado. M=%, U=%, tipo 3=% (antes %).',
     v_lote, v_cnt_m, v_cnt_u, v_cnt_r3, v_r3_antes;
 

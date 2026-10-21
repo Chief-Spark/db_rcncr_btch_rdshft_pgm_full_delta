@@ -1,0 +1,44 @@
+import re
+import os
+# Raiz del paquete, derivada de la ubicacion de este script: el repo se
+# clona en sitios distintos y una ruta absoluta lo rompe al primer traslado.
+_RAIZ = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "deploy", "redshift", "SLCOPRBA-1353")
+B = os.path.join(_RAIZ, "SQL") + os.sep
+
+# TODO VA CON \b Y POR EXPRESION REGULAR. Leccion de nov_control contra
+# nov_control_etapa.
+SUST = [
+    (r'bdm_datos\.sp_novedades_punto_interes_edf',
+     'bdm_datos.sp_novedades_punto_interes_mock'),
+    (r'bdm_datos\.mat_info_punto_interes\b',
+     'bdm_datos.mat_info_punto_interes_mock'),
+    (r'bdm_datos\.geo_distancias\b', 'bdm_datos.geo_distancias_mock'),
+    (r'bdm_tempo\.stg_nov_ubica_etapa_9\b',
+     'bdm_tempo.stg_nov_ubica_etapa_9_mock'),
+]
+
+CAB = ("-- Novedades - dominio PUNTO DE INTERES (ESPEJO MOCK)\n"
+       "-- Espejo del real. Generado por\n"
+       "-- SUSTITUCION DE FUENTES: no se edita a mano. Regenerar con\n"
+       "-- tools/gen_novedades_espejo_pinter.py.\n"
+       "-- Cuatro nombres cambian: el procedimiento, la tabla final, las\n"
+       "-- distancias GEO y la etapa 9 de Ubicacion. El diff contra el real\n"
+       "-- debe salir vacio modulo esos nombres. Las justificaciones viven en\n"
+       "-- el archivo real.\n\n")
+
+
+def espejo(src, dst):
+    t = open(B + src, encoding="ascii").read()
+    # EL CORTE VA ANCLADO A PRINCIPIO DE LINEA: la cabecera del real nombra el
+    # procedimiento en prosa y un index() engancharia la primera aparicion.
+    m = re.search(r'^CREATE OR REPLACE PROCEDURE', t, re.M)
+    cuerpo = t[m.start():]
+    for pat, rep in SUST:
+        cuerpo = re.sub(pat, rep, cuerpo)
+    open(B + dst, "w", encoding="ascii").write(CAB + cuerpo)
+    print("ok", dst, sum(1 for _ in open(B + dst)), "lineas")
+
+
+espejo("sp_novedades_punto_interes_edf.sql",
+       "sp_novedades_punto_interes_mock.sql")

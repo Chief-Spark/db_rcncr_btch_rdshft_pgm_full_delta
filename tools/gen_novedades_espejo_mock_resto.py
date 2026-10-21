@@ -36,6 +36,11 @@ SUST = [
     # del ciclo llamaria al SP real y contaria filas de la tabla real.
     ("bdm_datos.sp_novedades_info_basica_edf",          "bdm_datos.sp_novedades_info_basica_mock"),
     ("bdm_datos.mat_info_basica",                       "bdm_datos.mat_info_basica_mock"),
+    # Dominio PUNTO DE INTERES. Mas las distancias GEO, que son su fuente:
+    # sin esa linea el espejo del ciclo leeria geo_distancias REAL.
+    ("bdm_datos.sp_novedades_punto_interes_edf",        "bdm_datos.sp_novedades_punto_interes_mock"),
+    ("bdm_datos.mat_info_punto_interes",                "bdm_datos.mat_info_punto_interes_mock"),
+    ("bdm_datos.geo_distancias",                        "bdm_datos.geo_distancias_mock"),
     ("bdm_datos.mat_info_actividad_economica",          "bdm_datos.mat_info_actividad_economica_mock"),
     ("bdm_datos.sp_rcn_ctl_nov_etapa_marcar",              "bdm_datos.nov_control_mock_etapa_marcar"),
     ("bdm_datos.sp_rcn_ctl_nov_abrir",                     "bdm_datos.nov_control_mock_abrir"),

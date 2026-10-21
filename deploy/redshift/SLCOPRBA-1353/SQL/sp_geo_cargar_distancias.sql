@@ -160,8 +160,16 @@ BEGIN
   --      col05 Longitud                 -> DECIMAL(38,8) [-180, 180]
   --      col06 Descripcion_Proceso      (DISTANCIAS)
   --      col07 Tipo_Punto_Interes       (clave 1:N)
-  --      col08 Nombre_Punto_Interes     (no se guarda: geo_distancias no
-  --                                      tiene columna; va con Novedades d7)
+  --      col08 Nombre_Punto_Interes     -> VARCHAR(200) (2026-10-21, d7)
+  --            Hasta hoy decia "no se guarda: geo_distancias no tiene
+  --            columna; va con Novedades d7". Ya tiene columna: es la columna
+  --            NOMBRE de MAT_INFO_PUNTO_INTERES (Novedad.sql:4794).
+  --            NO SE VALIDA Y NO ENTRA EN NINGUN PREDICADO: es opcional, y
+  --            meterla en el WHERE cambiaria el conteo de rechazo, que es
+  --            justo lo que miden los criterios GEO. Solo se trunca a 200,
+  --            que es el ancho del contrato de salida (SCHEMA P0035_13,
+  --            130.TPT:149); el crudo llega en VARCHAR(500) y un literal mas
+  --            largo que su columna es un [REDSHIFT:112].
   --      col09 Latitud_Punto_Interes    -> DECIMAL(38,8) [-90, 90]
   --      col10 Longitud_Punto_Interes   -> DECIMAL(38,8) [-180, 180]
   --      col11 Distancia_Punto_Interes  -> INTEGER metros [0, 2147483647]
@@ -277,14 +285,15 @@ BEGIN
     longitud                  DECIMAL(38,8),
     latitud_punto_interes     DECIMAL(38,8),
     longitud_punto_interes    DECIMAL(38,8),
-    distancia_punto_interes   INTEGER      NOT NULL
+    distancia_punto_interes   INTEGER      NOT NULL,
+    nombre_punto_interes      VARCHAR(200)
   )
   DISTSTYLE EVEN;
 
   INSERT INTO bdm_tempo.stg_distancias_delta (
     cod_dw_ubic, lote, tipo_punto_interes, cod_punto_interes_host,
     latitud, longitud, latitud_punto_interes, longitud_punto_interes,
-    distancia_punto_interes
+    distancia_punto_interes, nombre_punto_interes
   )
   SELECT
       CAST(BTRIM(s.col01) AS BIGINT)                                  AS cod_dw_ubic,
@@ -299,7 +308,10 @@ BEGIN
            ELSE CAST(BTRIM(s.col09) AS DECIMAL(38,8)) END             AS latitud_punto_interes,
       CASE WHEN s.col10 IS NULL OR BTRIM(s.col10) = '' THEN NULL
            ELSE CAST(BTRIM(s.col10) AS DECIMAL(38,8)) END             AS longitud_punto_interes,
-      CAST(BTRIM(s.col11) AS INTEGER)                                 AS distancia_punto_interes
+      CAST(BTRIM(s.col11) AS INTEGER)                                 AS distancia_punto_interes,
+      -- 2026-10-21 (d7). NULLIF para que un nombre vacio sea NULL y no '';
+      -- LEFT a 200 porque el crudo es VARCHAR(500) y el destino 200.
+      NULLIF(LEFT(BTRIM(s.col08), 200), '')                           AS nombre_punto_interes
   FROM bdm_tempo.stg_arcgis_distancias s
   WHERE
     -- Clave 1:N no nula ni vacia (Req 4.2, 4.3)
@@ -398,12 +410,12 @@ BEGIN
     INSERT INTO bdm_tempo.stg_distancias_delta_dedup (
       cod_dw_ubic, lote, tipo_punto_interes, cod_punto_interes_host,
       latitud, longitud, latitud_punto_interes, longitud_punto_interes,
-      distancia_punto_interes
+      distancia_punto_interes, nombre_punto_interes
     )
     SELECT
       cod_dw_ubic, lote, tipo_punto_interes, cod_punto_interes_host,
       latitud, longitud, latitud_punto_interes, longitud_punto_interes,
-      distancia_punto_interes
+      distancia_punto_interes, nombre_punto_interes
     FROM (
       SELECT d.*,
              ROW_NUMBER() OVER (
@@ -439,12 +451,13 @@ BEGIN
     INSERT INTO bdm_datos.geo_distancias (
       cod_dw_ubic, lote, tipo_punto_interes, cod_punto_interes_host,
       latitud, longitud, latitud_punto_interes, longitud_punto_interes,
-      distancia_punto_interes, fecha_actualizacion, usuario_bd
+      distancia_punto_interes, nombre_punto_interes,
+      fecha_actualizacion, usuario_bd
     )
     SELECT
       cod_dw_ubic, lote, tipo_punto_interes, cod_punto_interes_host,
       latitud, longitud, latitud_punto_interes, longitud_punto_interes,
-      distancia_punto_interes,
+      distancia_punto_interes, nombre_punto_interes,
       TRUNC(GETDATE())   AS fecha_actualizacion,
       CURRENT_USER       AS usuario_bd
     FROM bdm_tempo.stg_distancias_delta;
