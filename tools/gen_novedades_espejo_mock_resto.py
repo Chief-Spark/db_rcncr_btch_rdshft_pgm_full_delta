@@ -27,6 +27,11 @@ SUST = [
     # borra. Cambia de nombre, no de sufijo: real y mock comparten bdm_tempo.
     ("bdm_tempo.stg_nov_ubiagr_sev",                    "bdm_tempo.stg_mock_nov_ubiagr_sev"),
     ("bdm_tempo.stg_nov_acteco_etapa_1",                "bdm_tempo.stg_nov_acteco_etapa_1_mock"),
+    # Dominio CONTACTABILIDAD. Sin estas dos el espejo del ciclo llamaria al
+    # SP real y contaria filas de la tabla real: la misma trampa de paridad
+    # que ya se pago con ACTIVIDAD ECONOMICA.
+    ("bdm_datos.sp_novedades_contactabilidad_edf",      "bdm_datos.sp_novedades_contactabilidad_mock"),
+    ("bdm_datos.mat_info_contactabilidad",              "bdm_datos.mat_info_contactabilidad_mock"),
     ("bdm_datos.mat_info_actividad_economica",          "bdm_datos.mat_info_actividad_economica_mock"),
     ("bdm_datos.sp_rcn_ctl_nov_etapa_marcar",              "bdm_datos.nov_control_mock_etapa_marcar"),
     ("bdm_datos.sp_rcn_ctl_nov_abrir",                     "bdm_datos.nov_control_mock_abrir"),

@@ -40,6 +40,8 @@ DECLARE
     v_personas_ag BIGINT;
     v_altas_ag    BIGINT;
     v_cambios_ag  BIGINT;
+    v_entrada_ct  BIGINT;
+    v_personas_ct BIGINT;
 BEGIN
     -- SLCOPRBA-1398: el slot 4 trae el MNEMOTECNICO, no el modo.
     v_modo  := bdm_datos.fw_resolver_param('MODO', in_nemotecnico);
@@ -165,6 +167,39 @@ BEGIN
   -- Ahora si: bdm_tempo es compartido y una tabla huerfana confunde al
   -- siguiente que mire.
   DROP TABLE IF EXISTS bdm_tempo.stg_mock_nov_ubiagr_sev;
+
+  -- ---------- CONTACTABILIDAD ----------
+  -- VA DESPUES DE UBICACION PORQUE SU UNIVERSO ES LA ETAPA 9, igual que en
+  -- el legado: las cuatro consultas que leen V_CONTACTABILIDAD la cruzan con
+  -- INNER JOIN TMP_UBICA_ETAPA_9 (Novedad.sql:272, :357, :432, :618).
+  -- Invertido el orden saldria vacio por un efecto de secuencia y no por un
+  -- defecto, que es la leccion del ciclo GEO y de Novedades entera.
+  --
+  -- ESTE DOMINIO SALE CON DIEZ DE SUS DOCE COLUMNAS EN NULL, y es
+  -- deliberado: no existe la fuente de gestion (D-NOV-08, justificado en
+  -- sp_novedades_contactabilidad_edf.sql). Las metricas que se registran lo
+  -- reflejan sin disfrazarlo.
+  CALL bdm_datos.nov_control_mock_etapa_marcar(v_corrida_id, v_lote, 'contactabilidad',
+                                          'en proceso', NULL, NULL, NULL, NULL, NULL);
+
+  CALL bdm_datos.sp_novedades_contactabilidad_mock(v_lote);
+
+  SELECT COUNT(*), COUNT(DISTINCT ubicacion_id)
+    INTO v_entrada_ct, v_personas_ct
+    FROM bdm_datos.mat_info_contactabilidad_mock;
+
+  -- ALTAS, CAMBIOS Y BAJAS VAN A NULL Y NO A CERO, y la diferencia importa:
+  -- el contrato de este dominio es FOTO COMPLETA (TRUNCATE + INSERT, como el
+  -- DELETE ... ALL de 111.BTQ:820), de modo que no hay estado previo contra
+  -- el que calcular un delta. Un 0 diria "las busque y no habia"; NULL dice
+  -- "no hay con que medirlas". Es la misma distincion de las columnas por_*
+  -- del censo de Ordenamiento (F1-08) y la leccion de NOV-UB-12.
+  --   personas_ct cuenta UBICACIONES DISTINTAS, no personas: el grano de esta
+  --   tabla es la ubicacion porque id y sector salen en NULL. La columna del
+  --   control se llama personas y aqui lleva ubicaciones; queda dicho.
+  CALL bdm_datos.nov_control_mock_etapa_marcar(v_corrida_id, v_lote, 'contactabilidad',
+                                          'completado', v_entrada_ct, v_personas_ct,
+                                          NULL, NULL, NULL);
 
   -- ---------- el watermark nuevo ----------
     -- EL WATERMARK SALE DEL MAX DEL DATO, NUNCA DE LA FECHA DE EJECUCION.
