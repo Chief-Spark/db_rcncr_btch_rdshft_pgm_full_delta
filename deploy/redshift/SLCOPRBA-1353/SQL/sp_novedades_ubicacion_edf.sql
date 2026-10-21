@@ -371,7 +371,9 @@ BEGIN
   )
   SELECT
     CAST(e6.cod_tipo_ident_fte AS VARCHAR(20)),
-    CAST(NULL AS VARCHAR(30)),                          -- BLOQUEADA: falta V_Hom_Tip_Ident_Linea
+    -- 2026-10-21 (NOV-UB-18): YA NO ES NULL. El catalogo
+    -- V_Hom_Tip_Ident_Linea llego y este es el join del legado.
+    CAST(hti.descripcion AS VARCHAR(30))                AS tipo_identificacion,
     e6.cod_pin_persona                                  AS numero_identificacion,
     e6.cod_dw_persona_ubic                              AS id,
     e6.orden_prioridad                                  AS orden,
@@ -430,6 +432,10 @@ BEGIN
       WHEN f.flag_op_delta IS NOT NULL THEN f.flag_op_delta
     END AS VARCHAR(1))                                  AS flag_op
   FROM bdm_tempo.stg_nov_ubica_e6 e6
+  -- El catalogo del tipo de identificacion. LEFT JOIN: un tipo fuera del
+  -- catalogo sale NULL y NO pierde la ubicacion, que es lo que hace el legado.
+  LEFT JOIN bdm_datos.catalogo_hom_tipo_ident hti
+         ON hti.valor_fuente = CAST(e6.cod_tipo_ident_fte AS VARCHAR(20))
   LEFT JOIN bdm_tempo.stg_nov_flag_op_ubica f
          ON f.cod_dw_persona_ubic = e6.cod_dw_persona_ubic
   LEFT JOIN ( SELECT cod_dw_persona_ubic, MAX(bloqueado) AS bloqueado

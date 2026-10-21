@@ -14,12 +14,15 @@
 --                                            GEO que no se entrego)
 --   los siete dominios no portados        -> NO_IMPLEMENTADO
 --   NOV-AE-01..10 menos 06 y 07           -> CONSULTA
---   NOV-AE-06 y NOV-AE-07                 -> BLOQUEADO (catalogo que no se
---                                            entrego)
+--   NOV-AE-06                             -> BLOQUEADO (falta
+--                                            V_ACTIVIDAD_ECONO_CIIU)
+--   NOV-AE-07 y NOV-UB-18                 -> CONSULTA desde el 2026-10-21:
+--                                            llego V_Hom_Tip_Ident_Linea
 --   NOV-AG-01                             -> CONSULTA (mira el contrato, no
 --                                            las filas)
---   NOV-AG-02..NOV-AG-08                  -> BLOQUEADO (el mismo catalogo,
---                                            que aqui vacia el dominio entero)
+--   NOV-AG-02..NOV-AG-08                  -> BLOQUEADO, pero YA NO por el
+--                                            catalogo: falta la consulta que
+--                                            los afirme (ver el bloque)
 --   NOV-G-01..G-03                        -> REVISION_MANUAL
 --
 -- Y ESTE PROCEDIMIENTO ES AHORA UN GATE DE VERDAD: sp_cert_asercion_final
@@ -617,15 +620,68 @@ BEGIN
   FROM       bdm_tempo.stg_cert_ae_base  z
   CROSS JOIN bdm_tempo.stg_cert_ae_falta f;
 
-  -- ---------- NOV-AE-06 y 07: bloqueadas por catalogo que no se entrego ----------
+  -- ---------- NOV-AE-06: la unica que sigue bloqueada por catalogo ----------
+  -- NOV-AE-07 SALIO DE ESTE BLOQUE (2026-10-21): el catalogo
+  -- V_Hom_Tip_Ident_Linea llego -- 11 filas en
+  -- bdm_datos.catalogo_hom_tipo_ident -- y la columna ya se puebla, asi que
+  -- el criterio se afirma POR CONSULTA justo debajo. Dejarlo en BLOQUEADO con
+  -- el dato presente seria un tablero que se contradice a si mismo, que es
+  -- exactamente lo que se corrigio con CA-02..CA-05.
+  --   Queda UNA sola fila, de modo que ya no hace falta el UNION ALL: el
+  --   CAST explicito fija el tipo igual.
   INSERT INTO bdm_datos.cert_resultado_nov
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
-  SELECT p_lote, p_fase, c.criterio, 'BLOQUEADO', c.detalle, GETDATE(), CURRENT_USER
-  FROM (
-    SELECT CAST('NOV-AE-06' AS VARCHAR(12)) AS criterio,
-           CAST('falta V_ACTIVIDAD_ECONO_CIIU (Novedad.sql:1352-1354): actividad_economica y version salen NULL. Pedido en docs/PETICION_CATALOGOS_NOVEDADES.md seccion 6' AS VARCHAR(1024)) AS detalle UNION ALL
-    SELECT 'NOV-AE-07', 'falta el catalogo V_Hom_Tip_Ident_Linea, el mismo que bloquea NOV-UB-18: el tipo de identificacion sale NULL'
-  ) c;
+  SELECT p_lote, p_fase,
+         CAST('NOV-AE-06' AS VARCHAR(12)),
+         'BLOQUEADO',
+         CAST('falta V_ACTIVIDAD_ECONO_CIIU (Novedad.sql:1352-1354): actividad_economica y version salen NULL. Pedido en docs/PETICION_CATALOGOS_NOVEDADES.md seccion 6' AS VARCHAR(1024)),
+         GETDATE(), CURRENT_USER;
+
+  -- ---------- NOV-AE-07: el tipo de identificacion homologado ----------
+  -- El catalogo llego el 2026-10-21. El criterio exige que la columna traiga
+  -- la descripcion homologada, de modo que se mide cuantas filas la traen.
+  --   NO se exige el 100 %: el LEFT JOIN del legado deja NULL a un tipo que
+  --   no este en el catalogo, y esa es la conducta correcta. Lo que se exige
+  --   es que la columna este POBLADA en las filas que si tienen tipo, porque
+  --   eso es lo que distingue "el catalogo esta cableado" de "sigue en NULL".
+  INSERT INTO bdm_datos.cert_resultado_nov
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'NOV-AE-07',
+         CASE WHEN COUNT(*) = 0 THEN 'SIN_DATO'
+              WHEN COALESCE(SUM(CASE WHEN z.tipo_identificacion IS NOT NULL
+                                     THEN 1 ELSE 0 END), 0) > 0 THEN 'PASSED'
+              ELSE 'FAILED' END,
+         'filas=' || CAST(COUNT(*) AS VARCHAR)
+           || ', con tipo de identificacion homologado=' ||
+           CAST(COALESCE(SUM(CASE WHEN z.tipo_identificacion IS NOT NULL
+                                  THEN 1 ELSE 0 END), 0) AS VARCHAR)
+           || ', valores distintos=' || CAST(COUNT(DISTINCT z.tipo_identificacion) AS VARCHAR)
+           || '. El catalogo V_Hom_Tip_Ident_Linea llego el 2026-10-21 (11 filas en bdm_datos.catalogo_hom_tipo_ident)'
+           || ' y se consume por LEFT JOIN, igual que el legado (Novedad.sql:3455, :3475-3476):'
+           || ' un tipo ausente del catalogo sale NULL y no pierde la fila',
+         GETDATE(), CURRENT_USER
+  FROM bdm_tempo.stg_cert_ae_base z;
+
+  -- ---------- NOV-UB-18: el tipo de identificacion homologado ----------
+  -- Mismo catalogo y mismo razonamiento que NOV-AE-07: llego el 2026-10-21 y
+  -- esta columna dejo de ser NULL. Sale del bloque de BLOQUEADO de este
+  -- dominio y se afirma por consulta.
+  INSERT INTO bdm_datos.cert_resultado_nov
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'NOV-UB-18',
+         CASE WHEN COUNT(*) = 0 THEN 'SIN_DATO'
+              WHEN COALESCE(SUM(CASE WHEN z.tipo_identificacion IS NOT NULL
+                                     THEN 1 ELSE 0 END), 0) > 0 THEN 'PASSED'
+              ELSE 'FAILED' END,
+         'filas=' || CAST(COUNT(*) AS VARCHAR)
+           || ', con tipo de identificacion homologado=' ||
+           CAST(COALESCE(SUM(CASE WHEN z.tipo_identificacion IS NOT NULL
+                                  THEN 1 ELSE 0 END), 0) AS VARCHAR)
+           || ', valores distintos=' || CAST(COUNT(DISTINCT z.tipo_identificacion) AS VARCHAR)
+           || '. Novedad.sql:8406. Se consume por LEFT JOIN como el legado:'
+           || ' un tipo ausente del catalogo sale NULL y no pierde la ubicacion',
+         GETDATE(), CURRENT_USER
+  FROM bdm_tempo.stg_cert_nov_base z;
 
   -- ------------------------------------------------------------
   -- DOMINIO UBICACION AGREGADA (NOV-AG-01..08)
@@ -661,19 +717,36 @@ BEGIN
            || ' (esperado 32 = 29 mas lote, fecha_actualizacion y usuario_bd)',
          GETDATE(), CURRENT_USER;
 
-  -- ---------- NOV-AG-02..08: bloqueadas por el mismo catalogo ----------
+  -- ---------- NOV-AG-02..08: BLOQUEADAS, Y EL MOTIVO CAMBIO ----------
+  -- 2026-10-21. HASTA HOY LAS SIETE DECIAN "falta V_Hom_Tip_Ident_Linea: sin
+  -- filas no hay nada que medir", Y ESE MOTIVO ERA FALSO POR DOS LADOS:
+  --   1. el catalogo LLEGO (11 filas en bdm_datos.catalogo_hom_tipo_ident) y
+  --      la etapa 9 ya puebla tipo_identificacion, de modo que el join por
+  --      igualdad de la etapa 5 (Novedad.sql:5431) ya casa;
+  --   2. y la premisa "sin filas" tampoco se sostenia: medido en el banco,
+  --      mat_ubicacion_agregada_mock tiene 9.700 filas.
+  -- Un criterio que cita un motivo ya falso miente con cara de correcto. Es
+  -- el mismo error que costo una vuelta en F1-01 y el que se corrigio
+  -- retirando el bloque de CA-02..CA-05.
+  --
+  -- SIGUEN EN BLOQUEADO Y NO PASAN A PASSED, y la distincion importa: lo que
+  -- falta ya no es el dato, es LA CONSULTA QUE LOS AFIRME. Darlos por buenos
+  -- sin medirlos seria peor que dejarlos bloqueados -- siete criterios en
+  -- verde sin una sola comprobacion detras --, y con la rama NOVEDADES del
+  -- gate activa desde el #409 un criterio mal calibrado tumba el build.
+  -- Cablearlos es la siguiente pieza de este dominio.
   INSERT INTO bdm_datos.cert_resultado_nov
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
   SELECT p_lote, p_fase, c.criterio, 'BLOQUEADO', c.detalle, GETDATE(), CURRENT_USER
   FROM (
     SELECT CAST('NOV-AG-02' AS VARCHAR(12)) AS criterio,
-           CAST('falta V_Hom_Tip_Ident_Linea: con tipo_identificacion en NULL la etapa 5 (Novedad.sql:5431) sale vacia y no hay filas sobre las que medir el grano de la llave de siete columnas' AS VARCHAR(1024)) AS detalle UNION ALL
-    SELECT 'NOV-AG-03', 'mismo catalogo: sin filas en la etapa final no hay listas concatenadas que comprobar' UNION ALL
-    SELECT 'NOV-AG-04', 'mismo catalogo: sin filas no hay ranking que numerar' UNION ALL
-    SELECT 'NOV-AG-05', 'mismo catalogo: sin filas no se puede comprobar que las cinco columnas de reporte vengan pobladas' UNION ALL
-    SELECT 'NOV-AG-06', 'mismo catalogo: sin filas el conteo de bajas sale cero por vacio y no por paridad, que es justo lo que este criterio debe distinguir' UNION ALL
-    SELECT 'NOV-AG-07', 'mismo catalogo: la tabla final no crece entre pasadas porque no entra nada, de modo que el verde no probaria la idempotencia del UPSERT' UNION ALL
-    SELECT 'NOV-AG-08', 'mismo catalogo: sin filas no se puede comprobar que cod_pais siga en blanco'
+           CAST('el catalogo V_Hom_Tip_Ident_Linea llego el 2026-10-21 y el dominio tiene filas: lo que falta es la consulta que mida el grano de la llave de siete columnas, no el insumo' AS VARCHAR(1024)) AS detalle UNION ALL
+    SELECT 'NOV-AG-03', 'insumo disponible desde el 2026-10-21: falta la consulta que compruebe las listas concatenadas' UNION ALL
+    SELECT 'NOV-AG-04', 'insumo disponible: falta la consulta que compruebe el ranking' UNION ALL
+    SELECT 'NOV-AG-05', 'insumo disponible: falta la consulta que compruebe las cinco columnas de reporte' UNION ALL
+    SELECT 'NOV-AG-06', 'insumo disponible: falta la consulta que distinga un conteo de bajas en cero por paridad de uno en cero por vacio' UNION ALL
+    SELECT 'NOV-AG-07', 'insumo disponible: falta la consulta que compruebe la idempotencia del UPSERT entre pasadas' UNION ALL
+    SELECT 'NOV-AG-08', 'insumo disponible: falta la consulta que compruebe que cod_pais sigue en blanco'
   ) c;
 
   -- ---------- NOV-UB-16..22: bloqueadas por insumo que no se entrego ----------
@@ -684,7 +757,8 @@ BEGIN
     SELECT CAST('NOV-UB-16' AS VARCHAR(12)) AS criterio,
            CAST('falta el catalogo V_Hom_TipoUbic_Dir_Linea: la columna TIPO sale NULL' AS VARCHAR(1024)) AS detalle UNION ALL
     SELECT 'NOV-UB-17', 'faltan V_ZONA_UBICACION y V_Hom_Zona_Linea: la columna ZONA sale NULL' UNION ALL
-    SELECT 'NOV-UB-18', 'falta el catalogo V_Hom_Tip_Ident_Linea: el tipo de identificacion sale NULL' UNION ALL
+    -- NOV-UB-18 SALIO DE AQUI (2026-10-21): el catalogo llego y la columna ya
+    -- se puebla. Se afirma por consulta mas abajo.
     SELECT 'NOV-UB-19', 'falta V_TELEFONO_FIJO: la columna INDICATIVO sale NULL' UNION ALL
     SELECT 'NOV-UB-20', 'falta V_TIPO_CORREO: la columna de tipo de cuenta sale NULL' UNION ALL
     SELECT 'NOV-UB-21', 'geo_atributos declara barrio y estrato y nunca los escribe: su posicion en el contrato de 32 columnas no esta pinada (sp_geo_cargar_georreferenciacion.sql:443-446)' UNION ALL

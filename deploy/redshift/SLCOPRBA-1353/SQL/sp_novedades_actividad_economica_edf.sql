@@ -90,7 +90,13 @@ BEGIN
   AS
   SELECT rpu.id_buro_persona,
          MAX(rpu.cod_pin_persona) AS cod_pin_persona,
-         MAX(r.fecha_reporte)     AS fecha_reporte
+         MAX(r.fecha_reporte)     AS fecha_reporte,
+         -- 2026-10-21 (NOV-AE-07): el tipo de identificacion de la persona,
+         -- para homologarlo contra el catalogo que acaba de llegar. MAX() y
+         -- no MIN() porque ignora los NULL: recupera el valor cuando alguna
+         -- fila de la RPU lo trae. Es la misma eleccion que en la vista mock
+         -- de persona basica, y por el mismo motivo.
+         MAX(rpu.cod_tipo_ident_fte) AS cod_tipo_ident_fte
   FROM      bdm_tempo.v_xpm_relacion_persona_ubicacion rpu
   LEFT JOIN bdm_tempo.v_xpm_reporte_relacion_persona_ubica r
          ON r.cod_dw_persona_ubic = rpu.cod_dw_persona_ubic
@@ -137,7 +143,8 @@ BEGIN
   FROM (
     SELECT
       CAST(NULL AS INTEGER)                        AS id,
-      CAST(NULL AS VARCHAR(30))                    AS tipo_identificacion,  -- BLOQUEADA: falta V_Hom_Tip_Ident_Linea
+      -- 2026-10-21 (NOV-AE-07): YA NO ES NULL. El catalogo llego.
+      CAST(hti.descripcion AS VARCHAR(30))         AS tipo_identificacion,
       p.cod_pin_persona                            AS numero_identificacion,
       CAST(c.cod_act_econo_ciiu_fte AS VARCHAR(20)) AS ciiu,
       CAST(NULL AS VARCHAR(500))                   AS actividad_economica,  -- BLOQUEADA: falta V_ACTIVIDAD_ECONO_CIIU
@@ -152,6 +159,10 @@ BEGIN
     FROM      bdm_tempo.v_xpm_actividad_economica_persona     c
     JOIN      bdm_tempo.stg_nov_acteco_pers    p ON p.id_buro_persona = c.id_buro_persona
     LEFT JOIN bdm_tempo.stg_nov_acteco_flag    f ON f.info_basica_id  = c.id_buro_persona
+    -- El catalogo del tipo de identificacion. LEFT JOIN: un tipo fuera del
+    -- catalogo sale NULL y no pierde la actividad.
+    LEFT JOIN bdm_datos.catalogo_hom_tipo_ident hti
+           ON hti.valor_fuente = CAST(p.cod_tipo_ident_fte AS VARCHAR(20))
     -- El filtro del legado, literal (:1377). Nuestra vista ya lo garantiza con
     -- su propio WHERE, y se repite porque el mock no lo lleva.
     WHERE c.cod_act_econo_ciiu_fte IS NOT NULL
