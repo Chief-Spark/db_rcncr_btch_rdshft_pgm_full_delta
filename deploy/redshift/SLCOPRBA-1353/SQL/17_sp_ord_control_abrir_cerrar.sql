@@ -18,16 +18,27 @@ NONATOMIC
 LANGUAGE plpgsql
 AS $$
 DECLARE
-    v_inicio TIMESTAMP;
+    v_inicio  TIMESTAMP;
+    v_version VARCHAR(40);
 BEGIN
     v_inicio := GETDATE();
+    -- G-06 (D-ORD-12, 2026-10-21): la corrida registra QUE VERSION DE BETAS
+    -- uso. Sale del catalogo cargado, no de un literal de aqui: si estuviera
+    -- escrito en el SP registraria lo que alguien recordo poner. Va a una
+    -- variable ANTES del INSERT, que es el idiom del repo para no mezclar una
+    -- lectura de catalogo con una escritura en la misma sentencia.
+    --   NULL es un valor legitimo y NO se sustituye por un '?' ni por un
+    --   'desconocido': significa que el catalogo de betas esta vacio, y eso
+    --   es justo lo que hay que poder ver en la traza.
+    SELECT MAX(version_betas) INTO v_version FROM bdm_datos.beta_ordenamiento;
+
     INSERT INTO bdm_datos.ord_control (
         lote, modo, bootstrap, fecha_proceso,
-        watermark_anterior, estado, fecha_hora_inicio, usuario_bd
+        watermark_anterior, estado, fecha_hora_inicio, usuario_bd, version_betas
     )
     VALUES (
         p_lote, p_modo, p_bootstrap, p_fecha_proceso,
-        p_watermark_anterior, 'enproceso', v_inicio, CURRENT_USER
+        p_watermark_anterior, 'enproceso', v_inicio, CURRENT_USER, v_version
     );
     SELECT MAX(corrida_id)
       INTO p_corrida_id

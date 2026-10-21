@@ -21,21 +21,50 @@ BEGIN
   --   XX000: This type of correlated subquery pattern is not supported
   -- y que el banco local no ve porque PostgreSQL la ejecuta sin una queja.
   --
-  -- El LEFT JOIN contra un agregado por info_basica_id sustituye al LEFT JOIN
-  -- directo del legado: la tabla final puede tener VARIAS filas por persona
-  -- -- justo porque el upsert nunca actualiza -- y un join directo
-  -- multiplicaria la etapa. El legado tiene ese mismo defecto y alli se nota;
-  -- aqui se agrega primero y se compara contra la ultima version conocida.
+  -- LA LLAVE DEL LEFT JOIN SON TRES COLUMNAS, NO UNA. CORREGIDO 2026-10-21.
+  --
+  -- El legado une STG con la MAT por
+  --   STG.INFO_BASICA_ID = B.INFO_BASICA_ID
+  --   AND STG.CIIU       = B.CIIU
+  --   AND STG.FECHA_REPORTE = B.FECHA_REPORTE
+  -- (P0035_Extractor_Novedades_120.TPT:200-202).
+  --
+  -- Aqui se unia SOLO por info_basica_id contra un agregado por persona, y
+  -- eso PERDIA FILAS. El camino es concreto: una persona que YA esta en la
+  -- MAT recibe un CIIU NUEVO. En el legado ese CIIU no casa con ninguna fila,
+  -- B.* sale NULL y la primera rama del CASE le da Severidad = 1, de modo que
+  -- entra. Aqui b.info_basica_id NO era NULL -- la persona existe --, caia en
+  -- la segunda rama y se comparaba contra el MAX(actividad_economica) y el
+  -- MAX(version) de TODAS sus actividades: si no los superaba, salia -1 y la
+  -- actividad nueva se perdia en silencio.
+  --
+  -- IMPORTA MAS DESDE HOY: con D-NOV-06 el universo pasa a ser todas las
+  -- actividades de la persona, no solo el CIIU principal, asi que una persona
+  -- con varias actividades es el caso normal y no el raro.
+  --
+  -- SE SIGUE AGREGANDO, PERO POR LA LLAVE COMPLETA, y ese es el motivo de que
+  -- la tabla de apoyo no desaparezca: la MAT es insert-only, de modo que la
+  -- misma (persona, ciiu, fecha) puede estar repetida de corridas anteriores y
+  -- un join directo multiplicaria la etapa. El legado tiene ese defecto y
+  -- aqui no se copia. El MAX ya no mezcla actividades distintas: desempata
+  -- dentro de la MISMA llave, que es lo que un dedup necesita.
+  --
+  -- (La version anterior de este comentario citaba 120.TPT:198-199 para
+  -- justificar la llave de una columna. Esas dos lineas son el CROSS JOIN y
+  -- la cabecera del LEFT JOIN; la condicion esta en :200-202 y dice lo
+  -- contrario.)
   -- ------------------------------------------------------------
   DROP TABLE IF EXISTS bdm_tempo.stg_mock_nov_acteco_viva;
   CREATE TABLE bdm_tempo.stg_mock_nov_acteco_viva
   DISTSTYLE KEY DISTKEY(info_basica_id)
   AS
   SELECT info_basica_id,
+         ciiu,
+         fecha_reporte,
          MAX(actividad_economica) AS actividad_economica,
          MAX(version)             AS version
   FROM bdm_datos.mat_info_actividad_economica_mock
-  GROUP BY info_basica_id;
+  GROUP BY info_basica_id, ciiu, fecha_reporte;
 
   DROP TABLE IF EXISTS bdm_tempo.stg_mock_nov_acteco_sev;
   CREATE TABLE bdm_tempo.stg_mock_nov_acteco_sev
@@ -52,7 +81,10 @@ BEGIN
            ELSE -1
          END AS severidad
   FROM      bdm_tempo.stg_nov_acteco_etapa_1_mock s
-  LEFT JOIN bdm_tempo.stg_mock_nov_acteco_viva    b ON b.info_basica_id = s.info_basica_id;
+  LEFT JOIN bdm_tempo.stg_mock_nov_acteco_viva    b
+         ON  b.info_basica_id = s.info_basica_id
+         AND b.ciiu           = s.ciiu
+         AND b.fecha_reporte  = s.fecha_reporte;
 
   -- ------------------------------------------------------------
   -- El id: MAX(id) de la tabla viva mas la posicion de la fila, que es lo que
