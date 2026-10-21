@@ -94,7 +94,7 @@ BEGIN
                 ELSE 'A' END AS VARCHAR(1))        AS flag_op,
       ROW_NUMBER() OVER (PARTITION BY c.cod_act_econo_ciiu_fte, c.id_buro_persona
                          ORDER BY p.fecha_reporte DESC NULLS LAST)          AS rn
-    FROM      bdm_tempo.v_mock_ciiu_persona     c
+    FROM      bdm_tempo.v_mock_actividad_economica_persona     c
     JOIN      bdm_tempo.stg_mock_nov_acteco_pers    p ON p.id_buro_persona = c.id_buro_persona
     LEFT JOIN bdm_tempo.stg_mock_nov_acteco_flag    f ON f.info_basica_id  = c.id_buro_persona
     -- El filtro del legado, literal (:1377). Nuestra vista ya lo garantiza con

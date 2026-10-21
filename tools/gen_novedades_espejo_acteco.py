@@ -16,6 +16,7 @@ SUST = [
     # vistas de insumo
     ("bdm_tempo.v_xpm_relacion_persona_ubicacion",     "bdm_tempo.v_mock_relacion_persona_ubicacion"),
     ("bdm_tempo.v_xpm_reporte_relacion_persona_ubica", "bdm_tempo.v_mock_reporte_relacion_persona_ubica"),
+    ("bdm_tempo.v_xpm_actividad_economica_persona",     "bdm_tempo.v_mock_actividad_economica_persona"),
     ("bdm_tempo.v_xpm_ciiu_persona",                   "bdm_tempo.v_mock_ciiu_persona"),
     # contrato y tabla final
     ("bdm_tempo.stg_nov_acteco_etapa_1",               "bdm_tempo.stg_nov_acteco_etapa_1_mock"),

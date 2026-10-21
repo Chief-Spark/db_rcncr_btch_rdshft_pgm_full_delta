@@ -14,8 +14,17 @@
 --
 -- DIVERGENCIA 1. El legado arma su universo de V_PERSONA_ACT_ECONOMICA_CIIU,
 --   que trae COD_DW_ACT_ECONO_CIIU, FECHA_REPORTE e INFO_BASICA_ID por fila.
---   Nosotros tenemos v_xpm_ciiu_persona, que son DOS columnas:
---   id_buro_persona y cod_act_econo_ciiu_fte
+--   Nosotros leemos v_xpm_actividad_economica_persona, que son DOS columnas:
+--   id_buro_persona y cod_act_econo_ciiu_fte.
+--   2026-10-21 (D-NOV-06): ANTES ERA v_xpm_ciiu_persona, que trae SOLO el
+--   CIIU principal, y el legado toma TODAS las actividades de la persona
+--   (Novedad.sql:1280-1294, PRIMARY INDEX(INFO_BASICA_ID,
+--   COD_DW_ACT_ECONO_CIIU)). La vista nueva une las once fuentes del
+--   datashare: el principal de bestpersonalinformation, el principal y las
+--   cuatro secundarias de personalinformation, y las mismas cinco de
+--   chamberofcommerce.
+--   NO se amplio v_xpm_ciiu_persona: la Regla 1 de Unificacion la une por
+--   persona con un LEFT JOIN y mas de una fila le multiplicaria el insumo.
 --   (02_vistas_insumo_edf_views.sql:364-370). El CIIU viene directo del
 --   datashare, en bestpersonalinformation.mainisiccodeforproduct.
 --
@@ -140,7 +149,7 @@ BEGIN
                 ELSE 'A' END AS VARCHAR(1))        AS flag_op,
       ROW_NUMBER() OVER (PARTITION BY c.cod_act_econo_ciiu_fte, c.id_buro_persona
                          ORDER BY p.fecha_reporte DESC NULLS LAST)          AS rn
-    FROM      bdm_tempo.v_xpm_ciiu_persona     c
+    FROM      bdm_tempo.v_xpm_actividad_economica_persona     c
     JOIN      bdm_tempo.stg_nov_acteco_pers    p ON p.id_buro_persona = c.id_buro_persona
     LEFT JOIN bdm_tempo.stg_nov_acteco_flag    f ON f.info_basica_id  = c.id_buro_persona
     -- El filtro del legado, literal (:1377). Nuestra vista ya lo garantiza con
