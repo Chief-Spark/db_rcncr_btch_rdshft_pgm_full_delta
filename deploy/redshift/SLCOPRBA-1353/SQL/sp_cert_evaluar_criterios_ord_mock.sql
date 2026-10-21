@@ -1434,10 +1434,15 @@ BEGIN
   --
   -- La caracteristica que SI depende del operador es CEL018 (:908-909), y el
   -- legado la discrimina por el VALOR del catalogo, no por estar dentro o
-  -- fuera. El ARQ 83 enfrenta ahora 310 (0.62 -> categoria 3) contra 300
-  -- (0.55 -> categoria 2), los dos catalogados y los dos supervivientes de
-  -- la compuerta. Dos mitades: que el 310 gane el lugar 1, y que el delta
+  -- fuera. El ARQ 83 enfrenta ahora 311 (0.6370 -> categoria 3) contra 320
+  -- (0.5407 -> categoria 2), los dos catalogados y los dos supervivientes de
+  -- la compuerta. Dos mitades: que el 311 gane el lugar 1, y que el delta
   -- sea el de un solo escalon de CEL018.
+  --
+  -- LOS PREFIJOS CAMBIARON EL 2026-10-21 Y LOS NUMEROS NO (D-ORD-11). Con el
+  -- V_Operador_Ord_Cel real el 310 y el 300 caen los dos en categoria 4 y el
+  -- delta se iba a 0; el 311 y el 320 reproducen el mismo escalon de 1, de
+  -- modo que el 38.3817 de abajo sigue siendo el valor correcto.
   INSERT INTO bdm_datos.cert_resultado_ord
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
   SELECT p_lote, p_fase, 'F4-CEL-02',
@@ -1445,9 +1450,9 @@ BEGIN
               WHEN MAX(a.cabeza_ok) <> MAX(a.personas)            THEN 'FAILED'
               WHEN ABS(MAX(a.delta_min) - 38.3817) > 0.0002       THEN 'FAILED'
               ELSE 'PASSED' END,
-         'ARQ 83 (CEL, operador 310 contra 300): personas='
+         'ARQ 83 (CEL, operador 311 contra 320): personas='
            || CAST(COALESCE(MAX(a.personas), 0) AS VARCHAR)
-           || ', con el 310 en el lugar 1='
+           || ', con el 311 en el lugar 1='
            || CAST(COALESCE(MAX(a.cabeza_ok), 0) AS VARCHAR)
            || ', delta observado='
            || COALESCE(CAST(MAX(a.delta_min) AS VARCHAR), 'sin filas')
@@ -1466,8 +1471,12 @@ BEGIN
   --
   -- El legado devuelve 0 para el prefijo no catalogado (:909) y Orden_Celular
   -- lo EXCLUYE del ranking (:899, WHERE CEl018.CO01CEL018 <> 0). Ya esta
-  -- aplicado en scoring_cel_edf.sql. El ARQ 83 siembra TRES celulares --310,
-  -- 300 y 322-- y la compuerta se lleva el 322: deben quedar DOS filas.
+  -- aplicado en scoring_cel_edf.sql. El ARQ 83 siembra TRES celulares --311,
+  -- 320 y 399-- y la compuerta se lleva el 399: deben quedar DOS filas.
+  --
+  -- EL TERCER PREFIJO ERA EL 322 Y DEJO DE SERVIR EL 2026-10-21 (D-ORD-11):
+  -- el V_Operador_Ord_Cel real SI lo trae (0.1481), de modo que pasaba la
+  -- compuerta y salian TRES filas. El 399 no esta en las 20 del catalogo.
   --
   -- Es el mismo 2..2 de antes, pero ahora sobre tres sembrados en vez de dos,
   -- de modo que el criterio prueba que la compuerta FILTRA en lugar de probar
@@ -1481,8 +1490,8 @@ BEGIN
          'ARQ 83: filas de score por persona (min..max)='
            || COALESCE(CAST(MAX(a.filas_min) AS VARCHAR), '0') || '..'
            || COALESCE(CAST(MAX(a.filas_max) AS VARCHAR), '0')
-           || ', esperado 2..2 sobre TRES celulares sembrados (310, 300 y 322). '
-           || 'El 322 no esta en catalogo_operador_ord_cel, CEL018 le da 0 y la '
+           || ', esperado 2..2 sobre TRES celulares sembrados (311, 320 y 399). '
+           || 'El 399 no esta en catalogo_operador_ord_cel, CEL018 le da 0 y la '
            || 'compuerta del canal lo deja fuera del ranking, igual que el '
            || 'legado (Caracteristicas.txt:899)',
          GETDATE(), CURRENT_USER
