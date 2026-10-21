@@ -359,8 +359,12 @@ BEGIN
     e6.estrato,
     CAST(NULL AS VARCHAR(30))                           AS tipo,         -- BLOQUEADA: falta V_Hom_TipoUbic_Dir_Linea
     CAST(NULL AS VARCHAR(30))                           AS zona,         -- BLOQUEADA: falta V_Hom_Zona_Linea
-    e6.ciudad,
-    e6.departamento,
+    -- 2026-10-21 (D-NOV-05): el centinela '' del legado, COALESCE(CIUDAD,'')
+    -- y COALESCE(DEPARTAMENTO,'') (Novedad.sql:8354-8355). Con NULL la etapa 2
+    -- no casaba con la agregacion por igualdad y dejaba los dos contadores en
+    -- NULL; con '' casa, igual que en el legado.
+    COALESCE(e6.ciudad, '')                             AS ciudad,
+    COALESCE(e6.departamento, '')                       AS departamento,
     e6.longitud,
     e6.latitud,
     -- Las cinco que el legado emite como literales por esta ruta
@@ -418,10 +422,9 @@ BEGIN
   -- TRAMPA DEL LEGADO QUE SE PORTA LITERAL. La etapa 9 escribe '' para ciudad
   -- y departamento y '-1' para el DANE; las dos agregaciones escriben 'SV'
   -- para los tres (Novedad.sql:8502-8504). La etapa 2 une por igualdad en
-  -- esas tres columnas (:8649-8651), asi que donde el valor original era NULL
-  -- el join falla y los dos contadores quedan NULL. Se reproduce tal cual:
-  -- es defecto del legado y corregirlo cambiaria numeros que nadie ha
-  -- certificado todavia.
+  -- esas tres columnas (:8649-8651). En el legado no rompe porque la etapa 9
+  -- ya aplico el COALESCE y nunca llega un NULL; aqui tampoco desde el
+  -- 2026-10-21 (D-NOV-05), que la etapa 9 escribe el mismo ''.
   --
   -- DIVERGENCIA 5. El legado separa el primer reporte del ultimo con
   -- ID_FLAG_DESDE (Novedad.sql:8636-8637). Nuestra vista de reportes no trae

@@ -382,7 +382,7 @@ revisarlo contra el.
 |---|---|
 | `FLAG_OP` referencia el alias de una columna definida **dos lineas despues**. Teradata lo resuelve, **Redshift no**: hay que repetir el `CASE` | `Novedad.sql:8392-8396` |
 | `V_CARGA_FULL` lee `REC_MTDAT.LOG_TD` con el esquema **hardcodeado**, ignorando el parametro | `:7366-7372` |
-| Centinelas de nulo inconsistentes: `''` y `'-1'` en la etapa 9, `'SV'` en las agregaciones, y la etapa 2 une por igualdad en esas tres columnas. **En el legado no rompe**: la etapa 9 ya aplica el `COALESCE`. **En Redshift si**: el port deja CIUDAD y DEPARTAMENTO en NULL | `:8354`, `:8374`, `:8502-8504`, `:8649-8651` |
+| Centinelas de nulo inconsistentes: `''` y `'-1'` en la etapa 9, `'SV'` en las agregaciones, y la etapa 2 une por igualdad en esas tres columnas. **En el legado no rompe**: la etapa 9 ya aplica el `COALESCE`. ~~En Redshift si: el port deja CIUDAD y DEPARTAMENTO en NULL~~ **Corregido 2026-10-21 (D-NOV-05):** la etapa 9 escribe `''`, como el legado, y la etapa 2 ya casa | `:8354`, `:8374`, `:8502-8504`, `:8649-8651` |
 | La homologacion de fuente **jamas se aplica**: el `COALESCE` interno nunca da NULL. La fuente sale de `V_FUENTE`, y `'CAM'` solo cuando no hay coincidencia (no "todo sale `'CAM'`", como decia esta fila) | `:8635` |
 | `TMP_UBICA_ETAPA_0` es **codigo muerto**: se crea, se analiza y se borra sin que nadie la lea. No se porta | `:7514`, `:8723` |
 | **`FLAG_OP = 'E'` es codigo muerto, y con el la unica via de BAJA.** La etapa 1 anti-une `V_BLOQUEO` y la etapa 9 vuelve a unirla por la MISMA llave para preguntar por `FECHA_BLOQUEO`: lo que sobrevivio no esta en la tabla, asi que nunca da TRUE | `:7590-7594` contra `:8393`, `:8416` |
