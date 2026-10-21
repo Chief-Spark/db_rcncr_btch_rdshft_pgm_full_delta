@@ -42,6 +42,8 @@ DECLARE
     v_cambios_ag  BIGINT;
     v_entrada_ct  BIGINT;
     v_personas_ct BIGINT;
+    v_entrada_ib  BIGINT;
+    v_personas_ib BIGINT;
 BEGIN
     -- SLCOPRBA-1398: el slot 4 trae el MNEMOTECNICO, no el modo.
     v_modo  := bdm_datos.fw_resolver_param('MODO', in_nemotecnico);
@@ -199,6 +201,37 @@ BEGIN
   --   control se llama personas y aqui lleva ubicaciones; queda dicho.
   CALL bdm_datos.nov_control_mock_etapa_marcar(v_corrida_id, v_lote, 'contactabilidad',
                                           'completado', v_entrada_ct, v_personas_ct,
+                                          NULL, NULL, NULL);
+
+  -- ---------- INFO BASICA ----------
+  -- ESTE DOMINIO NO DEPENDE DE UBICACION, al contrario de los otros cuatro.
+  -- El legado arranca de la RPU pero termina en la UNION de dos ramas
+  -- (Novedad.sql:3778-3784): personas CON datos de ubicacion y personas SIN
+  -- ellos, de modo que la union vuelve a abrir el universo a toda persona.
+  -- Va aqui por el orden en que el 111.BTQ invoca los SP del legado, no por
+  -- una dependencia: podria ir primero sin cambiar el resultado.
+  --
+  -- DIECINUEVE de las 22 columnas se pueblan. Las tres que no:
+  -- tipo_identificacion (falta el catalogo C37), pagina_web (NO EXISTE en
+  -- EDF, CCBR 251264543) y mosaic_id (decision legal, D-NOV-07). Detalle en
+  -- sp_novedades_info_basica_edf.sql.
+  CALL bdm_datos.nov_control_mock_etapa_marcar(v_corrida_id, v_lote, 'info_basica',
+                                          'en proceso', NULL, NULL, NULL, NULL, NULL);
+
+  CALL bdm_datos.sp_novedades_info_basica_mock(v_lote);
+
+  SELECT COUNT(*), COUNT(DISTINCT id)
+    INTO v_entrada_ib, v_personas_ib
+    FROM bdm_datos.mat_info_basica_mock;
+
+  -- ALTAS, CAMBIOS Y BAJAS VAN A NULL Y NO A CERO, por el mismo motivo que en
+  -- CONTACTABILIDAD: el contrato es FOTO COMPLETA (TRUNCATE + INSERT, como el
+  -- DELETE ... ALL de 111.BTQ:820) y no hay estado previo contra el que
+  -- calcular un delta. Un 0 diria "los busque y no habia".
+  --   entrada y personas DEBEN COINCIDIR: el grano es una fila por persona y
+  --   la vista ya lo garantiza. Si divergen, hay fan-out y es un defecto.
+  CALL bdm_datos.nov_control_mock_etapa_marcar(v_corrida_id, v_lote, 'info_basica',
+                                          'completado', v_entrada_ib, v_personas_ib,
                                           NULL, NULL, NULL);
 
   -- ---------- el watermark nuevo ----------

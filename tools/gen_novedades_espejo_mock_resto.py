@@ -32,6 +32,10 @@ SUST = [
     # que ya se pago con ACTIVIDAD ECONOMICA.
     ("bdm_datos.sp_novedades_contactabilidad_edf",      "bdm_datos.sp_novedades_contactabilidad_mock"),
     ("bdm_datos.mat_info_contactabilidad",              "bdm_datos.mat_info_contactabilidad_mock"),
+    # Dominio INFO BASICA. Misma trampa de paridad: sin estas dos el espejo
+    # del ciclo llamaria al SP real y contaria filas de la tabla real.
+    ("bdm_datos.sp_novedades_info_basica_edf",          "bdm_datos.sp_novedades_info_basica_mock"),
+    ("bdm_datos.mat_info_basica",                       "bdm_datos.mat_info_basica_mock"),
     ("bdm_datos.mat_info_actividad_economica",          "bdm_datos.mat_info_actividad_economica_mock"),
     ("bdm_datos.sp_rcn_ctl_nov_etapa_marcar",              "bdm_datos.nov_control_mock_etapa_marcar"),
     ("bdm_datos.sp_rcn_ctl_nov_abrir",                     "bdm_datos.nov_control_mock_abrir"),
