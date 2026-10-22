@@ -232,56 +232,37 @@ codigo de error y el build sigue. **Es hipotesis, no dato**, que algun gate
 futuro exija que el tipo detectado case con el `type` del `.jenkins.yml`; si
 alguna vez sale un error por ahi, el sitio es este.
 
-**Y EL BLOQUEO DE VERDAD NO ES DEL PAQUETE: LAS NUEVE RELACIONES DEL
-DATASHARE ESTAN ENMASCARADAS.** Redshift no permite consultar por datashare
-una relacion con mascara, y no es un problema de `GRANT`:
+**EL DATASHARE YA NO BLOQUEA: LAS NUEVE RELACIONES RESPONDEN (2026-10-22).**
+Medido una por una, no estimado. El ticket a EDF esta RETIRADO y
+`dt/docs/PETICION_RELACIONES_ENMASCARADAS_DATASHARE.md` conserva la evidencia
+relacion por relacion.
 
-```
-XX000: ERROR: cross-cluster query of the masked relation "<rel>" is not supported
-```
+| Como se confirmo | Relaciones | Dato |
+|---|---|---|
+| job #454, carga de `catalogo_sector_financiero` | `xpm`, `xpm_location`, `xpm_location_val_contactinformations`, `xpm_counterparties` | **1.188 filas** de un INNER JOIN de las cuatro |
+| job #458, via real de Novedades | `xpm_personalinformation`, `xpm_chamberofcommerce` | **124.263 filas** en `mat_info_actividad_economica` |
+| job #458, error `42703` y no `XX000` | `xpm_bestidentifications` | el error es de columna, no de mascara |
+| `COUNT(*)` en DBeaver contra DEV | `xpm_bestaccounts`, `xpm_bestaccounts_val_frequentbehaviour` | **1.231.183** y **1.726.424** filas |
 
-Las nueve que leemos, por impacto:
+**El sintoma era real**: Redshift rechaza con
+`XX000: cross-cluster query of the masked relation "<rel>" is not supported`,
+y eso tumbo el job #453. Lo que fue falso tres veces fue el ALCANCE.
 
-| Enmascarada | Que bloquea |
-|---|---|
-| `xpm` | **la raiz del modelo**: `id_buro_persona = FNV_HASH(xpm.pin)`. 19 referencias en el paquete |
-| `xpm_location_val_contactinformations` | **Unificacion entera**, los cuatro canales del Ordenamiento y dos tablas dominio |
-| `xpm_bestaccounts` | Fase 2 del Ordenamiento (`v_xpm_cuenta`, `v_xpm_comportamiento_cta`, `v_xpm_cuenta_bloqueada`) |
-| `xpm_personalinformation` | Actividad economica (`v_xpm_actividad_economica_persona`) |
-| `xpm_chamberofcommerce` | la misma |
-| `xpm_bestidentifications` | Info basica (`v_xpm_persona_basica`) |
-| `xpm_location` | atributos de la ubicacion (`v_xpm_ubicacion_estandarizada`) |
-| `xpm_counterparties` | identidad del suscriptor que reporta |
-| `xpm_bestaccounts_val_frequentbehaviour` | comportamiento de cuenta, Fase 2 |
+**ESTA SECCION ESTIMO EL ALCANCE TRES VECES Y LAS TRES SALIO MAL**, en las dos
+direcciones: **cinco** leyendo las flechas de un pantallazo (por defecto: la
+sonda para en el primer error), **nueve** tomando el inventario de EDF (por
+exceso: el inventario dice que politica existe, no cual bloquea hoy) y **cinco
+otra vez** tras medir cuatro (seguia siendo estimacion). **La medicion completa
+dio CERO.**
 
-Ticket en `dt/docs/PETICION_RELACIONES_ENMASCARADAS_DATASHARE.md`.
+**La leccion, y vale para cualquier dependencia externa: un inventario no es
+una medicion, y una sonda que para en el primer error no mide el universo.** Lo
+unico que cierra una pregunta asi es consultar las N relaciones hasta el final.
 
-**ESTA SECCION DIJO ANTES CINCO, Y ERA FALSO.** Las cinco salian de las que la
-sonda alcanzo a rechazar en una corrida; el inventario que entrega EDF son las
-**nueve**. La leccion de metodo: **una sonda que para en el primer error no
-mide el universo**, y lo que no fallo no esta limpio, solo no se probo.
-
-**PERO CUATRO YA RESPONDEN, Y ES DATO MEDIDO, NO INVENTARIO (job DEV/DATABASE
-#454).** Ese build desplego la version ANTIGUA de `02_catalogos_ordenamiento.sql`
--- la que cargaba `catalogo_sector_financiero` del datashare -- y el log imprime
-`catalogo_sector_financiero | 1188`. En el #453 imprimia `0`. Esa carga lee
-`v_xpm_reporte_relacion_persona_ubica`, que hace INNER JOIN sobre **`xpm`,
-`xpm_location`, `xpm_location_val_contactinformations` y `xpm_counterparties`**
-(`02_vistas_insumo_edf_views.sql`, el `FROM` de esa vista). Un INNER JOIN de
-cuatro relaciones que devuelve 1.188 suscriptores distintos **no se ejecuta si
-alguna esta enmascarada**: esas cuatro estan levantadas hoy, y entre ellas la
-que esta seccion llamaba "la mas critica".
-
-**Lo que eso deja abierto son CINCO, no nueve**, y cuales exactamente lo dice la
-sonda, no el inventario: `xpm_personalinformation`, `xpm_chamberofcommerce`,
-`xpm_bestaccounts`, `xpm_bestaccounts_val_frequentbehaviour` y
-`xpm_bestidentifications`. El ticket pide las nueve igual -- pedir una ya
-levantada no cuesta nada y el inventario es de EDF --, pero **el estado real se
-vuelve a medir con la sonda antes de escalar**.
-
-**Y la moraleja es la de siempre, cobrada dos veces en una hora:** el inventario
-dice que politica existe; la sonda dice que bloquea hoy. No son la misma
-pregunta, y esta bitacora ha confundido las dos en las dos direcciones.
+**Y UN DATO DE ENTORNO QUE COSTO UN RATO:** en DBeaver la conexion abre en la
+base `dba`, donde **no existen** `bdm_datos` / `bdm_tempo` / `bdm_stage`. Hay
+que cambiar a la base del pipeline antes de consultar nada nuestro; las del
+datashare funcionan desde cualquiera porque llevan las tres partes del nombre.
 
 **Lo que NO bloquea, y es lo que despisto hasta ahora:** `CREATE OR REPLACE
 VIEW` funciona, porque no ejecuta la consulta. El error sale la primera vez
