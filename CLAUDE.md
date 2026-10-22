@@ -261,10 +261,27 @@ sonda alcanzo a rechazar en una corrida; el inventario que entrega EDF son las
 **nueve**. La leccion de metodo: **una sonda que para en el primer error no
 mide el universo**, y lo que no fallo no esta limpio, solo no se probo.
 
-**Lo unico sin cerrar es `xpm`:** se nos dijo que le habian retirado la
-mascara, y el inventario la trae. El ticket la pide igual y pide confirmar si
-la retirada se aplico, porque si se aplico **es la prueba de que el cambio es
-viable** para las otras ocho.
+**PERO CUATRO YA RESPONDEN, Y ES DATO MEDIDO, NO INVENTARIO (job DEV/DATABASE
+#454).** Ese build desplego la version ANTIGUA de `02_catalogos_ordenamiento.sql`
+-- la que cargaba `catalogo_sector_financiero` del datashare -- y el log imprime
+`catalogo_sector_financiero | 1188`. En el #453 imprimia `0`. Esa carga lee
+`v_xpm_reporte_relacion_persona_ubica`, que hace INNER JOIN sobre **`xpm`,
+`xpm_location`, `xpm_location_val_contactinformations` y `xpm_counterparties`**
+(`02_vistas_insumo_edf_views.sql`, el `FROM` de esa vista). Un INNER JOIN de
+cuatro relaciones que devuelve 1.188 suscriptores distintos **no se ejecuta si
+alguna esta enmascarada**: esas cuatro estan levantadas hoy, y entre ellas la
+que esta seccion llamaba "la mas critica".
+
+**Lo que eso deja abierto son CINCO, no nueve**, y cuales exactamente lo dice la
+sonda, no el inventario: `xpm_personalinformation`, `xpm_chamberofcommerce`,
+`xpm_bestaccounts`, `xpm_bestaccounts_val_frequentbehaviour` y
+`xpm_bestidentifications`. El ticket pide las nueve igual -- pedir una ya
+levantada no cuesta nada y el inventario es de EDF --, pero **el estado real se
+vuelve a medir con la sonda antes de escalar**.
+
+**Y la moraleja es la de siempre, cobrada dos veces en una hora:** el inventario
+dice que politica existe; la sonda dice que bloquea hoy. No son la misma
+pregunta, y esta bitacora ha confundido las dos en las dos direcciones.
 
 **Lo que NO bloquea, y es lo que despisto hasta ahora:** `CREATE OR REPLACE
 VIEW` funciona, porque no ejecuta la consulta. El error sale la primera vez
