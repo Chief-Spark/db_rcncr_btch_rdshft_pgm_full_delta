@@ -206,6 +206,32 @@ Cuatro hipotesis mias cayeron por buscar la causa en el repo. Escalado a
 DevSecOps. El paquete esta verificado contra el remoto de Bitbucket: 151
 archivos bajo `deploy/redshift/SLCOPRBA-1353/`.
 
+**EL ONBOARDING DE DEVSECOPS ES UN PASO APARTE, Y LOS REPOS NUEVOS NO LO
+TIENEN (job DEV/DATABASE #451).** Con el `.jenkins.yml` correcto el build
+llega al pipeline de DATABASE y valida el paquete entero -- `[BITBUCKET:414]`
+49 scripts, `[REDSHIFT:210]` 49 de deploy, `[REDSHIFT:215]` 49 de rollback,
+`[REDSHIFT:211] Rollback disponible: 'true'` -- y **muere despues**, en
+`redshiftValidateRuntime()`:
+
+```
+[REDSHIFT:151] Validando onboarding Redshift para 'COAWSPPR/DB_DS_RCNCR_BTCH_RDSHFT_STRCT'
+ERROR: [REDSHIFT:156] El repositorio ... no tiene onboarding Redshift en DevSecOps
+```
+
+No es del paquete y no se arregla desde el repo: es un alta que hace
+DevSecOps, repo por repo. Peticion redactada en
+`dt/docs/PETICION_ONBOARDING_REDSHIFT_DEVSECOPS.md`. **No confundirlo con el
+`[REDSHIFT:419]`**: aquel caia en silencio a la ruta legacy sin decir por que;
+este dice exactamente que falta.
+
+**Y OJO AL `[REDSHIFT:209]`, que es informativo HOY:** el detector imprime
+`Tipos detectados: 'data + struct + program'` para el paquete de `strct`, y
+por archivo marca `00_prerequisitos_schemas.sql` como `struct + program` (crea
+una funcion) y los catalogos como `data + struct` (llevan `INSERT`). No lleva
+codigo de error y el build sigue. **Es hipotesis, no dato**, que algun gate
+futuro exija que el tipo detectado case con el `type` del `.jenkins.yml`; si
+alguna vez sale un error por ahi, el sitio es este.
+
 **EL CLUSTER DE DEV YA NO SE PAUSA: ESTA SIEMPRE ARRIBA (SLCOPRBA-1355).**
 Hasta ahora esta seccion decia que se pausaba a diario sobre las 19:00 de
 Bogota y que ahi terminaba la ventana de despliegue. **Ya no hay ventana**: se
