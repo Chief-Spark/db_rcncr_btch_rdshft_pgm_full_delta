@@ -24,19 +24,30 @@
 --   lo trae, en col08; era nuestra tabla la que no tenia donde ponerlo.
 --
 -- ------------------------------------------------------------
--- SIETE DE LAS DIEZ COLUMNAS SE POBLAN. Las tres que no, y por que:
---   tipo           -> falta V_Hom_Tipo_Pto_Int_Linea, el catalogo de
---                     homologacion que el legado cruza por
---                     Cod_Tipo_Punto_Interes_Host (Novedad.sql:4888-4890).
---                     El valor de entrada SI lo tenemos
---                     (cod_punto_interes_host), de modo que el dia que
---                     llegue el catalogo esto es un join.
+-- OCHO DE LAS DIEZ COLUMNAS SE POBLAN. Las dos que no, y por que:
 --   nombre_entidad -> salen de RELACION_PUNTO_INTERES_X_PERS
 --   nit_entidad       (NOMBRE_SUSCRIPTOR y NUM_IDENT, Novedad.sql:4801-4802),
 --                     una tabla que no existe de este lado y que NO viaja en
 --                     el contrato de distancias. Es peticion, no codigo.
 -- Van en NULL y no en un valor por defecto: NULL dice "no hay con que
 -- medir". La distincion de F1-08 y de NOV-UB-12.
+--
+-- `tipo` ENTRO EL 2026-10-22 con V_Hom_Tipo_Pto_Int_Linea
+-- (27_ddl_catalogo_hom_tipo_pto_int.sql, 34 filas sin un Valor_Fuente
+-- repetido). El legado hace TIPO = h2.Descripcion_Hom_Tipo_Pto_Int_Linea
+-- uniendo por Cod_Tipo_Punto_Interes_Host (Novedad.sql:4879, :4891).
+--   LA LLAVE NO ES LA MISMA Y ESO HAY QUE DECIRLO: ese
+--   Cod_Tipo_Punto_Interes_Host es una columna de V_TIPO_PUNTO_INTERES
+--   (:4806), el catalogo que NO se ha entregado. Unimos por
+--   geo_distancias.tipo_punto_interes, la col07 del contrato
+--   Salida_Distancias. Los 34 Valor_Fuente son codigos SIC de cuatro
+--   digitos y casan uno a uno con su descripcion, que es la taxonomia con
+--   la que ArcGIS clasifica un POI; que col07 traiga ese codigo y no la
+--   descripcion es HIPOTESIS, no esta probado, y no hay con que probarlo
+--   hasta que llegue un archivo de distancias real. La consulta que lo
+--   cierra en una linea esta escrita en la cabecera del catalogo.
+--   El riesgo de cablearlo antes es nulo: va por LEFT JOIN, de modo que
+--   una llave equivocada deja `tipo` en NULL, que es donde estaba.
 --
 -- ------------------------------------------------------------
 -- EL id SE DERIVA, Y HAY QUE SABERLO ANTES DE COMPARARLO CON TERADATA.
@@ -101,7 +112,7 @@ BEGIN
          -- 120.TPT castea al exportar.
          CAST(d.latitud_punto_interes AS VARCHAR(40))   AS latitud,
          CAST(d.longitud_punto_interes AS VARCHAR(40))  AS longitud,
-         CAST(NULL AS VARCHAR(30))                      AS tipo,
+         hpi.descripcion                                AS tipo,
          p_lote, GETDATE(), CURRENT_USER
   FROM bdm_datos.geo_distancias d
   -- El universo de Ubicacion, agrupado por cod_dw_ubic. Va en subconsulta
@@ -112,7 +123,10 @@ BEGIN
     FROM bdm_tempo.stg_nov_ubica_etapa_9 e9
     WHERE e9.cod_dw_ubic IS NOT NULL
   ) u
-    ON u.cod_dw_ubic = d.cod_dw_ubic;
+    ON u.cod_dw_ubic = d.cod_dw_ubic
+  -- No multiplica: los 34 valor_fuente del catalogo son distintos entre si.
+  LEFT JOIN bdm_datos.catalogo_hom_tipo_pto_int hpi
+    ON hpi.valor_fuente = d.tipo_punto_interes;
 
 END;
 $$;

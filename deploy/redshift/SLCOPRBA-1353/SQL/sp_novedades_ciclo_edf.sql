@@ -261,10 +261,11 @@ BEGIN
   -- instante -- y la tabla la puebla run_geo_ciclo_mock.sql despues. Es la
   -- misma leccion del orden que ya costo el ciclo GEO y Novedades entera.
   --
-  -- SIETE de las diez columnas se pueblan. Las tres que no: tipo (falta
-  -- V_Hom_Tipo_Pto_Int_Linea), nombre_entidad y nit_entidad (falta
-  -- RELACION_PUNTO_INTERES_X_PERS, que no viaja en el contrato de
-  -- distancias). Detalle en sp_novedades_punto_interes_edf.sql.
+  -- OCHO de las diez columnas se pueblan desde el 2026-10-22, cuando llego
+  -- V_Hom_Tipo_Pto_Int_Linea y `tipo` dejo de ir en NULL. Las dos que no:
+  -- nombre_entidad y nit_entidad (falta RELACION_PUNTO_INTERES_X_PERS, que
+  -- no viaja en el contrato de distancias). Detalle en
+  -- sp_novedades_punto_interes_edf.sql.
   CALL bdm_datos.sp_rcn_ctl_nov_etapa_marcar(v_corrida_id, v_lote, 'punto_interes',
                                           'en proceso', NULL, NULL, NULL, NULL, NULL);
 
@@ -291,11 +292,13 @@ BEGIN
   -- de Info Basica se escribe en la etapa de arriba. Invertido el orden
   -- saldria vacio por un efecto de secuencia y no por un defecto.
   --
-  -- SEIS de las ocho columnas se pueblan. Las dos que no: descripcion (falta
-  -- V_INDICADOR_MOVILIDAD) y novedad_2 (falta V_Hom_Ind_Mov_Linea).
-  -- Y se portan TRES de los cuatro indicadores: falta Cambio de Localidad,
-  -- porque LOCALIDAD no existe en EDF. Detalle en
-  -- sp_novedades_movilidad_edf.sql.
+  -- LAS OCHO columnas se pueblan desde el 2026-10-22, cuando llegaron
+  -- V_INDICADOR_MOVILIDAD y V_Hom_Ind_Mov_Linea y descripcion y novedad_2
+  -- dejaron de ir en NULL.
+  -- Se portan TRES de los cuatro indicadores: falta Cambio de Localidad,
+  -- porque LOCALIDAD no existe en EDF. El catalogo de homologacion abarata
+  -- esa ausencia -- Localidad y Direccion dan las dos CAM_LOC --, y eso
+  -- tambien esta en sp_novedades_movilidad_edf.sql.
   CALL bdm_datos.sp_rcn_ctl_nov_etapa_marcar(v_corrida_id, v_lote, 'movilidad',
                                           'en proceso', NULL, NULL, NULL, NULL, NULL);
 

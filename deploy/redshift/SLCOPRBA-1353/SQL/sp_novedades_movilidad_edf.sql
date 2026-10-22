@@ -31,6 +31,13 @@
 -- SE PORTAN TRES DE LOS CUATRO. Falta Cambio de Localidad: LOCALIDAD / comuna
 -- no existe en EDF por ninguna via (buscado en el inventario de 1.072
 -- columnas del datashare y en Confluence, espacios CCBR y EDCLMI).
+--   Y EL CATALOGO DE HOMOLOGACION ABARATA ESA AUSENCIA, cosa que no se
+--   sabia hasta el 2026-10-22: Localidad y Direccion homologan LAS DOS a
+--   CAM_LOC, de modo que Linea no las distingue. Como las cuatro ramas
+--   exigen CambioDir = 1, toda fila de Localidad convive con una de
+--   Direccion de la misma persona. La rama que falta no aporta ni un
+--   codigo de Linea nuevo: los tres portados cubren los TRES codigos
+--   distintos del catalogo (CAM_LOC, CAM_CIU, CAM_EST).
 --
 -- ------------------------------------------------------------
 -- EL UNIVERSO ES LA INTERSECCION DE UBICACION E INFO BASICA, y es paridad
@@ -144,8 +151,18 @@ BEGIN
   -- y rechaza las repetidas con Cod_Rechazo '002902'; aqui la ubicacion es
   -- unica en stg_nov_movil_evento, de modo que la combinacion ya lo es.
   --
-  -- descripcion y novedad_2 van NULL: faltan V_INDICADOR_MOVILIDAD y
-  -- V_Hom_Ind_Mov_Linea. novedad SI se puebla, con el literal.
+  -- descripcion y novedad_2 SALEN DE CATALOGO desde el 2026-10-22, que es
+  -- cuando llegaron V_INDICADOR_MOVILIDAD y V_Hom_Ind_Mov_Linea
+  -- (26_ddl_catalogo_movilidad.sql). Hasta esa fecha iban NULL.
+  --   OJO AL REPARTO, QUE EL LEGADO LO CRUZA: `descripcion` lleva la FRASE
+  --   LARGA (VIM.Valor_Indicador_Movilidad) y `novedad` el NOMBRE CORTO
+  --   (VIM.Descripcion_Indicador_Movilida), al reves de lo que sugieren los
+  --   nombres de las columnas del catalogo (Novedad.sql:1782-1783).
+  --   `novedad` ya se poblaba con ese nombre corto, de modo que el literal
+  --   que ya estaba escrito es tambien la LLAVE de los dos joins.
+  --   Los dos van por LEFT JOIN, como en el legado (:1788, :1923): un
+  --   indicador fuera de catalogo deja la columna en NULL y NO pierde la
+  --   fila.
   --
   -- El id se DERIVA con FNV_HASH de (persona, indicador, fecha), porque
   -- COD_DW_PERSONA_IND_MOVIL es un correlativo que el legado saca de
@@ -162,10 +179,10 @@ BEGIN
   SELECT FNV_HASH(CAST(e.id_buro_persona AS VARCHAR) || '|' || e.novedad
                   || '|' || CAST(v_hoy AS VARCHAR))   AS id,
          v_hoy                                        AS fecha,
-         CAST(NULL AS VARCHAR(100))                   AS descripcion,
+         vim.descripcion                              AS descripcion,
          e.novedad,
          e.id_buro_persona                            AS info_basica_id,
-         CAST(NULL AS VARCHAR(30))                    AS novedad_2,
+         him.descripcion                              AS novedad_2,
          e.tipo_identificacion,
          e.cod_pin_persona                            AS numero_identificacion,
          p_lote, GETDATE(), CURRENT_USER
@@ -183,7 +200,15 @@ BEGIN
            'Cambio de Estrato'
     FROM bdm_tempo.stg_nov_movil_evento
     WHERE cambio_estrato = 1
-  ) e;
+  ) e
+  -- Ninguno de los dos multiplica: catalogo_indicador_movilidad trae una
+  -- fila por nombre corto -- la quinta del volcado, el duplicado de
+  -- direccion, se descarto al cargarlo -- y los cuatro valor_fuente de
+  -- catalogo_hom_ind_mov son distintos entre si.
+  LEFT JOIN bdm_datos.catalogo_indicador_movilidad vim
+    ON vim.novedad = e.novedad
+  LEFT JOIN bdm_datos.catalogo_hom_ind_mov him
+    ON him.valor_fuente = e.novedad;
 
   -- ------------------------------------------------------------
   -- Paso 5: AHORA se toma la foto de hoy, y solo de lo que cambio o es nuevo.

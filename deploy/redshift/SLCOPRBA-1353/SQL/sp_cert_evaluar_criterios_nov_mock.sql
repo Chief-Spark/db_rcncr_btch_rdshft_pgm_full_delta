@@ -838,7 +838,8 @@ BEGIN
          CASE WHEN COUNT(*) > 0 THEN 'PASSED' ELSE 'SIN_DATO' END,
          'filas=' || CAST(COUNT(*) AS VARCHAR)
            || ', ubicaciones distintas=' || CAST(COUNT(DISTINCT ubicacion_id) AS VARCHAR)
-           || '. Portado el 2026-10-21, 7 de 10 columnas. CERO EN LA BATERIA ES EFECTO DE'
+           || '. Portado el 2026-10-21, 8 de 10 columnas desde el 2026-10-22 (tipo sale ya'
+           || ' del catalogo de homologacion). CERO EN LA BATERIA ES EFECTO DE'
            || ' ORDEN Y NO DEFECTO: las distancias mock las carga run_geo_ciclo_mock.sql'
            || ' DESPUES del e2e, y este evaluador corre dentro. El conteo real del dominio'
            || ' lo imprime ese runner',
@@ -852,17 +853,34 @@ BEGIN
   -- todavia. El unico cambio sembrado es el del ARQ 97, que el paso 3b del
   -- e2e aplica antes del DELTA2. O sea que lo esperado es: FULL 0, DELTA1 0,
   -- DELTA2 con filas.
+  --
+  -- Y DESDE EL 2026-10-22 TAMBIEN MIDE LOS DOS CATALOGOS, que es el modo de
+  -- fallo que acaba de entrar: un LEFT JOIN cuya llave no casa no da error
+  -- ni pierde filas, deja la columna en NULL. Sin medirlo, el criterio
+  -- seguiria en PASSED con descripcion y novedad_2 vacias -- justo lo que
+  -- costo una vuelta en F1-01 con por_cuenta. Con eventos > 0, cualquier
+  -- NULL en esas dos columnas es FAILED.
   INSERT INTO bdm_datos.cert_resultado_nov
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
   SELECT p_lote, p_fase, 'NOV-MOV-01',
-         CASE WHEN COUNT(*) > 0 THEN 'PASSED' ELSE 'SIN_DATO' END,
+         CASE WHEN COUNT(*) = 0 THEN 'SIN_DATO'
+              WHEN COUNT(descripcion) < COUNT(*) THEN 'FAILED'
+              WHEN COUNT(novedad_2)   < COUNT(*) THEN 'FAILED'
+              ELSE 'PASSED' END,
          'eventos=' || CAST(COUNT(*) AS VARCHAR)
            || ', personas distintas=' || CAST(COUNT(DISTINCT info_basica_id) AS VARCHAR)
            || ', indicadores distintos=' || CAST(COUNT(DISTINCT novedad) AS VARCHAR)
+           || ', con descripcion=' || CAST(COUNT(descripcion) AS VARCHAR)
+           || ', con novedad_2=' || CAST(COUNT(novedad_2) AS VARCHAR)
+           || ', codigos Linea distintos=' || CAST(COUNT(DISTINCT novedad_2) AS VARCHAR)
            || '. Portado el 2026-10-21 con 3 de los 4 indicadores: falta Cambio de'
-           || ' Localidad porque LOCALIDAD no existe en EDF. TABLA DE EVENTOS: cero es'
+           || ' Localidad porque LOCALIDAD no existe en EDF, y el catalogo de'
+           || ' homologacion abarata esa ausencia porque Localidad y Direccion dan las'
+           || ' dos CAM_LOC. TABLA DE EVENTOS: cero es'
            || ' valido en FULL (no hay foto anterior) y en DELTA1 (nadie cambio todavia);'
-           || ' el cambio sembrado es el del ARQ 97 y entra en el DELTA2',
+           || ' el cambio sembrado es el del ARQ 97 y entra en el DELTA2.'
+           || ' Un NULL en descripcion o en novedad_2 con eventos > 0 es un join de'
+           || ' catalogo que no caso',
          GETDATE(), CURRENT_USER
   FROM bdm_datos.mat_info_movilidad_mock;
 

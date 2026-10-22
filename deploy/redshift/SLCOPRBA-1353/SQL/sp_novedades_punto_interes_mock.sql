@@ -38,7 +38,7 @@ BEGIN
          -- 120.TPT castea al exportar.
          CAST(d.latitud_punto_interes AS VARCHAR(40))   AS latitud,
          CAST(d.longitud_punto_interes AS VARCHAR(40))  AS longitud,
-         CAST(NULL AS VARCHAR(30))                      AS tipo,
+         hpi.descripcion                                AS tipo,
          p_lote, GETDATE(), CURRENT_USER
   FROM bdm_datos.geo_distancias_mock d
   -- El universo de Ubicacion, agrupado por cod_dw_ubic. Va en subconsulta
@@ -49,7 +49,10 @@ BEGIN
     FROM bdm_tempo.stg_nov_ubica_etapa_9_mock e9
     WHERE e9.cod_dw_ubic IS NOT NULL
   ) u
-    ON u.cod_dw_ubic = d.cod_dw_ubic;
+    ON u.cod_dw_ubic = d.cod_dw_ubic
+  -- No multiplica: los 34 valor_fuente del catalogo son distintos entre si.
+  LEFT JOIN bdm_datos.catalogo_hom_tipo_pto_int hpi
+    ON hpi.valor_fuente = d.tipo_punto_interes;
 
 END;
 $$;
