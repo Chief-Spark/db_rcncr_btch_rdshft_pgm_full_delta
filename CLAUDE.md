@@ -232,34 +232,39 @@ codigo de error y el build sigue. **Es hipotesis, no dato**, que algun gate
 futuro exija que el tipo detectado case con el `type` del `.jenkins.yml`; si
 alguna vez sale un error por ahi, el sitio es este.
 
-**Y EL BLOQUEO DE VERDAD NO ES DEL PAQUETE: CINCO RELACIONES DEL DATASHARE
-ESTAN ENMASCARADAS.** Redshift no permite consultar por datashare una
-relacion con mascara, y no es un problema de `GRANT`:
+**Y EL BLOQUEO DE VERDAD NO ES DEL PAQUETE: LAS NUEVE RELACIONES DEL
+DATASHARE ESTAN ENMASCARADAS.** Redshift no permite consultar por datashare
+una relacion con mascara, y no es un problema de `GRANT`:
 
 ```
 XX000: ERROR: cross-cluster query of the masked relation "<rel>" is not supported
 ```
 
-**Medido con la sonda, no deducido** (`diagnostico_datashare_edf_views.sql`,
-lineas 156-164: nueve `COUNT(*)`, uno por relacion, en una sesion contra DEV
-sin parar en el primer error). De las nueve que leemos:
+Las nueve que leemos, por impacto:
 
 | Enmascarada | Que bloquea |
 |---|---|
-| `xpm_location_val_contactinformations` | **Unificacion entera**, los cuatro canales del Ordenamiento y dos tablas dominio. La mas critica |
+| `xpm` | **la raiz del modelo**: `id_buro_persona = FNV_HASH(xpm.pin)`. 19 referencias en el paquete |
+| `xpm_location_val_contactinformations` | **Unificacion entera**, los cuatro canales del Ordenamiento y dos tablas dominio |
 | `xpm_bestaccounts` | Fase 2 del Ordenamiento (`v_xpm_cuenta`, `v_xpm_comportamiento_cta`, `v_xpm_cuenta_bloqueada`) |
 | `xpm_personalinformation` | Actividad economica (`v_xpm_actividad_economica_persona`) |
 | `xpm_chamberofcommerce` | la misma |
 | `xpm_bestidentifications` | Info basica (`v_xpm_persona_basica`) |
+| `xpm_location` | atributos de la ubicacion (`v_xpm_ubicacion_estandarizada`) |
+| `xpm_counterparties` | identidad del suscriptor que reporta |
+| `xpm_bestaccounts_val_frequentbehaviour` | comportamiento de cuenta, Fase 2 |
 
-**Responden sin problema**: `xpm`, `xpm_location`, `xpm_counterparties` y
-`xpm_bestaccounts_val_frequentbehaviour`. Ticket en
-`dt/docs/PETICION_RELACIONES_ENMASCARADAS_DATASHARE.md`.
+Ticket en `dt/docs/PETICION_RELACIONES_ENMASCARADAS_DATASHARE.md`.
 
-**CORRECCION: `xpm` YA NO ESTA ENMASCARADA.** Esta seccion decia que si, y era
-el dato del job DEV/DATABASE #453 -- cierto entonces, caducado hoy: EDF la
-levanto. Que lo hicieran **confirma que el cambio es viable** y convierte este
-ticket en la continuacion de aquel, no en uno nuevo.
+**ESTA SECCION DIJO ANTES CINCO, Y ERA FALSO.** Las cinco salian de las que la
+sonda alcanzo a rechazar en una corrida; el inventario que entrega EDF son las
+**nueve**. La leccion de metodo: **una sonda que para en el primer error no
+mide el universo**, y lo que no fallo no esta limpio, solo no se probo.
+
+**Lo unico sin cerrar es `xpm`:** se nos dijo que le habian retirado la
+mascara, y el inventario la trae. El ticket la pide igual y pide confirmar si
+la retirada se aplico, porque si se aplico **es la prueba de que el cambio es
+viable** para las otras ocho.
 
 **Lo que NO bloquea, y es lo que despisto hasta ahora:** `CREATE OR REPLACE
 VIEW` funciona, porque no ejecuta la consulta. El error sale la primera vez
