@@ -175,12 +175,26 @@ BEGIN
   -- excluye el cod_dw_persona_ubic ENTERO. En el mock da igual porque el id
   -- es unico por construccion, pero en el datashare NO lo es -- 568.657 filas
   -- para 142.067 ids -- y ahi la diferencia importa: es la misma que ya costo
-  -- una divergencia en la etapa 1 de Novedades. Por eso va como NOT EXISTS y
-  -- no como COALESCE(rpu.bloqueado, 0) = 0.
-  WHERE NOT EXISTS ( SELECT 1
-                       FROM bdm_tempo.v_mock_relacion_persona_ubicacion bl
-                      WHERE bl.cod_dw_persona_ubic = rpu.cod_dw_persona_ubic
-                        AND COALESCE(bl.bloqueado, 0) = 1 )
+  -- una divergencia en la etapa 1 de Novedades. Por eso excluye el id entero
+  -- y no es un COALESCE(rpu.bloqueado, 0) = 0.
+  --
+  -- Y VA COMO LEFT JOIN CONTRA UN SELECT DISTINCT, NO COMO NOT EXISTS
+  -- (job DEV/DATABASE #458). El NOT EXISTS correlacionado contra una vista
+  -- del datashare -- que a su vez lleva subconsultas -- Redshift no lo
+  -- descorrelaciona y lo RECHAZA en ejecucion:
+  --   XX000: This type of correlated subquery pattern is not supported
+  -- Tumbo la via real entera: sin stg_rpu_post_unificacion no hay
+  -- Ordenamiento, y sin orden_prioridad Novedades entra con cero relaciones.
+  -- El mock no lo sufria porque v_mock_relacion_persona_ubicacion es una
+  -- vista plana sobre una tabla, de modo que el tablero daba verde mientras
+  -- la via real no arrancaba. Es la trampa que CLAUDE.md ya documentaba, en
+  -- sitio nuevo. El anti-join no correlacionado es equivalente y Redshift lo
+  -- planifica sin problema; se aplica a las DOS vias para no romper paridad.
+  LEFT JOIN ( SELECT DISTINCT bl.cod_dw_persona_ubic
+                FROM bdm_tempo.v_mock_relacion_persona_ubicacion bl
+               WHERE COALESCE(bl.bloqueado, 0) = 1 ) blq
+    ON blq.cod_dw_persona_ubic = rpu.cod_dw_persona_ubic
+  WHERE blq.cod_dw_persona_ubic IS NULL
   ;
 
   ANALYZE bdm_tempo.stg_rpu_post_unificacion;
