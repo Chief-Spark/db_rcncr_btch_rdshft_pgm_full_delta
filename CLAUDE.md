@@ -178,13 +178,24 @@ vacio.
 | `REDSHIFT:232` | `UPDATE`/`DELETE` de nivel superior sin `WHERE` | `WHERE` explicito, o `TRUNCATE` |
 | `JENKINS:104/105` | rama sin ID de subtarea | nombrar la rama con la subtarea |
 
-**EL TRASLADO A BITBUCKET LLEVA SOLO `deploy/redshift/`.** Nada de
+**EL TRASLADO A BITBUCKET LLEVA `deploy/redshift/` Y `.jenkins.yml`.** Nada de
 `CLAUDE.md`, `validar.sh`, `docs/` ni `banco/`: Bitbucket es el repo de
 despliegue y Jenkins solo lee `sourcePath`, `orderFile` y `sqlFolder`, todos
-dentro del paquete. La secuencia de `./migra418.sh traslado <id>` ya lo hace
-bien; **la linea de `git checkout ... -- validar.sh CLAUDE.md` fue un anadido
-mio y es un error**: ensucia el diff que alguien tiene que revisar. Decision
-del equipo, SLCOPRBA-1355. Consecuencia asumida: los chequeos de `validar.sh`
+dentro del paquete. **El `.jenkins.yml` es la excepcion y se anadio el
+2026-10-22**, porque es lo que ELIGE el pipeline y Jenkins lo lee de la rama de
+Bitbucket, no de GitHub. Los repos `DB_DS_*` son nuevos y nacen de una
+**plantilla de Terraform**: su `.jenkins.yml` declara `tech: terraform`, de modo
+que el build se va al pipeline TERRAFORM y muere en `sonarQubeScan` con
+`SONARQUBE:101` **sin mirar una linea de SQL y sin tocar DEV** (DEV/TERRAFORM
+#74615, SLCOPRBA-1444). El bueno declara `tech: database`, `language: redshift`,
+`application: dba_rncr_batch` y el `type`/`order` de cada repo: `struct`/1,
+`program`/2, `data`/3.
+  **Y las cinco carpetas de la plantilla se borran** -- `demo`, `develop`,
+  `qa`, `trunk` y `production` --: son entornos de Terraform y el unico que las
+  nombra es ese mismo `.jenkins.yml`. `.gitignore` y `README.md` se quedan.
+**La linea de `git checkout ... -- validar.sh CLAUDE.md` sigue siendo un
+error**: ensucia el diff que alguien tiene que revisar. Decision del equipo,
+SLCOPRBA-1355. Consecuencia asumida: los chequeos de `validar.sh`
 viven solo en el repo de trabajo; si alguna vez hacen falta del lado de
 Bitbucket, el sitio es un paso del pipeline, no el repo.
 
