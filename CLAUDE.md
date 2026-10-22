@@ -232,6 +232,35 @@ codigo de error y el build sigue. **Es hipotesis, no dato**, que algun gate
 futuro exija que el tipo detectado case con el `type` del `.jenkins.yml`; si
 alguna vez sale un error por ahi, el sitio es este.
 
+**Y EL BLOQUEO DE VERDAD NO ES DEL PAQUETE: LA RELACION `xpm` DEL DATASHARE
+ESTA ENMASCARADA (job DEV/DATABASE #453).** Con el onboarding resuelto, el
+build valido los 49 scripts, entro al DPLY y escribio en DEV hasta el archivo
+17 de 49, donde murio:
+
+```
+XX000: ERROR: cross-cluster query of the masked relation "xpm" is not supported
+```
+
+**Redshift no permite consultar por datashare una relacion con mascara**, y no
+es un problema de `GRANT`. `ds_dba_rncr_batch.edf_views.xpm` es la RAIZ del
+modelo -- `id_buro_persona = FNV_HASH(xpm.pin)` -- con **17 referencias** en
+los tres archivos de vistas, de modo que **ninguna consulta de la via real
+devuelve una fila hasta que se levante**. Peticion redactada en
+`dt/docs/PETICION_RELACION_XPM_ENMASCARADA.md`.
+
+**Lo que NO bloquea, y es lo que despisto hasta ahora:** `CREATE OR REPLACE
+VIEW` funciona, porque no ejecuta la consulta. El error sale la primera vez
+que algo la EJECUTA, y el primer sitio que lo hacia era la carga de un
+catalogo. El mock no se entera: vive en `bdm_stage`.
+
+**Dos cosas se corrigieron de nuestro lado el 2026-10-22, y las dos eran
+defectos reales:**
+
+| Que | Por que |
+|---|---|
+| `02_catalogos_ordenamiento.sql` ya no carga `catalogo_sector_financiero` del datashare | era el **unico** archivo de DDL que consultaba el datashare al desplegar. Ataba la estructura a que el dato existiera, y el resultado era el mismo: el log del #453 imprime `catalogo_sector_financiero \| 0`. La tabla se queda, vacia; la bandera ya estaba documentada como ruido |
+| `RevSQL/00_prerequisitos_schemas.sql` ya no hace `DROP SCHEMA bdm_stage` | su premisa era falsa -- decia "es nuestro y solo tiene semillas mock" y en DEV tiene **23 objetos ajenos**: la sandbox `pp9999_*` entera y seis funciones `sp_ordenamiento_*`/`sp_geo_*`. Fallaba en cada RLLBCK_PRECHECK con `[REDSHIFT:112] codigo 8`. Un rollback que falla siempre no es un rollback; nuestras tablas de ahi las borran `02a_rollback` y `02c_rollback`. `validar.sh` lo exceptua del chequeo 11, como a los otros dos esquemas compartidos |
+
 **EL CLUSTER DE DEV YA NO SE PAUSA: ESTA SIEMPRE ARRIBA (SLCOPRBA-1355).**
 Hasta ahora esta seccion decia que se pausaba a diario sobre las 19:00 de
 Bogota y que ahi terminaba la ventana de despliegue. **Ya no hay ventana**: se
