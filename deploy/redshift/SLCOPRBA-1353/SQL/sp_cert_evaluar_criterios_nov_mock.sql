@@ -12,7 +12,9 @@
 --                                            no esta modelada en el mock)
 --   NOV-UB-16..NOV-UB-22                  -> BLOQUEADO (catalogo o contrato
 --                                            GEO que no se entrego)
---   los siete dominios no portados        -> NO_IMPLEMENTADO
+--   NOV-CAT-01, unico dominio sin portar  -> NO_IMPLEMENTADO
+--   NOV-INB / CON / PIN / MOV -01         -> CONSULTA desde el 2026-10-22:
+--                                            los cuatro dominios se portaron
 --   NOV-AE-01..10 menos 06 y 07           -> CONSULTA
 --   NOV-AE-06                             -> BLOQUEADO (falta
 --                                            V_ACTIVIDAD_ECONO_CIIU)
@@ -765,21 +767,104 @@ BEGIN
     SELECT 'NOV-UB-22', 'localidad y codigo postal no tienen columna en geo_atributos; las dos vienen del contrato GEO sin pinar'
   ) c;
 
-  -- ---------- Los SEIS dominios no portados ----------
-  -- Eran siete. NOV-HIS-01 salio del catalogo: el historial de actividad
-  -- economica es PRO_Novedad_Linea_Historial, que es justo lo que el bloque
-  -- ACTIVIDAD_ECONOMICA certifica desde el job DEV/DATABASE #413.
+  -- ---------- EL DOMINIO QUE SIGUE SIN PORTAR: UNO ----------
+  -- ERAN SEIS Y HOY ES UNO (2026-10-21/22). Los cuatro que faltaban --
+  -- NOV-INB-01, NOV-CON-01, NOV-PIN-01 y NOV-MOV-01 -- se portaron en esta
+  -- misma sesion y pasan a afirmarse POR CONSULTA justo debajo.
+  --   Dejarlos en NO_IMPLEMENTADO con la tabla escrita y con filas era un
+  --   tablero que se contradice a si mismo, que es exactamente lo que ya se
+  --   corrigio retirando el bloque de CA-02..CA-05. Y dos de los cuatro
+  --   citaban ademas motivos YA FALSOS: que Movilidad "depende del proceso
+  --   P0029, cuya migracion esta pendiente" -- P0029 esta en el repo, lo que
+  --   faltaba era el productor de MTCalcularIndicadoresMovilidad -- y que a
+  --   Punto de Interes "le falta el nombre, que el contrato de distancias no
+  --   persiste" -- el contrato SI lo trae, en col08; era geo_distancias la que
+  --   no tenia columna.
   INSERT INTO bdm_datos.cert_resultado_nov
     (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
-  SELECT p_lote, p_fase, c.criterio, 'NO_IMPLEMENTADO', c.detalle, GETDATE(), CURRENT_USER
-  FROM (
-    SELECT CAST('NOV-CAT-01' AS VARCHAR(12)) AS criterio,
-           CAST('PRO_Novedad_Linea_Catalogo (Novedad.sql:3) no esta portado' AS VARCHAR(1024)) AS detalle UNION ALL
-    SELECT 'NOV-INB-01', 'PRO_Novedad_Linea_Info_Basica (Novedad.sql:2166) no esta portado; depende ademas de la decision funcional del filtro Mosaic' UNION ALL
-    SELECT 'NOV-CON-01', 'PRO_Novedad_Linea_Contact (Novedad.sql:186) no esta portado; siete de sus once columnas son datos de gestion que no vienen del datashare' UNION ALL
-    SELECT 'NOV-PIN-01', 'PRO_Novedad_Linea_Punto_Interes (Novedad.sql:4585) no esta portado; falta ademas el nombre del punto de interes en el contrato de distancias' UNION ALL
-    SELECT 'NOV-MOV-01', 'PRO_Novedad_Linea_Indic_Movilidad (Novedad.sql:1508) no esta portado y depende del proceso P0029, cuya migracion esta pendiente'
-  ) c;
+  SELECT p_lote, p_fase,
+         CAST('NOV-CAT-01' AS VARCHAR(12)),
+         'NO_IMPLEMENTADO',
+         CAST('PRO_Novedad_Linea_Catalogo (Novedad.sql:3) no esta portado' AS VARCHAR(1024)),
+         GETDATE(), CURRENT_USER;
+
+  -- ---------- NOV-INB-01: Info Basica (d4) ----------
+  -- 20 de las 22 columnas del contrato se pueblan. El criterio solo afirma
+  -- que el dominio PRODUCE: la cobertura columna a columna es trabajo de una
+  -- bateria propia que todavia no existe.
+  INSERT INTO bdm_datos.cert_resultado_nov
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'NOV-INB-01',
+         CASE WHEN COUNT(*) > 0 THEN 'PASSED' ELSE 'FAILED' END,
+         'filas=' || CAST(COUNT(*) AS VARCHAR)
+           || ', personas distintas=' || CAST(COUNT(DISTINCT id) AS VARCHAR)
+           || ', con tipo de identificacion=' || CAST(COUNT(tipo_identificacion) AS VARCHAR)
+           || '. Portado el 2026-10-21: no son las doce etapas del legado sino una'
+           || ' re-especificacion, porque en EDF bestName / bestIdentifications /'
+           || ' bestPersonalInformation YA SON el registro mas confiable. Tres columnas'
+           || ' en NULL a proposito: pagina_web no existe en EDF (CCBR 251264543) y'
+           || ' mosaic_id esta fuera por decision legal',
+         GETDATE(), CURRENT_USER
+  FROM bdm_datos.mat_info_basica_mock;
+
+  -- ---------- NOV-CON-01: Contactabilidad (d5) ----------
+  -- SOLO 2 DE 12 COLUMNAS, y el criterio lo dice en vez de callarlo: no
+  -- existe la fuente de gestion. Un PASSED aqui afirma que el dominio
+  -- produce filas, NO que las produce completas.
+  INSERT INTO bdm_datos.cert_resultado_nov
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'NOV-CON-01',
+         CASE WHEN COUNT(*) > 0 THEN 'PASSED' ELSE 'FAILED' END,
+         'filas=' || CAST(COUNT(*) AS VARCHAR)
+           || ', ubicaciones distintas=' || CAST(COUNT(DISTINCT ubicacion_id) AS VARCHAR)
+           || ', con fecha=' || CAST(COUNT(fecha_ultimo_contacto) AS VARCHAR)
+           || '. SOLO 2 DE 12 COLUMNAS SE POBLAN y las dos con OTRA semantica'
+           || ' (decision del usuario, D-NOV-08): no existe la fuente de gestion ni en el'
+           || ' datashare ni en la documentacion de EDF. Las otras diez en NULL, que es la'
+           || ' senal honesta de que el hecho no se midio',
+         GETDATE(), CURRENT_USER
+  FROM bdm_datos.mat_info_contactabilidad_mock;
+
+  -- ---------- NOV-PIN-01: Punto de Interes (d7) ----------
+  -- CERO AQUI ES SIN_DATO Y NO FAILED, Y ES UN EFECTO DE ORDEN CONOCIDO:
+  -- este evaluador corre DENTRO del e2e y las distancias mock las carga
+  -- run_geo_ciclo_mock.sql DESPUES, porque el ciclo GEO tiene que correr
+  -- entre la convergencia y el tablero (metido dentro tumbaria CA-01). De
+  -- modo que en las tres fases la tabla esta vacia por construccion.
+  -- Marcarlo FAILED seria tumbar el build por un orden que es deliberado.
+  INSERT INTO bdm_datos.cert_resultado_nov
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'NOV-PIN-01',
+         CASE WHEN COUNT(*) > 0 THEN 'PASSED' ELSE 'SIN_DATO' END,
+         'filas=' || CAST(COUNT(*) AS VARCHAR)
+           || ', ubicaciones distintas=' || CAST(COUNT(DISTINCT ubicacion_id) AS VARCHAR)
+           || '. Portado el 2026-10-21, 7 de 10 columnas. CERO EN LA BATERIA ES EFECTO DE'
+           || ' ORDEN Y NO DEFECTO: las distancias mock las carga run_geo_ciclo_mock.sql'
+           || ' DESPUES del e2e, y este evaluador corre dentro. El conteo real del dominio'
+           || ' lo imprime ese runner',
+         GETDATE(), CURRENT_USER
+  FROM bdm_datos.mat_info_punto_interes_mock;
+
+  -- ---------- NOV-MOV-01: Movilidad (d6) ----------
+  -- CERO TAMBIEN ES SIN_DATO AQUI, y por un motivo distinto: esta tabla es de
+  -- EVENTOS. En FULL no hay foto anterior contra la que comparar -- una
+  -- persona vista por primera vez no se mudo -- y en DELTA1 nadie ha cambiado
+  -- todavia. El unico cambio sembrado es el del ARQ 97, que el paso 3b del
+  -- e2e aplica antes del DELTA2. O sea que lo esperado es: FULL 0, DELTA1 0,
+  -- DELTA2 con filas.
+  INSERT INTO bdm_datos.cert_resultado_nov
+    (lote, modo, criterio, estado, detalle, fecha_hora, usuario_bd)
+  SELECT p_lote, p_fase, 'NOV-MOV-01',
+         CASE WHEN COUNT(*) > 0 THEN 'PASSED' ELSE 'SIN_DATO' END,
+         'eventos=' || CAST(COUNT(*) AS VARCHAR)
+           || ', personas distintas=' || CAST(COUNT(DISTINCT info_basica_id) AS VARCHAR)
+           || ', indicadores distintos=' || CAST(COUNT(DISTINCT novedad) AS VARCHAR)
+           || '. Portado el 2026-10-21 con 3 de los 4 indicadores: falta Cambio de'
+           || ' Localidad porque LOCALIDAD no existe en EDF. TABLA DE EVENTOS: cero es'
+           || ' valido en FULL (no hay foto anterior) y en DELTA1 (nadie cambio todavia);'
+           || ' el cambio sembrado es el del ARQ 97 y entra en el DELTA2',
+         GETDATE(), CURRENT_USER
+  FROM bdm_datos.mat_info_movilidad_mock;
 
   -- ---------- Gobernanza: no hay consulta que la decida ----------
   INSERT INTO bdm_datos.cert_resultado_nov
