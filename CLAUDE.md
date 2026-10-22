@@ -232,21 +232,34 @@ codigo de error y el build sigue. **Es hipotesis, no dato**, que algun gate
 futuro exija que el tipo detectado case con el `type` del `.jenkins.yml`; si
 alguna vez sale un error por ahi, el sitio es este.
 
-**Y EL BLOQUEO DE VERDAD NO ES DEL PAQUETE: LA RELACION `xpm` DEL DATASHARE
-ESTA ENMASCARADA (job DEV/DATABASE #453).** Con el onboarding resuelto, el
-build valido los 49 scripts, entro al DPLY y escribio en DEV hasta el archivo
-17 de 49, donde murio:
+**Y EL BLOQUEO DE VERDAD NO ES DEL PAQUETE: CINCO RELACIONES DEL DATASHARE
+ESTAN ENMASCARADAS.** Redshift no permite consultar por datashare una
+relacion con mascara, y no es un problema de `GRANT`:
 
 ```
-XX000: ERROR: cross-cluster query of the masked relation "xpm" is not supported
+XX000: ERROR: cross-cluster query of the masked relation "<rel>" is not supported
 ```
 
-**Redshift no permite consultar por datashare una relacion con mascara**, y no
-es un problema de `GRANT`. `ds_dba_rncr_batch.edf_views.xpm` es la RAIZ del
-modelo -- `id_buro_persona = FNV_HASH(xpm.pin)` -- con **17 referencias** en
-los tres archivos de vistas, de modo que **ninguna consulta de la via real
-devuelve una fila hasta que se levante**. Peticion redactada en
-`dt/docs/PETICION_RELACION_XPM_ENMASCARADA.md`.
+**Medido con la sonda, no deducido** (`diagnostico_datashare_edf_views.sql`,
+lineas 156-164: nueve `COUNT(*)`, uno por relacion, en una sesion contra DEV
+sin parar en el primer error). De las nueve que leemos:
+
+| Enmascarada | Que bloquea |
+|---|---|
+| `xpm_location_val_contactinformations` | **Unificacion entera**, los cuatro canales del Ordenamiento y dos tablas dominio. La mas critica |
+| `xpm_bestaccounts` | Fase 2 del Ordenamiento (`v_xpm_cuenta`, `v_xpm_comportamiento_cta`, `v_xpm_cuenta_bloqueada`) |
+| `xpm_personalinformation` | Actividad economica (`v_xpm_actividad_economica_persona`) |
+| `xpm_chamberofcommerce` | la misma |
+| `xpm_bestidentifications` | Info basica (`v_xpm_persona_basica`) |
+
+**Responden sin problema**: `xpm`, `xpm_location`, `xpm_counterparties` y
+`xpm_bestaccounts_val_frequentbehaviour`. Ticket en
+`dt/docs/PETICION_RELACIONES_ENMASCARADAS_DATASHARE.md`.
+
+**CORRECCION: `xpm` YA NO ESTA ENMASCARADA.** Esta seccion decia que si, y era
+el dato del job DEV/DATABASE #453 -- cierto entonces, caducado hoy: EDF la
+levanto. Que lo hicieran **confirma que el cambio es viable** y convierte este
+ticket en la continuacion de aquel, no en uno nuevo.
 
 **Lo que NO bloquea, y es lo que despisto hasta ahora:** `CREATE OR REPLACE
 VIEW` funciona, porque no ejecuta la consulta. El error sale la primera vez
