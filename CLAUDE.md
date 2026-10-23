@@ -724,6 +724,44 @@ via real con una regresion del mock.
 por el reset DESPUES de la corrida real, asi que ya no se pueden inspeccionar al
 acabar el build. Las siete `mat_*`, que son el entregable, no se tocan.
 
+**EL #484 CERRO LOS DOS ARREGLOS Y DESTAPO UN TERCERO.** El ancho funciono --
+`mat_info_basica` paso de 0 a **1.194.682 filas** y las SIETE etapas salieron
+`completado` -- y GEO dejo de fallar por SQL: ahora muere en el `UNLOAD` con
+`UnauthorizedException: role rcncr-batch-redshift-geo is not associated to
+cluster`, que es el bloqueo de permisos ya documentado y no bloquea.
+
+**PERO INFO BASICA TRAIA UN UNIVERSO QUE EL LEGADO NO TRAE, Y SE VEIA EN EL
+CONTEO:**
+
+| Dominio | Personas |
+|---|---|
+| Ubicacion, Ubicacion agregada, Contactabilidad | **55.259** |
+| **Info basica** | **1.194.682** |
+
+Veinte veces mas, y de esos 1,19 M **solo ~120.000 traian nombre o documento**:
+mas de un millon de filas con un id y poco mas. La causa estaba en una linea --
+`v_xpm_persona_basica` arrancaba de `xpm` entero en vez de la RPU.
+
+**EL LEGADO NO HACE ESO** (regla 4): `TMP_FLAG_OP_I_INBAS` se construye
+`FROM <BDDATOS>.RELACION_PERSONA_UBICACION RPU` (`Novedad.sql:2266-2267`), que
+es exactamente el universo de los otros tres dominios. Corregido con un
+`INNER JOIN` contra un `SELECT DISTINCT` de la RPU -- nunca un `EXISTS`
+correlacionado, que contra una vista del datashare Redshift rechaza.
+
+**Y LO QUE MAS DEBERIA INQUIETAR: EL ESPEJO MOCK YA LO HACIA BIEN.**
+`v_mock_persona_basica` arranca de `v_mock_relacion_persona_ubicacion` desde
+siempre, de modo que **la bateria mock no podia ver este defecto ni en
+principio**: el real y su espejo divergian justo en la linea que define el
+universo. **La paridad real<->mock no es solo de columnas: es tambien del FROM.**
+
+**UNA LECTURA DEL #484 QUE PARECIA DEFECTO Y ERA UNA MEDIDA ENVEJECIDA.**
+`en_las_tres_bloqueadas` dio 121.774 donde debia dar 0, y la culpa era de la
+medida: contaba `tipo_identificacion` entre las bloqueadas y esa columna **se
+puebla** desde que llego su catalogo el 2026-10-21. Las bloqueadas de verdad
+son DOS -- `pagina_web`, que no existe en EDF, y `mosaic_id`, fuera por decision
+legal. Renombrada a `en_las_dos_bloqueadas`, con `con_tipo_ident` aparte.
+**Tercera nota envejecida en dos dias**; el patron ya no es anecdota.
+
 ## Convenciones de codigo
 
 - **UTF-8 sin BOM. ASCII sin acentos**, a proposito, en todo el repo.
