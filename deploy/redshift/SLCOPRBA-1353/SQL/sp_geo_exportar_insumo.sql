@@ -264,7 +264,7 @@ BEGIN
   --        del universo del delta de la corrida, materializadas por el
   --        orquestador (sp_unificacion_ciclo) tras R2 en
   --        bdm_tempo.stg_unif_delta_ubic. La interseccion se aplica con un
-  --        predicado EXISTS gobernado por el modo (ver WHERE) para acotar los
+  --        predicado gobernado por el modo (ver WHERE) para acotar los
   --        candidatos al delta sin alterar la cardinalidad; toda ubicacion sin
   --        coordenadas que NO este en el delta queda fuera del Lote de esta
   --        corrida y se conserva pendiente para una corrida DELTA posterior que
@@ -286,36 +286,46 @@ BEGIN
     FROM bdm_tempo.v_xpm_ubicacion_estandarizada ubi
     LEFT JOIN bdm_datos.geo_atributos g
       ON ubi.cod_dw_ubic = g.cod_dw_ubic
+    -- LOS DOS PREDICADOS DE ABAJO ERAN "EXISTS" CORRELACIONADOS Y REDSHIFT LOS
+    -- RECHAZA (job DEV/DATABASE #477): correlacionan contra ubi, que es una
+    -- vista del datashare, y el motor contesta
+    --   XX000: This type of correlated subquery pattern is not supported.
+    -- No tumbaba el build porque GEO no es bloqueante y el ciclo captura la
+    -- excepcion, de modo que el sintoma real era peor: NINGUN Lote GEO se
+    -- exportaba nunca en la via real, en silencio.
+    --   El espejo mock no fallaba porque alli ubi es una tabla de bdm_stage.
+    --   Es el MISMO defecto que el de sp_ordenamiento_preparar_insumos del
+    --   #458, y esta aqui porque entonces lo arregle donde fallo en vez de
+    --   barrer el paquete entero buscando el patron.
+    -- SELECT DISTINCT en los dos derivados: conserva la cardinalidad del
+    -- barrido, que es lo que el EXISTS garantizaba y un JOIN a secas no.
+    LEFT JOIN ( SELECT DISTINCT d.cod_dw_ubic
+                  FROM bdm_tempo.stg_unif_delta_ubic d ) dlt
+      ON dlt.cod_dw_ubic = ubi.cod_dw_ubic
+    LEFT JOIN ( SELECT DISTINCT ga.cod_dw_ubic
+                  FROM bdm_datos.geo_atributos ga
+                  JOIN bdm_datos.geo_lote_control lc
+                    ON ga.lote = lc.lote
+                 WHERE lc.estado IN ('exportado', 'procesado por ArcGIS_Externo')
+              ) enc
+      ON enc.cod_dw_ubic = ubi.cod_dw_ubic
     WHERE (g.cod_dw_ubic IS NULL          -- sin fila en geo_atributos
         OR g.latitud IS NULL
         OR g.longitud IS NULL)            -- coordenadas no disponibles (Req 1.1)
-      -- Interseccion con el universo delta SOLO en Modo_Delta (Req 8.2). Se usa
-      -- un predicado EXISTS gobernado por el modo (no un JOIN) para NO multiplicar
-      -- filas ni alterar la cardinalidad del barrido: en FULL el predicado
-      -- completo es TRUE y se conserva el barrido total (Req 8.1); en DELTA solo
+      -- Interseccion con el universo delta SOLO en Modo_Delta (Req 8.2). El
+      -- predicado va gobernado por el modo: en FULL es TRUE entero y se
+      -- conserva el barrido total (Req 8.1); en DELTA solo
       -- pasan las cod_dw_ubic presentes en el universo del delta materializado por
       -- el orquestador tras R2 (Req 8.2). Las ubicaciones sin coordenadas fuera
       -- del delta quedan pendientes para una corrida posterior (Req 8.3).
-      AND ( v_modo <> 'DELTA'
-         OR EXISTS (
-              SELECT 1
-              FROM bdm_tempo.stg_unif_delta_ubic d
-              WHERE d.cod_dw_ubic = ubi.cod_dw_ubic
-            ) )
+      AND ( v_modo <> 'DELTA' OR dlt.cod_dw_ubic IS NOT NULL )
       -- Excluir solo las ubicaciones de un Lote EN CURSO (Req 1.5): exportado
       -- o procesado por ArcGIS y aun sin cargar. 2026-10-20 (defecto D):
       -- antes se excluia todo Lote no 'cargado', de modo que un Lote
       -- 'fallido' (un UNLOAD sin permisos, por ejemplo) dejaba sus
       -- candidatos fuera para siempre. Ahora 'fallido', 'fallido definitivo'
       -- y 'vencido' vuelven a exportarse.
-      AND NOT EXISTS (
-        SELECT 1
-        FROM bdm_datos.geo_atributos ga
-        JOIN bdm_datos.geo_lote_control lc
-          ON ga.lote = lc.lote
-        WHERE ga.cod_dw_ubic = ubi.cod_dw_ubic
-          AND lc.estado IN ('exportado', 'procesado por ArcGIS_Externo')
-      )
+      AND enc.cod_dw_ubic IS NULL
   ) q
   WHERE q.rn <= v_max_records;   -- limitar a max_records (Req 1.3, 1.4)
 

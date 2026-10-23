@@ -619,12 +619,110 @@ pinar (`BARRIO`, `ESTRATO`, `LOCALIDAD`, `CODIGO_POSTAL`), y el reexport de
 `V_Geografia` y `V_Cod_Entrega_Dato`, que **llegaron truncados a 1000 filas
 exactas**. Detalle en `docs/PETICION_CATALOGOS_NOVEDADES.md`.
 
-**UN RIESGO HEREDADO QUE TOCA LO YA DESPLEGADO.** El mapeo mide que `id` no es
-unico por fila en `xpm_location_val_contactinformations`: 568.657 filas contra
-142.067 `id` distintos, ~4:1. Nuestras vistas asignan
-`cod_dw_persona_ubic = ci.id`, que colapsa datos de contacto; la llave deberia
-derivarse de `(id, index)`. **Afecta a Unificacion, que ya esta desplegada y
-certificada.** No se toca aqui: se anota y se eleva.
+**~~UN RIESGO HEREDADO QUE TOCA LO YA DESPLEGADO~~ CERRADO (2026-10-23).** Esta
+nota decia que nuestras vistas asignaban `cod_dw_persona_ubic = ci.id` y que eso
+colapsaba datos de contacto, porque `id` no es unico por fila en
+`xpm_location_val_contactinformations` (568.657 filas contra 142.067 `id`
+distintos, ~4:1), y pedia derivar la llave de `(id, index)`. **Ya esta hecho**:
+`02_vistas_insumo_edf_views.sql:77` y `:507` la derivan de
+`FNV_HASH(id || ':' || index)`. La nota sobrevivio al arreglo y llego a ser el
+"riesgo numero uno de produccion" de una conversacion entera sin serlo.
+**Moraleja, la de siempre: antes de abrir trabajo a partir de una nota, leer el
+codigo.**
+
+## La via REAL: cuatro de siete dominios, y lo que el mock no puede ver
+
+**PRIMER DATO REAL EN LAS TABLAS DOMINIO (job DEV/DATABASE #477).** Cuatro de
+las siete se poblaron desde el datashare, y es el avance contra la meta:
+
+| Dominio | Filas reales |
+|---|---|
+| `mat_info_actividad_economica` | **124.263** (58.512 personas) |
+| `mat_info_ubicacion` | **60.452** (55.259 personas) |
+| `mat_info_contactabilidad` | **60.452** |
+| `mat_ubicacion_agregada` | **59.282** |
+
+Las otras tres salen en 0 por **efecto de secuencia y no por defecto**:
+`info_basica` aborto y `movilidad` y `punto_interes` corren detras.
+
+**EL ANCHO DE COLUMNA ES UN DEFECTO QUE SOLO EL DATO REAL REVELA**, y tumbo el
+build:
+
+```
+XX000: Value too long for type character varying(200)
+```
+
+Un `bestname.fullname` de mas de 200 caracteres contra
+`mat_info_basica.nombre_completo`. **El ancho no estaba mal**: lo fija el legado
+(`P0035_Extractor_Novedades_130.TPT:97`, `IN_NOMBRE_COMPLETO VARCHAR(200)`). Lo
+que faltaba era acotar el valor, porque en EDF ese campo no tiene tope y el mock
+siembra nombres cortos por construccion.
+
+**Y NO ERA UNA COLUMNA: ERAN ONCE DE LA MISMA CLASE.** Solo fallo la primera
+porque el motor para en el primer error -- **la misma leccion que ya se pago con
+el enmascaramiento, y en el mismo mes**. Acotadas las once de una vez en
+`v_xpm_persona_basica`.
+
+**VA CON `CAST` Y NO CON `LEFT`, y la diferencia no es de estilo:** `VARCHAR(n)`
+en Redshift son **n BYTES** y `LEFT()` corta **CARACTERES**, de modo que 200
+caracteres acentuados son hasta 400 bytes y volverian a desbordar. El `CAST`
+explicito al ancho de la columna es ademas lo que la documentacion de Redshift
+da como forma de conservar los caracteres de cabeza; Redshift **no** trunca solo
+al insertar.
+
+**SE TRUNCA Y NO SE ENSANCHA LA COLUMNA (decision del usuario, 2026-10-23):** el
+ancho es el del legado y el Batch de salida recorta a `CHAR(100)` aguas abajo
+(`P0033_BATCH2_EXPORTPLANO_111.BTQ:1141`), asi que nada que llegue al consumidor
+se pierde. Y si alguna vez se decide ensanchar, **hay que hacerlo con `ALTER`**:
+`CREATE TABLE IF NOT EXISTS` sobre una tabla ya creada en DEV no cambia un ancho.
+
+**UNA DE LAS ONCE NO ERA DE EDF, ERA NUESTRA.** `tipo_identificacion` se
+casteaba a `VARCHAR(100)` en la vista y la tabla la declara `VARCHAR(30)`
+(`37_ddl_nov_info_basica.sql`). Habria dado el mismo `XX000` sin que EDF tuviera
+nada que ver. **Cuando una vista declara un ancho, tiene que ser el de su tabla.**
+
+**Y GEO NO EXPORTABA NUNCA EN LA VIA REAL, EN SILENCIO.** Los dos `EXISTS`
+correlacionados de `sp_geo_exportar_insumo.sql` correlacionan contra
+`v_xpm_ubicacion_estandarizada`, que es vista del datashare, y Redshift los
+rechaza con `XX000: This type of correlated subquery pattern is not supported`.
+**No tumbaba el build porque GEO no es bloqueante y el ciclo captura la
+excepcion**, de modo que el sintoma era peor que un fallo: ningun Lote salia y
+nadie se enteraba. El espejo mock no fallaba porque alli la fuente es una tabla
+de `bdm_stage`.
+
+**LA LECCION DE METODO, QUE ES LA QUE VALE:** este es el **mismo** defecto del
+job #458, y seguia vivo porque entonces se arreglo **donde fallo** en vez de
+barrer el paquete buscando el patron. Un fallo con nombre propio -- una
+subconsulta correlacionada, un ancho de columna, una palabra reservada -- **no es
+un incidente: es una clase**. El arreglo se busca en todo el paquete el mismo
+dia, no cuando vuelva a saltar.
+
+**UN FALLO QUE NO TUMBA EL BUILD ES PEOR QUE UNO QUE SI**, y aqui hay dos
+ejemplos en la misma corrida. Lo que se traga una excepcion -- GEO por decision
+de negocio -- necesita que alguien mire el conteo, porque el verde no lo dice.
+
+**Y LA VIA REAL CORRE AHORA LA PRIMERA (2026-10-23, decision del usuario).**
+`run_reconocer_e2e_real_full.sql` pasa del puesto **17 al 4** de `deploy.par`,
+justo detras de las tres migraciones y delante de `reset_mock.sql`. Antes un
+fallo del dato real tardaba 45 minutos de bateria mock en aparecer, y el
+pipeline corre el DPLY **dos veces**.
+
+**ES SEGURO, Y ESTA MEDIDO, NO SUPUESTO:** `reset_mock.sql` no trunca **ni una**
+tabla de las que produce la via real -- ni las siete `mat_*`, ni
+`unificacion_direccion`, ni `rpu_orden_prioridad`, ni los tres control. Y los
+dos diccionarios viven en esquemas distintos: el real lee
+`bdm_datos.diccionario_complementos` / `diccionario_via` y el mock escribe los
+de `bdm_stage`, que son los unicos que el reset toca.
+
+**LO QUE SI CAMBIA, Y ES EL PRECIO ASUMIDO:** cuando la via real falle, la
+bateria mock y el gate **no llegan a correr**, de modo que ese build no produce
+evidencia de QA. Es justo el intercambio que se busca -- enterarse en minutos y
+no en tres cuartos de hora --, pero conviene no confundir un build rojo por la
+via real con una regresion del mock.
+
+**Y un efecto menor de orden:** `stg_nov_ubica_etapa_9` y `_2` quedan truncadas
+por el reset DESPUES de la corrida real, asi que ya no se pueden inspeccionar al
+acabar el build. Las siete `mat_*`, que son el entregable, no se tocan.
 
 ## Convenciones de codigo
 

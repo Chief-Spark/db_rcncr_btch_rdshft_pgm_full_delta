@@ -236,23 +236,34 @@ BEGIN
     FROM bdm_tempo.v_mock_ubicacion_estandarizada ubi
     LEFT JOIN bdm_datos.geo_atributos_mock g
       ON ubi.cod_dw_ubic = g.cod_dw_ubic
+    -- LOS DOS PREDICADOS DE ABAJO ERAN "EXISTS" CORRELACIONADOS Y REDSHIFT LOS
+    -- RECHAZA (job DEV/DATABASE #477): correlacionan contra ubi, que es una
+    -- vista del datashare, y el motor contesta
+    --   XX000: This type of correlated subquery pattern is not supported.
+    -- No tumbaba el build porque GEO no es bloqueante y el ciclo captura la
+    -- excepcion, de modo que el sintoma real era peor: NINGUN Lote GEO se
+    -- exportaba nunca en la via real, en silencio.
+    --   El espejo mock no fallaba porque alli ubi es una tabla de bdm_stage.
+    --   Es el MISMO defecto que el de sp_ordenamiento_preparar_insumos del
+    --   #458, y esta aqui porque entonces lo arregle donde fallo en vez de
+    --   barrer el paquete entero buscando el patron.
+    -- SELECT DISTINCT en los dos derivados: conserva la cardinalidad del
+    -- barrido, que es lo que el EXISTS garantizaba y un JOIN a secas no.
+    LEFT JOIN ( SELECT DISTINCT d.cod_dw_ubic
+                  FROM bdm_tempo.stg_mock_unif_delta_ubic d ) dlt
+      ON dlt.cod_dw_ubic = ubi.cod_dw_ubic
+    LEFT JOIN ( SELECT DISTINCT ga.cod_dw_ubic
+                  FROM bdm_datos.geo_atributos_mock ga
+                  JOIN bdm_datos.geo_lote_control_mock lc
+                    ON ga.lote = lc.lote
+                 WHERE lc.estado IN ('exportado', 'procesado por ArcGIS_Externo')
+              ) enc
+      ON enc.cod_dw_ubic = ubi.cod_dw_ubic
     WHERE (g.cod_dw_ubic IS NULL
         OR g.latitud IS NULL
         OR g.longitud IS NULL)
-      AND ( v_modo <> 'DELTA'
-         OR EXISTS (
-              SELECT 1
-              FROM bdm_tempo.stg_mock_unif_delta_ubic d
-              WHERE d.cod_dw_ubic = ubi.cod_dw_ubic
-            ) )
-      AND NOT EXISTS (
-        SELECT 1
-        FROM bdm_datos.geo_atributos_mock ga
-        JOIN bdm_datos.geo_lote_control_mock lc
-          ON ga.lote = lc.lote
-        WHERE ga.cod_dw_ubic = ubi.cod_dw_ubic
-          AND lc.estado IN ('exportado', 'procesado por ArcGIS_Externo')
-      )
+      AND ( v_modo <> 'DELTA' OR dlt.cod_dw_ubic IS NOT NULL )
+      AND enc.cod_dw_ubic IS NULL
   ) q
   WHERE q.rn <= v_max_records;
 
