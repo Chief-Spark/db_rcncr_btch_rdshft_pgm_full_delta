@@ -630,7 +630,7 @@ distintos, ~4:1), y pedia derivar la llave de `(id, index)`. **Ya esta hecho**:
 **Moraleja, la de siempre: antes de abrir trabajo a partir de una nota, leer el
 codigo.**
 
-## La via REAL: cuatro de siete dominios, y lo que el mock no puede ver
+## La via REAL: cinco de siete dominios, y lo que el mock no puede ver
 
 **PRIMER DATO REAL EN LAS TABLAS DOMINIO (job DEV/DATABASE #477).** Cuatro de
 las siete se poblaron desde el datashare, y es el avance contra la meta:
@@ -641,9 +641,11 @@ las siete se poblaron desde el datashare, y es el avance contra la meta:
 | `mat_info_ubicacion` | **60.452** (55.259 personas) |
 | `mat_info_contactabilidad` | **60.452** |
 | `mat_ubicacion_agregada` | **59.282** |
+| `mat_info_basica` | **58.878** (58.878 personas), desde el #491 |
 
-Las otras tres salen en 0 por **efecto de secuencia y no por defecto**:
-`info_basica` aborto y `movilidad` y `punto_interes` corren detras.
+Las otras dos salen en 0 por **efecto de secuencia y no por defecto**:
+`movilidad` y `punto_interes` corren detras. *(En el #477 eran tres: la quinta
+era `info_basica`, que abortaba por ancho de columna.)*
 
 **EL ANCHO DE COLUMNA ES UN DEFECTO QUE SOLO EL DATO REAL REVELA**, y tumbo el
 build:
@@ -761,6 +763,46 @@ puebla** desde que llego su catalogo el 2026-10-21. Las bloqueadas de verdad
 son DOS -- `pagina_web`, que no existe en EDF, y `mosaic_id`, fuera por decision
 legal. Renombrada a `en_las_dos_bloqueadas`, con `con_tipo_ident` aparte.
 **Tercera nota envejecida en dos dias**; el patron ya no es anecdota.
+
+**EL #491 CERRO LOS DOS ARREGLOS EN REDSHIFT REAL Y EN LAS DOS PASADAS DE DPLY.**
+Que es la unica forma de darlos por cerrados, porque el pipeline corre el DPLY
+dos veces y lo que una pasada escribe sobrevive a la otra:
+
+| Medida | #484 | #491 |
+|---|---|---|
+| `mat_info_basica` | 1.194.682 filas / 1.194.682 personas | **58.878 / 58.878** |
+| `con_nombre` | ~120.000 | **57.570** (98%) |
+| `con_documento` | ~120.000 | **58.878** (100%) |
+| genero en blanco | 1.157.535 | **21.863** |
+| `en_las_tres/dos_bloqueadas` | 121.774 | **0**, con `con_tipo_ident` = 58.878 aparte |
+
+Las SIETE etapas `completado` en las dos pasadas; la segunda entra como
+`corrida 2` con watermark `2026-09-30 -> 2026-09-30` y `ubi_agregada`
+`filas_altas = 0`, que es el UPSERT siendo idempotente. Los dos
+`CERTIFICACION OK`, `DDL_1 vs DDL_2` sin diferencias, `Rollback de prueba
+exitoso para 'struct'` y `Finished: SUCCESS`. Y el mock intacto en las dos
+pasadas -- Unificacion `50/50/0`, Ordenamiento `45/44/1`, Novedades `26/25/1`,
+convergencia `CA-C01..CA-C08` con checksums identicos --: **radio de impacto
+cero**, que era lo que habia que descartar.
+
+**Y EL NUMERO QUE YO ESPERABA ESTABA MAL: SON 58.878 Y NO 55.259.** Dije que
+Info basica debia aterrizar en las 55.259 de los otros tres dominios y
+aterrizo en 58.878. **La diferencia de 3.619 es correcta, no un residuo del
+defecto:** el legado arranca Info basica de la RPU **entera**
+(`Novedad.sql:2266-2267`), mientras Ubicacion, Ubicacion agregada y
+Contactabilidad filtran ademas por no bloqueada, no unificada y orden de
+prioridad no nulo. Copie el numero del dominio de al lado en vez de contar la
+RPU sin filtrar. **Un numero esperado se deriva del legado igual que el
+codigo**; tomarlo prestado del vecino es la misma clase de error que la medida
+envejecida, solo que del lado del que mide.
+
+**UNA RAMA QUE HAY QUE MEDIR, Y HOY ES HIPOTESIS Y NO DEFECTO.**
+`con_fecha_exp` dio **861** de 58.878 (1,5%) cuando en el #484 eran 42.147 de
+1,19 M: casi toda fecha de expedicion vivia en personas que el universo
+correcto deja fuera. Es plausible -- la RPU es otra poblacion --, pero es
+exactamente el patron de la rama que nadie mira (`NOV-AE`, `NOV-UB-12`). Antes
+de darla por buena hay que contar en DEV cuantas personas de la RPU traen
+`expeditiondate`. No se abre trabajo sobre esto hasta tener ese numero.
 
 ## Convenciones de codigo
 
