@@ -142,7 +142,20 @@ BEGIN
       '[[:space:]]+(NORTE|OESTE|ESTE|SUR|SOE|NE|NO|SE|SO|OE|N|S|E|O)$', '') AS via_principal_cmp,
     REGEXP_REPLACE(UPPER(COALESCE(df.via_generadora, '')),
       '[[:space:]]+(NORTE|OESTE|ESTE|SUR|SOE|NE|NO|SE|SO|OE|N|S|E|O)$', '') AS via_generadora_cmp,
-    CAST(NULLIF(REGEXP_SUBSTR(COALESCE(df.numero_puerta, ''), '^[0-9]+$'), '') AS INTEGER) AS numero_puerta_num,
+    -- QA #176: ESTE CAST NO LLEVABA GUARDA Y REVENTO LA REGLA 3 ENTERA con
+    -- "Overflow (Integer valid range -2147483648 to 2147483647)". El regex
+    -- acepta digitos SIN tope de longitud, y en QA llego un numero de puerta
+    -- que no cabe en INTEGER. La guarda por BIGINT ya estaba en el repo, en
+    -- las otras cuatro conversiones de texto a INTEGER sobre el datashare
+    -- (02_vistas_insumo_edf_views.sql:141 y :522, 03_vistas_contacto_canal:111,
+    -- y la de citycode acota por LEN); faltaba justo en esta.
+    -- NULL y no 0: un numero de puerta que no cabe en INTEGER no es una puerta,
+    -- y el escenario ya trata el NULL como "sin numero comparable".
+    CASE WHEN NULLIF(REGEXP_SUBSTR(COALESCE(df.numero_puerta, ''), '^[0-9]+$'), '') IS NOT NULL
+          AND CAST(NULLIF(REGEXP_SUBSTR(COALESCE(df.numero_puerta, ''), '^[0-9]+$'), '') AS BIGINT) <= 2147483647
+         THEN CAST(NULLIF(REGEXP_SUBSTR(COALESCE(df.numero_puerta, ''), '^[0-9]+$'), '') AS INTEGER)
+         ELSE NULL
+    END AS numero_puerta_num,
     -- (C1) LEFT JOIN, no INNER: ver la cabecera.
     COALESCE(COUNT(DISTINCT rep.id_buro_suscriptor), 0) AS numero_entidades_reportan,
     MAX(rep.fecha_reporte)                              AS fecha_ultima_actualizacion
