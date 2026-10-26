@@ -804,6 +804,97 @@ exactamente el patron de la rama que nadie mira (`NOV-AE`, `NOV-UB-12`). Antes
 de darla por buena hay que contar en DEV cuantas personas de la RPU traen
 `expeditiondate`. No se abre trabajo sobre esto hasta tener ese numero.
 
+**CERRADA (2026-10-26): el dato NO existe y el ranking no se come nada.** De las
+58.878 personas de la RPU, **862** traen `issuedate`, las 862 en la
+identificacion validada y **cero** solo en otra. La tabla tiene 861. El
+`ROW_NUMBER` de `v_xpm_persona_basica` no descarta ninguna fecha.
+
+## El universo real entra al 26%, y las tres cuartas partes que se caen son NITs
+
+**MEDIDO EN DEV, SUMA EXACTA, Y NADIE LO HABIA MIRADO.** El embudo de entrada de
+la via real:
+
+| | Relaciones | % |
+|---|---|---|
+| `v_xpm_relacion_persona_ubicacion` | **299.575** | 100% |
+| Caen por **bloqueada** | **221.383** | **73,9%** |
+| Caen por ya unificada | 19 | 0,006% |
+| **Entran al proceso** | **78.173** | **26,1%** |
+
+78.173 + 19 + 221.383 = 299.575. El filtro es
+`sp_unificacion_r1_preparar_insumo.sql:52,104,105`, y el `INNER JOIN` contra
+`v_xpm_ubicacion_estandarizada` de esa linea 52 **no descarta nada**: la
+estandarizacion cubre el 100% de las 114.703 ubicaciones.
+
+**EL BLOQUEO CAE SOBRE PERSONAS JURIDICAS, y por eso es correcto.** De las
+personas con mas de 500 relaciones: **106 son NIT con 134.357 relaciones** --el
+44,9% de la RPU entera-- y 8 son CC con 7.257. Son empresas con cientos de
+sedes, las marca el `blockreason` del suscriptor
+(`02_vistas_insumo_edf_views.sql:219-220`) y el legado las anti-une igual.
+
+**Y ESO EXPLICA LA TASA DE UNIFICACION, QUE PARECIA UN DEFECTO Y NO LO ES.**
+Con dato real la Unificacion produce **19 filas**: R1 **cero**, R2 **dos**, R3
+**diecisiete** (`unifica_atributos` sella la regla: 1=R1, 2=R2, 3=R3, literal
+del INSERT de cada `_persist`). La causa no es el port: **las direcciones con
+mas probabilidad de estar duplicadas son justo las que el filtro saca antes de
+empezar**. Quitadas las empresas quedan personas naturales con 1,33 ubicaciones
+de media, y con 1,33 no hay nada que unificar.
+
+**La prueba de que el port no tiene hueco es el censo de escenarios**
+(`unif_escenario_censo`, que escribe `sp_unificacion_regla2.sql`): la fila
+`BRECHA -- sin resolver, tenia pareja posible` da **0**, y `sin pareja posible
+(un solo complemento en el grupo)` da **78.188**. No hay un solo caso en que
+existiera pareja y ningun escenario la resolviera.
+
+**EL GRANO DE LA RPU SON CANALES, NO UBICACIONES**, y conviene no confundirlos:
+299.575 filas sobre **114.703 ubicaciones fisicas** son ~2,6 filas por
+ubicacion, que son los canales de contacto de cada una. Las 114.703 son
+exactamente el `conteo_esperado` del Lote GEO, porque GEO trabaja al grano de
+ubicacion. Las 8 CC con mas de 500 relaciones estan en ese mismo ratio (3-16
+filas por ubicacion, con 51-207 ubicaciones distintas cada una): **no es un
+colapso de llave**, es calidad de dato del origen sobre el 2,4% del universo.
+
+**LA LECCION, Y VALE PARA CUALQUIER TASA:** un porcentaje bajo no prueba un
+defecto mientras no se sepa **a quien se le aplica**. Aqui el denominador estaba
+recortado al 26% y la poblacion superviviente era justo la que no puede
+ejercitar la regla. Es la hermana de "un DELTA en cero no prueba que no haya
+cambios".
+
+### Tiempos de la cadena real (job #491, pasada 1)
+
+| Proceso | s | Etapa que se lo lleva |
+|---|---|---|
+| Unificacion | **130** | **regla2: 73 s, el 56%** |
+| Ordenamiento | 61 | preparar: 24 s |
+| Novedades | 70 | ubicacion 23 + ubi_agregada 21 |
+| **Cadena** | **263** | 58.878 personas, 185.242 scores, 363.327 filas MAT |
+
+**Los 73 s de la R2 se gastan barriendo 78.188 grupos de UNO.** No es una
+cascada cara resolviendo poco: es un barrido sobre un universo sin duplicados.
+
+**Y OJO AL LEER ESOS TIEMPOS, porque tres cosas los acotan:** los 8 s de `geo`
+son el coste de **fallar** en el `UNLOAD`, no de exportar; el volumen de DEV
+esta ~20x por debajo del buro (1.194.682 contra 58.878); y la segunda pasada
+arranca tras 25 minutos de bateria mock, de modo que no es comparable con la
+primera.
+
+**EL REPARTO POR ETAPA NO SALE DE LAS TABLAS DE TRAZA.**
+`unif_control_etapa` y `ord_control_etapa` traen los conteos en **0 literal**
+(`16_sp_unificacion_ciclo.sql:282`, `:302-308`: son marcadores, y el propio
+comentario de `:255-257` lo dice), y las seis `regla2_esc*` se abren todas antes
+y se cierran todas despues, de modo que sus 71-72 s son el mismo intervalo
+repetido seis veces. El reparto de la R2 solo puede salir de
+`unif_escenario_censo`; el de tiempos finos, de `stl_query` acotado por la
+ventana de la etapa. Consultas en `dt/docs/DRILLDOWN_VIA_REAL.sql`.
+
+**Y EL BATCH NO LEE NINGUNA DE LAS SIETE TABLAS DOMINIO.** Cero coincidencias de
+`mat_info_*` ni `mat_ubicacion_*` en los 36 archivos de
+`dt/docs/legado_teradata/batch/`: el P0033 lee `rec_stage.batch_cubo_*`, que en
+Teradata arma `P0032_BATCH_GENERACUBO`, **script ausente del material**.
+`CONTRATO_DATOS_ENTREGA_BATCH.md:9` ya lo decia. El eslabon que falta es de las
+MAT al cubo, y se cierra contando la cobertura de ese contrato, no con mas
+volumen.
+
 ## Convenciones de codigo
 
 - **UTF-8 sin BOM. ASCII sin acentos**, a proposito, en todo el repo.
