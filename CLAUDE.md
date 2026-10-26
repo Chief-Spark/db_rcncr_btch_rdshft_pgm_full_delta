@@ -643,9 +643,33 @@ las siete se poblaron desde el datashare, y es el avance contra la meta:
 | `mat_ubicacion_agregada` | **59.282** |
 | `mat_info_basica` | **58.878** (58.878 personas), desde el #491 |
 
-Las otras dos salen en 0 por **efecto de secuencia y no por defecto**:
-`movilidad` y `punto_interes` corren detras. *(En el #477 eran tres: la quinta
-era `info_basica`, que abortaba por ancho de columna.)*
+**LAS OTRAS DOS SALEN EN 0 POR DOS CAUSAS DISTINTAS, Y NINGUNA ES EFECTO DE
+SECUENCIA.** Esta nota decia que `movilidad` y `punto_interes` "corren detras";
+es falso, y el #491 lo desmiente: los otros cinco dominios ya estaban poblados
+cuando ellas corrieron. Leidos los dos SP (2026-10-26):
+
+| Dominio | Causa | Cita |
+|---|---|---|
+| `mat_info_punto_interes` | arranca `FROM bdm_datos.geo_distancias`, tabla que **solo** escribe el COPY de la respuesta de ArcGIS. Con el `UNLOAD` bloqueado por el rol IAM esta vacia y el `FROM` da 0. **Es el mismo bloqueo de permisos de GEO**, no codigo que falte | `sp_novedades_punto_interes_edf.sql:117` |
+| `mat_info_movilidad` | es un **delta contra una foto anterior**, y en una primera corrida no hay foto: *"una persona vista por primera vez no se mudo"*. Es `INNER JOIN` a proposito | `sp_novedades_movilidad_edf.sql:139-142`, comentario en `:122` |
+
+**Y MOVILIDAD ESTA MEDIDA Y CERRADA.** `nov_movilidad_foto` -- la tabla interna
+de apoyo, que nadie trunca en la via real: el reset solo toca el gemelo `_mock`
+(`reset_mock.sql:139`) -- quedo sembrada con **60.452 filas**, el mismo numero
+que `mat_info_ubicacion`. El SP recorrio el universo entero y guardo el estado;
+lo unico que no habia era contra que comparar. Que traiga 60.452 y no ~120.000
+prueba ademas que la segunda pasada de DPLY inserto **cero**: el paso 5 es
+idempotente. **No se llenara con mas corridas sobre el mismo dato: necesita un
+cambio real en origen** -- direccion, ciudad, codigo DANE o estrato.
+
+**Y MOSAIC NO TIENE NADA QUE VER**, por si alguien lo relaciona con ese cero:
+`PRO_Novedad_Linea_Indic_Movilidad` es `Novedad.sql:1508-2165` y ahi hay **cero**
+ocurrencias de `mosaic`; las 28 del archivo caen todas en `Info_Basica`
+(`:2166-3920`) y en su propio SP (`:3921`). En nuestro port `mosaic_id` solo
+aparece en `sp_novedades_info_basica_{edf,mock}.sql`.
+
+*(En el #477 eran tres: la quinta era `info_basica`, que abortaba por ancho de
+columna.)*
 
 **EL ANCHO DE COLUMNA ES UN DEFECTO QUE SOLO EL DATO REAL REVELA**, y tumbo el
 build:
@@ -818,13 +842,23 @@ la via real:
 |---|---|---|
 | `v_xpm_relacion_persona_ubicacion` | **299.575** | 100% |
 | Caen por **bloqueada** | **221.383** | **73,9%** |
-| Caen por ya unificada | 19 | 0,006% |
-| **Entran al proceso** | **78.173** | **26,1%** |
+| **Entran al proceso** | **78.192** | **26,1%** |
 
-78.173 + 19 + 221.383 = 299.575. El filtro es
+221.383 + 78.192 = 299.575. El filtro es
 `sp_unificacion_r1_preparar_insumo.sql:52,104,105`, y el `INNER JOIN` contra
 `v_xpm_ubicacion_estandarizada` de esa linea 52 **no descarta nada**: la
 estandarizacion cubre el 100% de las 114.703 ubicaciones.
+
+**OJO AL MEDIR ESTO DESPUES DEL BUILD, QUE ES DONDE ESTA TABLA SE EQUIVOCO.** La
+consulta lanzada al terminar reparte `221.383 + 19 + 78.173` y presenta esas 19
+como una tercera rama, "caen por ya unificada". **Son la salida de esta misma
+corrida, no una herencia:** `ind_unificacion` no llega del datashare, se
+**deriva** de `bdm_datos.unificacion_direccion` -- una relacion esta unificada si
+y solo si aparece como HIJA ahi (`02_vistas_insumo_edf_views.sql:286-311`,
+`:326-327`) -- y el FULL **trunca esa tabla en el paso 6, antes de preparar el
+insumo** (`16_sp_unificacion_ciclo.sql:204-214`). Al arrancar caian **cero**, de
+modo que entraron 78.192. En un DELTA ese filtro si es real y si las dejaria
+fuera.
 
 **EL BLOQUEO CAE SOBRE PERSONAS JURIDICAS, y por eso es correcto.** De las
 personas con mas de 500 relaciones: **106 son NIT con 134.357 relaciones** --el

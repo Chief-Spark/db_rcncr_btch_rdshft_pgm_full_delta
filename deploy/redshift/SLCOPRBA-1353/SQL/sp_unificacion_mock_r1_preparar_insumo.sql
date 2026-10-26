@@ -94,14 +94,36 @@ BEGIN
     -- (Documento Funcional Unificacion V1.0). El legado es incremental POR
     -- ESTADO, no por fecha: una relacion ya unificada se marca y no se vuelve a
     -- revisar.
-    -- HOY ESTE FILTRO ES INERTE EN LA VIA REAL, A PROPOSITO: la vista EDF
-    -- bdm_tempo.v_xpm_relacion_persona_ubicacion expone ind_unificacion como
-    -- CAST(NULL AS INTEGER) y bloqueado como CAST(0 AS SMALLINT) porque el
-    -- datashare no publica esos campos. Ambos predicados son siempre TRUE y los
-    -- volumenes no cambian. Se deja puesto para que se active solo el dia que
-    -- el datashare los publique, sin volver a tocar estos SP ni repetir la
-    -- certificacion. En la via MOCK el campo ind_unificacion SI es real, por lo
-    -- que la bateria de pruebas si ejercita el mecanismo del legado.
+    -- LOS DOS PREDICADOS ESTAN VIVOS EN LA VIA REAL, Y DECIDEN EL UNIVERSO.
+    --
+    -- Este comentario decia, hasta 2026-10-26, que el filtro era "INERTE EN LA
+    -- VIA REAL, A PROPOSITO", porque la vista exponia ind_unificacion como
+    -- CAST(NULL AS INTEGER) y bloqueado como CAST(0 AS SMALLINT). Las dos mitades
+    -- son FALSAS desde que esos campos se derivaron, y la nota sobrevivio al
+    -- arreglo: quien la leyera hoy daria por inerte justo la linea que se lleva
+    -- tres cuartas partes del universo.
+    --
+    --   bloqueado (D-EDF-01): se deriva del blockreason del suscriptor y del
+    --     blockSeverity de la cuenta (02_vistas_insumo_edf_views.sql:203-220).
+    --     MEDIDO EN DEV: de 299.575 relaciones caen 221.383, el 73,9%. Son
+    --     personas juridicas -- 106 NIT aportan 134.357 relaciones, el 44,9% de
+    --     la RPU entera -- y el legado las anti-une igual.
+    --
+    --   ind_unificacion (SLCOPRBA-1354, M7): se deriva de
+    --     bdm_datos.unificacion_direccion; una relacion esta unificada si y solo
+    --     si aparece como HIJA ahi (02_vistas_insumo_edf_views.sql:286-311,
+    --     :326-327). En FULL el orquestador trunca esa tabla en su paso 6, ANTES
+    --     de preparar el insumo (16_sp_unificacion_ciclo.sql:204-214), de modo
+    --     que un FULL arranca con cero excluidas y re-procesa todo. En DELTA el
+    --     filtro si recorta.
+    --
+    -- CUIDADO AL MEDIR EL EMBUDO DESPUES DE UN BUILD: la consulta ve como "ya
+    -- unificadas" las filas que la propia corrida acaba de producir. En el job
+    -- #491 eran 19, y son la salida de esa corrida, no una herencia.
+    --
+    -- En la via MOCK el campo ind_unificacion es ademas un dato sembrado por la
+    -- matriz (posicion YA_UNIF), por lo que la bateria ejercita el mecanismo del
+    -- legado por las dos vias.
     AND rpu.ind_unificacion IS NULL
     AND COALESCE(rpu.bloqueado, 0) = 0
     -- Ventana del Modo_Delta POR PERSONA (no por fila) -- SLCOPRBA-1355.
