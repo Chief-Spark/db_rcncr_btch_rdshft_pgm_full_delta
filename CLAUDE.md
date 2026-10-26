@@ -322,10 +322,50 @@ del paquete.
 
 ## El ciclo GEO mock: que se certifica y que no (SLCOPRBA-1355)
 
-**Los cinco criterios GEO estaban bloqueados por permisos, no por logica.** El
-rol IAM `rcncr-batch-redshift-geo` no esta asociado al cluster DEV, de modo
-que ni el `UNLOAD` escribe en S3 ni el `COPY` lee. Eso tumbaba CA-01 y dejaba
-CA-02..CA-05 sin forma de ejercitarse.
+**Los cinco criterios GEO estaban bloqueados por INFRAESTRUCTURA, no por logica.**
+De modo que ni el `UNLOAD` escribia en S3 ni el `COPY` leia. Eso tumbaba CA-01 y
+dejaba CA-02..CA-05 sin forma de ejercitarse.
+
+**ERAN DOS BLOQUEOS Y ESTA SECCION SOLO CONTABA UNO (2026-10-27).** Decia, en
+redondo, que el problema era de permisos: que el rol `rcncr-batch-redshift-geo`
+no estaba asociado al cluster. Es cierto y sigue en pie, pero es **la mitad**.
+
+| # | Bloqueo | Como se supo |
+|---|---|---|
+| 1 | el rol **no esta asociado al cluster** | `UnauthorizedException: role ... is not associated to cluster` (job #484) |
+| 2 | **el bucket de destino NO EXISTIA** | consola de S3 de la cuenta `647096294147`, filtro `rcncr`, todas las regiones: cuatro buckets y ninguno era el de GEO |
+
+**El segundo estaba TAPADO por el primero**, porque Redshift valida el rol antes
+de resolver la ruta y **el motor para en el primer error**. Aunque se hubiera
+asociado el rol, el `UNLOAD` habria seguido fallando. Es la misma leccion del
+ancho de columna de `info_basica` y de las relaciones enmascaradas, por tercera
+vez en el mismo mes: **un fallo con nombre propio puede estar escondiendo otro
+detras, y el verde del primero no prueba nada del segundo.**
+
+**Y LOS NOMBRES QUE TRAIA `geo_config` ERAN INVENCION NUESTRA.** `rcncr-batch-geo-<env>-<cuenta>`
+y el rol `rcncr-batch-redshift-geo` no existian en ninguna cuenta. La convencion
+real es la de la propia cuenta, y la infraestructura ya esta desplegada por IaC
+con ella:
+
+```
+bucket    <env>-<cuenta>-rcncr-ws5-geo
+iam_role  arn:aws:iam::<cuenta>:role/BURoleFor-<env>-<cuenta>-rcncr-ws5-redshift-geo
+```
+
+Corregidos los cuatro ambientes en `03_ddl_geo.sql`. **Solo DEV esta verificado
+contra la consola**; para PROD, UAT y TEST el token sale de la etiqueta en
+minuscula y es hipotesis: si la cuenta usara `pro` o `qa`, son dos literales por
+ambiente.
+
+**CAMBIAR EL LITERAL DEL `INSERT` NO BASTA, Y ESO ES LO QUE HAY QUE RECORDAR.**
+La siembra lleva `WHERE NOT EXISTS (SELECT 1 FROM bdm_datos.geo_config LIMIT 1)`:
+siembra **solo si la tabla esta vacia**. Donde ya hay filas -- DEV -- el valor
+viejo sobrevive para siempre. Por eso el commit lleva ocho `UPDATE` idempotentes
+con `WHERE` por ambiente y parametro. **Mismo patron que `CREATE TABLE IF NOT
+EXISTS` escondiendo un ancho: funciona en limpio y falla donde ya hay datos.**
+
+Peticion completa, con permisos minimos y como se verifica, en
+`dt/docs/PETICION_INFRAESTRUCTURA_GEO_S3_IAM.md`.
 
 **La salida fue sustituir el viaje a S3, no simular mal el resto.** Cuatro
 piezas nuevas y un interruptor:
@@ -362,7 +402,8 @@ el ciclo GEO corre una vez y no por fase.
 
 **LO QUE SIGUE SIN CERTIFICARSE, y hay que repetirlo cada vez que alguien lea
 el 50/50:** que el `UNLOAD` escriba de verdad en S3 y que el `COPY` lo lea.
-Son dos sentencias cuyo riesgo es de permisos. Todo lo demas -- gates de
+Son dos sentencias cuyo riesgo es de infraestructura -- rol asociado al cluster
+y bucket existente, no logica. Todo lo demas -- gates de
 estado y de conteo, conciliacion de tipos, los tres rechazos, los tres
 `UPDATE` por Status y las dos ramas del reenganche -- es el mismo SQL.
 
@@ -754,7 +795,9 @@ acabar el build. Las siete `mat_*`, que son el entregable, no se tocan.
 `mat_info_basica` paso de 0 a **1.194.682 filas** y las SIETE etapas salieron
 `completado` -- y GEO dejo de fallar por SQL: ahora muere en el `UNLOAD` con
 `UnauthorizedException: role rcncr-batch-redshift-geo is not associated to
-cluster`, que es el bloqueo de permisos ya documentado y no bloquea.
+cluster`, que no bloquea. *(Esa frase decia "el bloqueo de permisos ya
+documentado", como si fuera uno solo. El 2026-10-27 se midio que el bucket
+tampoco existia: ver la seccion del ciclo GEO.)*
 
 **PERO INFO BASICA TRAIA UN UNIVERSO QUE EL LEGADO NO TRAE, Y SE VEIA EN EL
 CONTEO:**
