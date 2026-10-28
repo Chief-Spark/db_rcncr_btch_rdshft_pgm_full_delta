@@ -1539,3 +1539,96 @@ no cambia no se prueba que detecte nada. Los dos se siembran en el Watermark
 corridas, que es lo contrario del `ARQ 96`, sembrado fuera a proposito. **El
 cambio es del TEXTO, nunca de la fecha**: mover la fecha mide la ventana, que
 es `F1-04`; aqui se mide que el hash reaccione a un atributo.
+
+## El Framework Batch contra dato real: como se lanza, y el bloqueo que lo para hoy
+
+**EL DESTINO `RECONOCER` ESTA COMENTADO EN EL TERRAFORM DE DEV.** Esta escrito
+y esta inactivo (`tf_fw_dynbtch_chief/develop/terraform.tfvars:79-89`), de modo
+que `pipeline: RECONOCER` no resuelve y el Builder cae al default
+`ALPHA` (`src/dynamicBatchBuilder/domain/services/redshift_target_resolver.py:37`), que apunta a `dba_batch` en la
+cuenta `651706752126` -- donde nuestros SP **no existen**. El sintoma seria
+`procedure bdm_datos.sp_unificacion_ciclo does not exist`, y el arreglo no esta
+en estos tres repos: es descomentar, que el rol remoto exista en
+`647096294147` y un `terraform apply` sobre `develop`.
+
+**Lo que NO es el problema, para no volver a investigarlo:** el cross-account
+si esta soportado. `src/dynamicBatchBuilder/domain/services/step_function_definition_builder.py:263,290-291` resuelve
+el `assume_role_arn` y lo inyecta como `state["Credentials"]`.
+
+**EL NOMBRE DEL ARCHIVO ES EL QUE LLEVA LOS PARAMETROS, Y LA CARPETA ELIGE EL
+YAML.** No hay un campo de configuracion: todo sale del nombre, via
+`FILE_NAME_PATTERN` y `FOLDER_PATTERN` (`src/dynamicBatchMainBatchInitiator/domain/constants.py:5-6`).
+
+| Trozo de `reconocerfullval1-20261028-2610.val` | Slot | Parametro | Resuelve a |
+|---|---|---|---|
+| `reconocerfullval` | 4 | `in_nemotecnico` | **MODO = FULL** |
+| `1` | 1 | `in_solicitud` | no se usa |
+| `20261028` | 5 | `in_id_facturacion` | **LOTE** |
+| `2610` | 6 | `in_fecha_ejecucion` | **FECHA = 2026-10-01** |
+
+La carpeta `PE1353/` es la que produce el `product_id`, y el Builder busca la
+definicion como `f"{product_id}.yml"` (`src/dynamicBatchBuilder/handler.py:63`): por eso el YAML va en
+la **raiz** del bucket de definiciones y el `.val` dentro de la carpeta.
+Los nombres de los dos buckets salen de `trunk/locals.tf:159,162`
+(`<stage>-<cuenta>-<project_name>-dynamic-batch-{source,definition}-repository`).
+
+**DOS PARSERS COMPARTEN LA MISMA REGEX Y REPARTEN LOS GRUPOS DISTINTO**, que es
+la trampa de este diseno: el Initiator descarta el grupo 3
+(`dynamicBatchMainBatchInitiator/domain/parsers.py:38`) y el Builder lo lee como
+`billing_id` (`dynamicBatchBuilder/domain/parsers.py:37`). Una lectura del
+Initiator sola hace creer que el LOTE no viaja.
+
+**EL MNEMOTECNICO DECIDE EL MODO POR LO QUE CONTIENE, NO POR IGUALDAD.**
+`bdm_datos.fw_resolver_param` (`pgm/.../12b_fn_fw_resolver_param.sql`) mira
+`DELTA` primero, luego `FULL`, y si solo termina en `VAL` da **FULL** por
+defecto. De modo que entre una corrida FULL y una DELTA **lo unico que cambia es
+el nombre del archivo**: `reconocerfullval...` contra `reconocerdeltaval...`.
+Ni el YAML ni el SP se tocan.
+
+**Dos trampas de nombre ya pagadas en DEV:** `[\D]+` no admite digitos antes de
+`val` (`reconocer1val` no casa), y la fecha es **YYMM y no MMYY** -- `0826` da
+cadena vacia porque el mes 26 no existe.
+
+**EL PARALELISMO DEL FRAMEWORK NO SIRVE PARA ESTA CADENA, y conviene saber por
+que antes de intentarlo.** El Framework corre en paralelo los `procedimientos`
+del **mismo** `nivel` y en serie los niveles.
+
+| Candidato | Paralelizable |
+|---|---|
+| Unificacion -> Ordenamiento -> Novedades | **No.** Ordenamiento lee la salida de Unificacion y Novedades filtra por el `orden_prioridad` que escribe Ordenamiento |
+| R1 -> R2 -> R3 dentro de Unificacion | **No.** Es *starvation by design*: cada etapa lee `ind_unificacion = 'N'` y sella lo que resuelve |
+| Los cuatro `sp_ordenamiento_scoring_*_edf` | **Si en teoria** -- escriben particiones disjuntas de `score_ordenamiento` por `canal` -- **pero no desde el YAML**: no llevan la firma de 6 VARCHAR y viven dentro de `sp_ordenamiento_ciclo` |
+
+Exponer los cuatro canales exige **cuatro wrappers nuevos** con la firma del
+Framework (el patron existe: `sp_geo_exportar_insumo_wrapper.sql`) y partir el
+orquestador en dos niveles. El ahorro medido es ~25 s sobre una cadena de 263 s,
+de modo que **no es lo que hay que probar primero**: lo que hay que probar es
+que el Framework alcanza el cluster y que los seis parametros llegan bien.
+
+Los cuatro archivos de la prueba estan en `dt/docs/framework_batch/`.
+
+## Lo que viaja a una sesion nueva y lo que no
+
+**LOS CUATRO `CLAUDE.md` SON EL MECANISMO: estan commiteados y el harness los
+carga solo en cualquier chat nuevo sobre estos repos.** Por eso un hallazgo que
+no se escribe aqui se pierde, y no es una metafora.
+
+| Que | Viaja | Por que |
+|---|---|---|
+| `CLAUDE.md` de los cuatro repos | **Si, automatico** | estan en el repo |
+| `docs/` commiteado | **Si**, bajo demanda | se lee cuando hace falta |
+| El alcance de repos de la sesion | **Si** | es config del entorno |
+| La conversacion | **No** | el transcript vive en el contenedor |
+| El scratchpad | **No** | contenedor efimero, se recicla al cerrar |
+
+**La regla que queda, y es hermana de "lo que una corrida escribe, el reset lo
+borra": lo que se quiera conservar entre sesiones se commitea en el mismo turno
+en que se descubre.** Un archivo en el scratchpad no es un entregable.
+
+## Tres datos de ambiente que cerraron preguntas abiertas
+
+| Dato | Como se supo | Estado |
+|---|---|---|
+| **QA usa el token `test`**, no `qa` | el log del job QA/DATABASE #196 imprime `ambiente TEST` y `rcncr-batch-geo-test-667397050561` | **medido.** Cierra la hipotesis que dejaba abierta la seccion de GEO para TEST |
+| **DEMO no tiene fila en `geo_config`** | `03_ddl_geo.sql` siembra cuatro ambientes y DEMO no esta | **medido.** `sp_geo_exportar_insumo` resuelve el ambiente de la cuenta y levanta excepcion; **no bloquea** porque GEO corre en su propio bloque. Hay que anadir la fila antes de Demo |
+| La cuenta de PROD podria no ser la del `03_ddl_geo.sql` | el ticket de PDN dice `324037294240`; `03_ddl_geo.sql` construye bucket y rol con `696708350333` | **HIPOTESIS, no dato.** Hay que confirmarlo contra la consola antes de desplegar a PROD |
