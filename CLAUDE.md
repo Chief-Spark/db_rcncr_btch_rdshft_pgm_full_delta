@@ -330,10 +330,14 @@ dejaba CA-02..CA-05 sin forma de ejercitarse.
 redondo, que el problema era de permisos: que el rol `rcncr-batch-redshift-geo`
 no estaba asociado al cluster. Es cierto y sigue en pie, pero es **la mitad**.
 
-| # | Bloqueo | Como se supo |
-|---|---|---|
-| 1 | el rol **no esta asociado al cluster** | `UnauthorizedException: role ... is not associated to cluster` (job #484) |
-| 2 | **el bucket de destino NO EXISTIA** | consola de S3 de la cuenta `647096294147`, filtro `rcncr`, todas las regiones: cuatro buckets y ninguno era el de GEO |
+| # | Bloqueo | Como se supo | Estado |
+|---|---|---|---|
+| 1 | el rol **no esta asociado al cluster** | `UnauthorizedException: role ... is not associated to cluster` (job #484) | **RESUELTO 2026-10-29** |
+| 2 | **el bucket de destino NO EXISTIA** | consola de S3 de la cuenta `647096294147`, filtro `rcncr`, todas las regiones: cuatro buckets y ninguno era el de GEO | **RESUELTO 2026-10-29** |
+
+Los dos se cerraron con las dos pruebas que estan mas abajo, en
+"EL `UNLOAD` ESCRIBE Y EL `COPY` LEE". Lo de aqui queda como historia: es el
+ejemplo de un fallo tapando a otro, que es lo que vale la pena recordar.
 
 **El segundo estaba TAPADO por el primero**, porque Redshift valida el rol antes
 de resolver la ruta y **el motor para en el primer error**. Aunque se hubiera
@@ -400,12 +404,46 @@ acierta.** Ahora los escribe solo `sp_cert_geo_mock`, con `modo = 'GEO'`, y
 el pivote tiene su columna `geo` -- columna aparte, no una quinta fase, porque
 el ciclo GEO corre una vez y no por fase.
 
-**LO QUE SIGUE SIN CERTIFICARSE, y hay que repetirlo cada vez que alguien lea
-el 50/50:** que el `UNLOAD` escriba de verdad en S3 y que el `COPY` lo lea.
-Son dos sentencias cuyo riesgo es de infraestructura -- rol asociado al cluster
-y bucket existente, no logica. Todo lo demas -- gates de
-estado y de conteo, conciliacion de tipos, los tres rechazos, los tres
-`UPDATE` por Status y las dos ramas del reenganche -- es el mismo SQL.
+**~~LO QUE SIGUE SIN CERTIFICARSE~~ CERRADO: EL `UNLOAD` ESCRIBE Y EL `COPY`
+LEE (2026-10-29).** Esta seccion decia, y lo repitio en cada lectura del 50/50,
+que esas dos sentencias eran el riesgo no certificado. Ya estan medidas contra
+el bucket y el rol reales de DEV, no en mock:
+
+| Prueba | Resultado |
+|---|---|
+| `UNLOAD ('SELECT 1')` a `reconocer_input/` | **verde en 0,698 s**, y el objeto `prueba_unload_000` de 2 B aparecio en S3 en el mismo segundo |
+| `COPY` desde `reconocer_output/` de un `.gz` delimitado por `|` con cabecera | **`2 record(s) loaded successfully`**, las dos filas en la tabla |
+
+Con eso **los dos bloqueos de la tabla de arriba estan resueltos**: el rol SI
+esta asociado al cluster y el bucket SI existe. Lo que queda de GEO es logica,
+y esa ya esta certificada por el ciclo mock.
+
+**Y LA PRUEBA ENSENO ALGO QUE NO ESTABA ESCRITO: LA POLITICA DEL ROL ES POR
+PREFIJO Y POR ACCION.** No es un defecto, es minimo privilegio bien hecho, y
+sigue el flujo del dato -- Redshift escribe la entrada, ArcGIS escribe la
+salida, Redshift lee la salida:
+
+| Prefijo | `PutObject` | `GetObject` |
+|---|---|---|
+| `reconocer_input/` | **si** (medido) | **no** (medido: `S3ServiceException ... not authorized to perform: s3:GetObject`) |
+| `reconocer_output/` | no probado | **si** (medido) |
+| cualquier otro (`prueba_copy/`) | **no** (medido: `s3:PutObject` denegado) | no probado |
+
+**La consecuencia practica, que es la que cuesta una hora si no esta escrita:
+el `COPY` NO se puede probar con un viaje de ida y vuelta desde Redshift.** El
+rol no puede escribir donde si puede leer. Hay que subir el archivo a
+`reconocer_output/` **con un usuario de AWS, no con el rol**, y entonces leerlo.
+Eso no es un apano: es la prueba realista, porque el `COPY` solo ejercita
+archivos que puso otro, que es justo lo que hara ArcGIS.
+
+**Y AL HACERLO, BORRAR EL ARCHIVO ENSEGUIDA.**
+`sp_rcn_geo_02_buscar_resultados.sql:125` hace `COPY` de **todos los archivos
+del prefijo**, sin filtrar por nombre: lo que quede ahi se lo come la siguiente
+corrida real como si fuera respuesta de ArcGIS.
+
+Todo lo demas -- gates de estado y de conteo, conciliacion de tipos, los tres
+rechazos, los tres `UPDATE` por Status y las dos ramas del reenganche -- es el
+mismo SQL.
 
 **EL CABLEADO YA EXISTIA Y NADIE LO SABIA.**
 `02b_vistas_insumo_mock.sql` define `v_mock_ubicacion_estandarizada` con un
