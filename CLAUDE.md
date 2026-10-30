@@ -1661,8 +1661,14 @@ unico ejercitado es el mock. Dos cosas antes de medirlo:
   `MAX(watermark_nuevo) WHERE estado = 'completado'`
   (`16_sp_unificacion_ciclo.sql:160-169`), de modo que un DELTA disparado desde
   el Framework con SU lote si ve la frontera que dejo el FULL de `deploy.par`.
-  La medicion es barata y el disparador ya existe:
+  La medicion seria barata y el disparador ya existe:
   `dt/docs/framework_batch/reconocerdeltaval1-20261028-2610.val`.
+  **PERO NO SE VA A MEDIR, Y ES DECISION, NO OLVIDO (usuario, 2026-10-30):**
+  *"para datos reales solo tenemos datos de FULL y eso esta bien"*. Con dato
+  real el alcance es la carga completa; el modo incremental queda certificado
+  con el mock, que es donde se pueden provocar los cambios que lo prueban. Lo
+  de esta vineta se queda escrito porque sigue siendo cierto el dia que se
+  retome, no porque este abierto.
 - **Un DELTA detras del FULL sobre dato que no se movio mide EL SUELO**, no la
   eficiencia: sin cambios en origen solo entra la rama `fecha IS NULL`. Es
   `NOV-UB-12` otra vez -- un DELTA en cero no prueba que no haya cambios --, asi
