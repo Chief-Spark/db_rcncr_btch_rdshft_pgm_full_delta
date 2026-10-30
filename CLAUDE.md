@@ -949,6 +949,25 @@ la via real:
 `v_xpm_ubicacion_estandarizada` de esa linea 52 **no descarta nada**: la
 estandarizacion cubre el 100% de las 114.703 ubicaciones.
 
+**Y ESE REPARTO ES UNA FOTO DE LA CORRIDA, NO UN INVARIANTE: SE MOVIO
+(2026-10-30).** Re-medido hoy sobre la misma vista, el **total es identico** --
+299.575 -- y el reparto **no**: `221.195` bloqueadas y `78.380` que entran, 188
+relaciones que cambiaron de lado. Como el total no se movio, no entraron ni
+salieron filas: lo que cambio es el `blockreason` del suscriptor en origen.
+`personas` son **58.878** y `ubicaciones_fisicas` **114.703**, las dos iguales a
+las del #491.
+
+**La columna DEV de la pagina se queda con las cifras del #491**, no con las de
+hoy: 221.383 / 78.192 / 19 / 185.242 / 363.327 son **una sola corrida** y
+mezclarlas con una medicion posterior rompe la coherencia de la columna -- y
+deja un hueco de 173 contra el censo (`19 + 78.188`) que alguien veria. **Un
+numero del datashare lleva fecha**, igual que un criterio lleva cita.
+
+**Y CONFIRMA LA CORRECCION DE `cod_dw_ubic`:** `ubicaciones_fisicas` sale
+**menor** que el total en los dos ambientes -- 114.703 de 299.575 en DEV y
+120.452 de 302.112 en QA --. Con `cod_dw_persona_ubic` daba 302.112 clavado, que
+era el sintoma de estar contando el CONTACTO y no la ubicacion.
+
 **OJO AL MEDIR ESTO DESPUES DEL BUILD, QUE ES DONDE ESTA TABLA SE EQUIVOCO.** La
 consulta lanzada al terminar reparte `221.383 + 19 + 78.173` y presenta esas 19
 como una tercera rama, "caen por ya unificada". **Son la salida de esta misma
@@ -1034,6 +1053,36 @@ cambios".
 
 **Los 73 s de la R2 se gastan barriendo 78.188 grupos de UNO.** No es una
 cascada cara resolviendo poco: es un barrido sobre un universo sin duplicados.
+
+**EN EL MOCK EL DELTA DEL ORDENAMIENTO ES MAS LENTO QUE EL FULL, Y NADIE LO
+HABIA MIRADO (2026-10-30).** Medido en `bdm_stage.mock_ord_control`, los tres
+ciclos de la bateria:
+
+| Ciclo | Lote | Personas | Scores | s |
+|---|---|---|---|---|
+| FULL | 1356601 | 92.800 | 305.800 | **43** |
+| DELTA1 | 1356602 | 90.800 | 300.800 | **303** |
+| DELTA2 | 1356604 | 90.800 | 300.800 | **568** |
+
+**No es que el DELTA haga menos trabajo y tarde mas por poco: hace el 98% del
+trabajo del FULL y tarda 7x y 13x.** El universo apenas se estrecha -- el ARQ 96
+y poco mas --, de modo que la diferencia no sale del volumen.
+
+**La causa es HIPOTESIS, no dato**, y el sospechoso es la limpieza:
+`score_ordenamiento` no se trunca nunca y su unico borrado es
+`DELETE ... WHERE id_buro_persona IN (stg_ord_personas_alcance)`, que en DELTA
+cae sobre una tabla que ya trae los scores reales mas los de los ciclos
+anteriores. El FULL de la primera pasada la encuentra practicamente vacia de
+mock. **No bloquea nada** -- el tablero no mide tiempos -- pero esta al reves de
+lo que se cuenta del incremental, y conviene saberlo antes de presentar que el
+DELTA es mas barato.
+
+**Y OJO A UNA FILA QUE NO ES DE LA BATERIA:** `mock_ord_control` trae tambien un
+FULL con **lote 7001**, que no sale de ningun runner -- 7001 es un
+`id_buro_suscriptor` del seed (`seed_mock_matriz_ord.sql:176`) --: es una
+invocacion a mano posterior al ultimo reset. El reset SI trunca esa tabla
+(`reset_mock.sql`), y el `diff` de los `TRUNCATE` contra el e2e sigue saliendo
+vacio.
 
 **Y OJO AL LEER ESOS TIEMPOS, porque tres cosas los acotan:** los 8 s de `geo`
 son el coste de **fallar** en el `UNLOAD`, no de exportar; el volumen de DEV
