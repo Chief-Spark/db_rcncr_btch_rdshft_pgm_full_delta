@@ -1483,6 +1483,22 @@ MUESTRA y no por formula: una muestra elegida por el extremo de una variable no
 mide la poblacion. Las otras tres son los padres del #310, el hermano sin sellar
 de la brecha R2 y el propio `lugar_max`.
 
+**Y SEIS DE LAS 47 BETAS SON NEGATIVAS, de modo que UN SCORE NEGATIVO ES
+CORRECTO.** Medido al abrir el ranking mas largo de TEL en QA, cuyo ultimo
+puesto vale **-45,6398**: `CO01TEL003` -130,40, `CO01EMA014` -130,80,
+`CO01EMA003` -106,96, `CO01TEL002` -81,50, `CO01DIR009` -51,61 y `CO01EMA017`
+-30,56 (`02_carga_betas_ritm5226589.sql:19,20,43,52,53,68`). Son penalizaciones
+de la calibracion oficial RITM5226589, no un signo invertido del port. Queda
+escrito porque un negativo a la vista invita a abrir un ticket que no hay que
+abrir.
+
+**LAS CUATRO ESCALERAS DE RANKING, medidas en QA el 2026-10-30** (los cuatro
+duenos son entidades, no personas): DIR reparte **158** datos en **56** puntajes
+distintos, EMA 82 en 8, TEL 227 en 17 y CEL 291 en 9. **DIR afina incluso en el
+peor caso**; TEL y CEL colapsan en un bloque de 199 y 279 puestos empatados,
+que son sedes con reportes identicos. Detalle en
+`dt/docs/DESGLOSE_TRES_VERTIENTES.md`.
+
 
 - la auditoria de los 11 buckets del canal (SLCOPRBA-1355), que ademas
   encontro los tres granos conviviendo bien: persona para TEL001/006/010,
