@@ -607,6 +607,25 @@ porque el mock reutiliza `sp_ordenamiento_consolidacion_edf`. Novedades lee de
 ahi en las dos vias, y esa es la unica linea que el espejo mock no sustituye.
 Defecto preexistente de esa vista, anotado y no corregido.
 
+**Y EL PREFIJO DE LOS MOCK DEL ORDENAMIENTO ES `mock_` Y NO EL SUFIJO
+`_mock`, QUE YA COSTO UNA CONSULTA VACIA.** Los control de Unificacion y
+Novedades son `unif_control_mock` / `nov_control_mock` en `bdm_datos`; los del
+Ordenamiento van al reves y en otro esquema: `bdm_stage.mock_ord_control` y
+`mock_ord_control_etapa` (`12_ddl_ord_control.sql:48`, `:71`). **Existen y se
+escriben**: `sp_ordenamiento_ejecucion_mock.sql:121` abre la corrida y `:349`
+la cierra. Buscar `ord_control_mock`, no encontrarlo y concluir que el ciclo
+mock no deja traza es el error que se pago: la consulta se fue a
+`bdm_datos.ord_control` acotada por banda de lote y habria salido **vacia**.
+
+Dos de esa familia **si** estan muertas, y conviene no confundirlas con la de
+arriba: `mock_ord_score` (`05_ddl_ordenamiento_mock.sql:24`) y
+`mock_ord_prioridad`. Nadie las escribe -- solo las trunca el reset --, porque
+el mock reutiliza los SP reales de scoring y consolidacion y sus filas caen en
+`bdm_datos.score_ordenamiento` y `rpu_orden_prioridad`, separadas por la banda
+`id_buro_persona BETWEEN 9000000 AND 9999999`. **Una tabla mock declarada no
+prueba que alguien la llene**, y la unica forma de saberlo es buscar quien le
+hace `INSERT`.
+
 **ORDEN EN LA BATERIA:** Novedades corre **despues** del Ordenamiento de cada
 fase, porque la etapa 1 filtra por orden de prioridad no nulo (`:7593`). Al
 reves saldria vacio por un efecto de secuencia y no por un defecto -- la misma
