@@ -1463,6 +1463,27 @@ Consulta en `dt/docs/DESGLOSE_TRES_VERTIENTES.md`. Tercera medida de
 observabilidad que se equivoca en esta bitacora, tras los padres del #310 y el
 hermano sin sellar de la brecha R2.
 
+**Y LA MEDIDA BUENA DICE QUE SI DISTINGUE (2026-10-30).** Sobre TODOS los
+rankings de QA, no sobre los veinte mayores: **CEL 93,3%** de puntajes
+distintos, EMA 76,6%, TEL 73,3%, **DIR 60,3%**. CEL, que en la muestra sesgada
+salia el peor con 3,1%, es el mejor del universo. **Una hipotesis mia murio
+aqui**: de esa muestra habia deducido que CEL y TEL no discriminaban y lo habia
+atado a sus dos piezas de ranking bloqueadas; era casualidad.
+
+**DOS SESGOS QUE HAY QUE TENER PRESENTES AL VOLVER A MEDIR ESTO:**
+el porcentaje **baja solo con la longitud** del ranking aunque el modelo sea
+perfecto (DIR promedia 12,2 datos por ranking y CEL 4,9, de modo que 60,3 y 93,3
+no son comparables entre si); y **el ranking se ejercita en una MINORIA** -- de
+57.813 personas de QA solo 2.276 tienen mas de una direccion y 1.050 mas de un
+celular --, asi que el valor del Ordenamiento esta en acertar el lugar 1, no en
+ordenar 291 sedes.
+
+**Cuarta medida de observabilidad equivocada en esta bitacora**, y la primera por
+MUESTRA y no por formula: una muestra elegida por el extremo de una variable no
+mide la poblacion. Las otras tres son los padres del #310, el hermano sin sellar
+de la brecha R2 y el propio `lugar_max`.
+
+
 - la auditoria de los 11 buckets del canal (SLCOPRBA-1355), que ademas
   encontro los tres granos conviviendo bien: persona para TEL001/006/010,
   telefono para TEL017/019, maximo-entre-telefonos para TEL023/025.
