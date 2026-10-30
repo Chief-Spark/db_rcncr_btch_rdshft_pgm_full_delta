@@ -1445,6 +1445,24 @@ arrastre. Lo confirman tres cosas independientes:
 - los datos de DEV: el canal da `lugar_max = 2`, o sea **rankea de verdad**;
 - los ARQ 89 y 90, que miden deltas **entre dos telefonos de la misma
   persona** y estan en PASSED;
+
+**`lugar_max` NO PRUEBA QUE EL RANKING DISCRIMINE, Y LA PAGINA DE NEGOCIO LLEGO
+A AFIRMARLO (2026-10-30).** Mide cuantas filas tiene esa persona en ese canal,
+nada mas. Abierto el ranking de **291** celulares de QA: solo **ocho** puntajes
+distintos, y **279 de los 291 comparten el mismo** (`521,7842`). El orden dentro
+de ese bloque lo decide el desempate, no el score. **No es defecto del port** --
+el dueno es el MUNICIPIO DE ACHI (NIT 811.154.757) y sus 291 celulares son sedes
+con los mismos reportes--, pero la afirmacion era falsa y se corrigio.
+
+**Y los DIEZ rankings mas largos de QA son NUEVE NIT y UN CC**, lo que cierra la
+otra pregunta: el filtro de bloqueo **no saca a todas las empresas**, y las que
+pasan son justo las que producen los rankings largos.
+
+**La medida correcta es `COUNT(DISTINCT score)` por ranking**, no `MAX(lugar)`.
+Consulta en `dt/docs/DESGLOSE_TRES_VERTIENTES.md`. Tercera medida de
+observabilidad que se equivoca en esta bitacora, tras los padres del #310 y el
+hermano sin sellar de la brecha R2.
+
 - la auditoria de los 11 buckets del canal (SLCOPRBA-1355), que ademas
   encontro los tres granos conviviendo bien: persona para TEL001/006/010,
   telefono para TEL017/019, maximo-entre-telefonos para TEL023/025.
