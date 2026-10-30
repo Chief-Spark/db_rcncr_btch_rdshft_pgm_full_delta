@@ -140,10 +140,28 @@ BEGIN
         -- COUNT(DISTINCT) como funcion de ventana. Ademas PARTITION BY trata
         -- los NULL como iguales, que es lo que hace falta cuando
         -- texto_ubicacion llega nulo -- un JOIN los perderia.
-        WHEN MIN(COALESCE(e.complemento, '')) OVER (
+        --
+        -- Y LA VENTANA MIDE SOLO LAS FILAS QUE QUEDARON SIN RESOLVER, que es
+        -- lo que el CASE de dentro consigue (SLCOPRBA-1355, medido en QA el
+        -- 2026-10-30). Sin el, un grupo de TRES -- A y B con el MISMO
+        -- complemento, C vacia -- que esc1 ya resolvio (C -> A) dejaba a B
+        -- clasificada SIN_RESOLVER sin que nada hubiera fallado: C sale por su
+        -- sello, A por la rama PADRE de arriba, y B no es ninguna de las dos.
+        -- Medido: de los 35 grupos que QA daba como brecha, los 35 estaban ya
+        -- unificados. Es el HERMANO del defecto del job #310 que esa misma
+        -- rama PADRE vino a arreglar, un escalon mas abajo.
+        --
+        -- No vale la version burda -- "si el grupo tuvo alguna unificacion,
+        -- nada en el es brecha" --: esconderia un par genuinamente sin
+        -- resolver dentro de un grupo donde otro par si se unio.
+        -- MIN/MAX ignoran los NULL, de modo que el CASE acota la ventana sin
+        -- necesitar un segundo paso.
+        WHEN MIN(CASE WHEN e.n_id IS NULL AND pad.id_padre IS NULL
+                      THEN COALESCE(e.complemento, '') END) OVER (
                PARTITION BY e.id_buro_persona, e.texto_ubicacion,
                             e.cod_dw_tipo_ubicacion_dir, e.cod_dw_municipio)
-          <> MAX(COALESCE(e.complemento, '')) OVER (
+          <> MAX(CASE WHEN e.n_id IS NULL AND pad.id_padre IS NULL
+                      THEN COALESCE(e.complemento, '') END) OVER (
                PARTITION BY e.id_buro_persona, e.texto_ubicacion,
                             e.cod_dw_tipo_ubicacion_dir, e.cod_dw_municipio)
         THEN 'SIN_RESOLVER'

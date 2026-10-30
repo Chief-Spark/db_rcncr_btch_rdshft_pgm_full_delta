@@ -961,6 +961,35 @@ de media, y con 1,33 no hay nada que unificar.
 (un solo complemento en el grupo)` da **78.188**. No hay un solo caso en que
 existiera pareja y ningun escenario la resolviera.
 
+**Y EN QA ESA FILA DIO 175, QUE NO ERA UN HUECO DEL PORT SINO DE LA MEDIDA
+(2026-10-30).** Medido hasta el final, que es lo unico que cierra una pregunta
+asi: los **35** grupos de una corrida (175 son ~5 corridas acumuladas; el censo
+no se trunca en la via real) tenian **todos la misma forma** -- dos filas con el
+MISMO complemento y una vacia -- y **los 35 estaban ya unificados**. El caso es
+este: grupo de tres, `A` y `B` con el mismo complemento y `C` vacia; `esc1`
+resuelve `C -> A`; el censo excluye a `C` por su sello y a `A` por la rama
+`PADRE`, y **`B` no es ninguna de las dos**, de modo que se quedaba clasificada
+`SIN_RESOLVER` sin que nada hubiera fallado.
+
+**Es el HERMANO del defecto del job #310**, el que hizo nacer la rama `PADRE`
+-- alli los padres inflaron la brecha de ~6.000 a 31.000 --, un escalon mas
+abajo. Corregido acotando la ventana con un `CASE` a las filas que siguen sin
+resolver (`sp_unificacion_regla2.sql` y su espejo mock). El cambio **solo puede
+estrechar** el cubo `SIN_RESOLVER`, y **ningun criterio lo lee**: los cinco que
+tocan el censo filtran por `n_id`. Radio de impacto cero en el tablero.
+
+**LA LECCION, Y YA VA DOS VECES EN EL MISMO SITIO: una medida de observabilidad
+tambien se equivoca, y cuando lo hace inventa un defecto que no existe.** Antes
+de abrir trabajo por una cifra, hay que preguntarse si la cifra mide lo que dice
+medir. Aqui costo dos hipotesis mias -- primero `A6`/`E6`, luego un fallo de
+`esc1` -- y las dos cayeron contra el dato.
+
+**Y EL DETALLE NO SOBREVIVE A LA CORRIDA**, que es por lo que hizo falta
+reconstruirlo: el censo guarda conteos y los calcula sobre
+`bdm_tempo.stg_regla2_e2`, que `sp_unificacion_regla2.sql:218` borra al cerrar
+la regla. La reconstruccion, con el criterio de lectura caso por caso, queda en
+`dt/docs/framework_batch/brecha_r2_detalle.sql`.
+
 **EL GRANO DE LA RPU SON CANALES, NO UBICACIONES**, y conviene no confundirlos:
 299.575 filas sobre **114.703 ubicaciones fisicas** son ~2,6 filas por
 ubicacion, que son los canales de contacto de cada una. Las 114.703 son
