@@ -1623,6 +1623,25 @@ defecto. De modo que entre una corrida FULL y una DELTA **lo unico que cambia es
 el nombre del archivo**: `reconocerfullval...` contra `reconocerdeltaval...`.
 Ni el YAML ni el SP se tocan.
 
+**PERO LA VIA REAL SOLO HA CORRIDO EN FULL, Y ESO NO ESTABA ESCRITO.**
+`run_reconocer_e2e_real_full.sql:60,63,69` pasa `'FULL'` en los tres `CALL`, de
+modo que **el DELTA con dato real nunca ha corrido**: del modo incremental lo
+unico ejercitado es el mock. Dos cosas antes de medirlo:
+
+- **El watermark NO esta acotado por lote.** Se lee como
+  `MAX(watermark_nuevo) WHERE estado = 'completado'`
+  (`16_sp_unificacion_ciclo.sql:160-169`), de modo que un DELTA disparado desde
+  el Framework con SU lote si ve la frontera que dejo el FULL de `deploy.par`.
+  La medicion es barata y el disparador ya existe:
+  `dt/docs/framework_batch/reconocerdeltaval1-20261028-2610.val`.
+- **Un DELTA detras del FULL sobre dato que no se movio mide EL SUELO**, no la
+  eficiencia: sin cambios en origen solo entra la rama `fecha IS NULL`. Es
+  `NOV-UB-12` otra vez -- un DELTA en cero no prueba que no haya cambios --, asi
+  que son dos cifras con etiqueta distinta y nunca una. La cifra CON cambios
+  necesita que el datashare se mueva, y eso no lo controlamos nosotros. Razon
+  estructural por la que el DELTA es mas barato, al margen del volumen: el FULL
+  trunca `unificacion_direccion` en su paso 6 (`:204-214`) y el DELTA no.
+
 **Dos trampas de nombre ya pagadas en DEV:** `[\D]+` no admite digitos antes de
 `val` (`reconocer1val` no casa), y la fecha es **YYMM y no MMYY** -- `0826` da
 cadena vacia porque el mes 26 no existe.
