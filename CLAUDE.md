@@ -1253,6 +1253,38 @@ parentesis y solo mira las que abren entre un `SELECT` y su `FROM`, de modo que
 `FROM (SELECT ...)`, `JOIN (SELECT ...)` e `IN (SELECT ...)` del `WHERE` no
 avisan.
 
+**Y LA TERCERA CIFRA DEL TITULAR NO SON FAILED, QUE ES LO QUE TODO EL MUNDO
+SUPONE (2026-10-30).** `50|50|0`, `45/44/1` y `26/25/1` son
+`alcance | certificados | pendientes`, y `pendientes` es un cajon de sastre:
+**todo lo que no es `PASSED` ni `NO_APLICA`**
+(`validacion_certificacion_51.sql:76-85`, `_ord.sql:28-39`, `_nov.sql:45-62`).
+Hoy el desglose es:
+
+| Titular | El 1 de la tercera cifra | Que es |
+|---|---|---|
+| Ordenamiento `45/44/1` | `F4-EMA-03`, **REVISION_MANUAL** | decision funcional abierta: el RF dice que `EMA025` es ratio de recencia y el legado dice que es la LONGITUD DEL BUZON (`sp_cert_evaluar_criterios_ord_mock.sql:1743-1744`). **No entra en la suma del score** |
+| Novedades `26/25/1` | `NOV-UB-05`, **SIN_DATO** | el `INNER JOIN` con la gestion de registro esta portado; el mock no siembra ese estado (`sp_cert_evaluar_criterios_nov_mock.sql:186-188`) |
+
+**CERO FAILED en los tres**, y el gate solo cuenta FAILED
+(`sp_cert_asercion_final.sql:92-133`): **un build verde ya es la prueba de que
+no falla ninguno**. Los BLOQUEADO estan deliberadamente FUERA del alcance
+contado, no dentro de esa cifra.
+
+**Y EL ALCANCE DE ORDENAMIENTO SE QUEDO EN 45 DE 90.** El `WHERE` del titular
+(`validacion_certificacion_ord.sql:37-39`) cuenta solo `FASE4` + `CA_FUNC` mas
+nueve transversales y **excluye FASE1, FASE2 y FASE3** -- 29 criterios que hoy
+ya estan certificados sobre mock. **El titular SUBESTIMA lo certificado.** No se
+ensancho a la vez que la pagina porque mueve el tablero y el gate de
+Ordenamiento sigue apagado (`run_cert_asercion_final.sql:35-36` llama solo
+`UNIFICACION` y `NOVEDADES`); encenderlo pide primero verde en Redshift real.
+
+**El catalogo son 189 y no hay que estimarlo:** 51 + 90 + 48
+(`13_ddl_cert_criterios.sql:101`, `20_ddl_cert_criterios_ord.sql:120`,
+`33_ddl_cert_criterios_nov.sql:91`). **`docs/CERTIFICACION_ACEPTACION_QA.md`
+esta desfasado** -- su Resumen va por 183 y 115, y llama "no portada" a F1-F3 --
+y lleva ya el aviso dentro. Las consultas que lo regeneran, y el detalle de los
+que no cumplen, en `dt/docs/framework_batch/criterios_estado.sql`.
+
 ## Como responder en este proyecto
 
 Corto, claro y contundente. Quien lee necesita decidir, no leer.
