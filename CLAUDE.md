@@ -1879,3 +1879,34 @@ en que se descubre.** Un archivo en el scratchpad no es un entregable.
 | **QA usa el token `test`**, no `qa` | el log del job QA/DATABASE #196 imprime `ambiente TEST` y `rcncr-batch-geo-test-667397050561` | **medido.** Cierra la hipotesis que dejaba abierta la seccion de GEO para TEST |
 | **DEMO no tiene fila en `geo_config`** | `03_ddl_geo.sql` siembra cuatro ambientes y DEMO no esta | **medido.** `sp_geo_exportar_insumo` resuelve el ambiente de la cuenta y levanta excepcion; **no bloquea** porque GEO corre en su propio bloque. Hay que anadir la fila antes de Demo |
 | La cuenta de PROD podria no ser la del `03_ddl_geo.sql` | el ticket de PDN dice `324037294240`; `03_ddl_geo.sql` construye bucket y rol con `696708350333` | **HIPOTESIS, no dato.** Hay que confirmarlo contra la consola antes de desplegar a PROD |
+
+**LAS SIETE TABLAS DE NOVEDADES, MEDIDAS EN LOS TRES AMBIENTES (2026-10-30).**
+Mock / DEV / QA, en filas: actividad economica 73.000 / 124.267 / 121.220;
+ubicacion 88.800 / 60.493 / 74.237; contactabilidad 88.800 / 60.485 / 74.237;
+ubicacion agregada 89.800 / 59.314 / 69.231; info basica 92.800 / 58.878 /
+57.813; punto de interes **20.000** / 0 / 0; movilidad **1.000** / 0 / 0.
+Totales 454.200 / 363.437 / 396.738. Detalle en
+`dt/docs/DESGLOSE_TRES_VERTIENTES.md`.
+
+**PUNTO DE INTERES NO ESTA EN CERO EN MOCK, Y ESO CAMBIA EL ARGUMENTO.** El
+ciclo GEO mock simula la respuesta de ArcGIS y escribe `geo_distancias_mock`,
+de modo que la regla SI se ejercita: 20.000 filas. En los dos ambientes reales
+el cero es del **proveedor externo**, no de codigo que falte.
+
+**Y UNA TABLA DE EVENTOS QUE SE TRUNCA POR CORRIDA NO SE MIDE POR SU
+`COUNT(*)`: SE MIDE EN LA TRAZA.** `mat_info_movilidad_mock` es la unica de las
+siete que es de eventos y `sp_novedades_movilidad_mock.sql:122` la trunca al
+empezar, asi que su conteo es el de la ULTIMA corrida. Medida ahi da 0, y con
+ese 0 se escribio en la pagina que a Movilidad le faltaba un caso que la
+ejercitara. **Es falso:** `nov_control_etapa_mock`
+(`sp_novedades_mock_ciclo.sql:299-310`) guarda que el **DELTA2, lote 1356604,
+produjo 1.000 eventos / 1.000 personas**. Son el ARQ 97, al que el paso 3b del
+e2e le cambia el texto de la direccion
+(`run_reconocer_e2e_mock_full_delta.sql:264-267`): comparadas las dos fotos,
+las 1.000 cambiaron `dato` y ninguna `ciudad`, `codigo_dane` ni `estrato`.
+
+**LA VACIO LA CORRIDA MANUAL DEL LOTE 7001, Y VA TRES VECES.** Esa misma
+ejecucion a mano del 2026-10-29 ya habia falseado la lectura de
+`unificacion_direccion` y la de `mock_ord_control`. **El estado actual de DEV
+no es el que dejo la bateria**, y antes de leer un conteo hay que preguntarse
+que corrida lo escribio.
