@@ -124,8 +124,8 @@ cd dt/banco && ./banco.sh init nueva && ./banco.sh fase strct
 **EL BANCO YA NO ES EL GATE.** Desde que el pipeline de Jenkins despliega y
 corre la bateria **en Redshift real** (job DEV/DATABASE #370: e2e completo,
 tablero y asercion final), la prueba que manda es esa. El banco se queda como
-**chequeo previo de dos minutos** -- `./banco.sh fase pgm`, que compila los 74
-archivos y verifica los 80 objetos -- y ahi es donde sigue siendo rentable:
+**chequeo previo de dos minutos** -- `./banco.sh fase pgm`, que compila los 116
+archivos del paquete y verifica los objetos -- y ahi es donde sigue siendo rentable:
 caza en dos minutos lo que en Jenkins cuesta commit, push, traslado y job, y
 sin dejar DEV a medias. La bateria larga de 45 minutos se corre cuando
 interesa una hipotesis barata, no para certificar.
@@ -1201,7 +1201,7 @@ volumen.
   procedimiento llegara a invocarse nunca.)*
   Una tabla o columna que no existe si espera a la primera invocacion; un
   error de sintaxis salta en el propio `CREATE`. La consecuencia buena: un
-  deploy verde de `pgm` SI garantiza que los 74 cuerpos parsean en Redshift.
+  deploy verde de `pgm` SI garantiza que los 116 cuerpos parsean en Redshift.
 - **Un literal mas largo que su columna es un `[REDSHIFT:112]`**, y
   `CREATE TABLE IF NOT EXISTS` lo esconde: si la tabla ya existe con la columna
   ancha de una version anterior, el `INSERT` pasa en DEV y falla en el primer
