@@ -172,11 +172,61 @@ vacio.
 
 | Codigo | Causa | Como se evita |
 |---|---|---|
-| `REDSHIFT:112` | error SQL durante el deploy | **es lo unico que tumba el build hoy** |
+| `REDSHIFT:112` | error SQL durante el deploy | **tumba el build** |
 | `REDSHIFT:207` | BOM en un `.par` | UTF-8 **sin** BOM |
 | `REDSHIFT:219` | basename de `RevSQL/` distinto a la linea de `rollback.par` | mismo nombre, sin sufijo `_rev` |
 | `REDSHIFT:232` | `UPDATE`/`DELETE` de nivel superior sin `WHERE` | `WHERE` explicito, o `TRUNCATE` |
+| `REDSHIFT:330/340` | tope de **1.200 celdas** del renderizador del snapshot DDL | **no se evita desde el repo**: es un paso del pipeline |
 | `JENKINS:104/105` | rama sin ID de subtarea | nombrar la rama con la subtarea |
+
+**EL `[REDSHIFT:330]` TUMBA UN DESPLIEGUE QUE SALIO EN VERDE, Y ES UN TOPE DEL
+PIPELINE (2026-11-16, SLCOPRBA-1449).** Hasta hoy esta tabla decia que el
+`REDSHIFT:112` era "lo unico que tumba el build"; **ya no es cierto**. El
+despliegue de strct ejecuto **los 51 scripts correctamente** -- los dos nuevos
+incluidos, con su `[REDSHIFT:315]` cada uno -- y murio despues, en la
+verificacion:
+
+```
+[REDSHIFT:340] Error en snapshot DDL_2 seccion COLUMN: Cannot add cell to
+               table content: total cell count of 1200 exceeded.
+ERROR: [REDSHIFT:330] Error generando snapshot 'DDL_2' en la seccion 'COLUMN'
+Finished: FAILURE
+```
+
+**No es Redshift: `Cannot add cell to table content` es de la libreria de tablas
+con la que el pipeline dibuja el snapshot**, y 1.200 es un tope duro suyo.
+
+**LO QUE DEJA EL AMBIENTE, QUE ES LO QUE IMPORTA ANTES DE RELANZAR NADA.** El
+fallo cae en `DDL_2`, justo detras del primer DPLY:
+
+| Hecho | Consecuencia |
+|---|---|
+| el primer DPLY completo los 51 scripts | **los objetos SI estan en DEV** |
+| `RLLBCK_FINAL` no llego a correr | **nada se revirtio** |
+| el segundo DPLY no corrio | este build **no tiene prueba de rollback** |
+| el build figura `FAILURE` | el expediente de QA no refleja que el deploy si funciono |
+
+**Y EL TOPE ESTA MEDIDO, NO ESTIMADO: `DDL_1` PASO Y `DDL_2` FALLO.** Mismo
+renderizador, misma seccion, mismo esquema, y entre los dos solo el DPLY que
+anadio **26 columnas** (dos tablas de 13). De modo que la cuenta estaba en
+**[1.175, 1.200] antes** y en **[1.201, 1.226] ahora**: el esquema ya venia
+pegado al techo y el margen era de menos de 26 columnas.
+
+**POR ESO NO SE RECORTAN LAS DOS TABLAS NUEVAS**, que es la reaccion natural y
+la equivocada: devolveria el catalogo **al borde exacto** del tope, y el
+siguiente `CREATE TABLE` de cualquiera lo cruza otra vez. strct declara ya
+**108 tablas y ~1.264 columnas**. Y `bdm_datos` es **compartido**: si la seccion
+cuenta el catalogo y no el paquete, **un equipo ajeno puede tumbar nuestros
+builds creando una tabla suya**, y el log culparia al paquete que pasara
+despues.
+
+**LA PRUEBA QUE SEPARA LAS DOS LECTURAS LA PAGA EL BUILD SIGUIENTE, Y NO TOCA
+CODIGO:** `pgm` son **solo procedimientos** y aporta **cero** columnas. Si su
+build falla igual con `REDSHIFT:330`, el tope es del esquema entero; si pasa, el
+snapshot mide solo los objetos del paquete. Peticion redactada en
+`dt/docs/PETICION_TOPE_SNAPSHOT_DDL_DEVSECOPS.md`. **Tercer bloqueo del
+proyecto que no esta en el SQL sino en el pipeline**, tras el `[REDSHIFT:419]` y
+el `[REDSHIFT:156]`.
 
 **EL TRASLADO A BITBUCKET LLEVA `deploy/redshift/` Y `.jenkins.yml`.** Nada de
 `CLAUDE.md`, `validar.sh`, `docs/` ni `banco/`: Bitbucket es el repo de
