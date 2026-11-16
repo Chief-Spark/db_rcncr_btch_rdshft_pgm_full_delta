@@ -1836,23 +1836,66 @@ unico ejercitado es el mock. Dos cosas antes de medirlo:
 `val` (`reconocer1val` no casa), y la fecha es **YYMM y no MMYY** -- `0826` da
 cadena vacia porque el mes 26 no existe.
 
-**EL PARALELISMO DEL FRAMEWORK NO SIRVE PARA ESTA CADENA, y conviene saber por
-que antes de intentarlo.** El Framework corre en paralelo los `procedimientos`
-del **mismo** `nivel` y en serie los niveles.
+**EL PARALELISMO DEL FRAMEWORK YA ESTA PUESTO: LOS CUATRO CANALES DE SCORING
+CORREN A LA VEZ (2026-11-16).** Esta seccion decia que "no sirve para esta
+cadena" y que los cuatro canales no se podian exponer "desde el YAML". Era
+cierto hasta que se escribieron los wrappers. Hoy `PE1353.yml` son **CINCO
+niveles** y el 3 lleva cuatro ramas.
 
-| Candidato | Paralelizable |
+| Candidato | Estado |
 |---|---|
 | Unificacion -> Ordenamiento -> Novedades | **No.** Ordenamiento lee la salida de Unificacion y Novedades filtra por el `orden_prioridad` que escribe Ordenamiento |
 | R1 -> R2 -> R3 dentro de Unificacion | **No.** Es *starvation by design*: cada etapa lee `ind_unificacion = 'N'` y sella lo que resuelve |
-| Los cuatro `sp_ordenamiento_scoring_*_edf` | **Si en teoria** -- escriben particiones disjuntas de `score_ordenamiento` por `canal` -- **pero no desde el YAML**: no llevan la firma de 6 VARCHAR y viven dentro de `sp_ordenamiento_ciclo` |
+| Los cuatro `sp_ordenamiento_scoring_*_edf` | **HECHO.** Nivel 3 del YAML, cuatro ramas simultaneas |
+| Los seis dominios de Novedades | **Se puede y NO esta hecho.** `actividad_economica` e `info_basica` tienen CERO referencias a `stg_nov_ubica_etapa_9`; `ubi_agregada` (13), `contactabilidad`, `punto_interes` y `movilidad` si. Y `movilidad` ademas hace `JOIN bdm_datos.mat_info_basica` (`sp_novedades_movilidad_edf.sql:90`). Admite dos sub-niveles |
 
-Exponer los cuatro canales exige **cuatro wrappers nuevos** con la firma del
-Framework (el patron existe: `sp_geo_exportar_insumo_wrapper.sql`) y partir el
-orquestador en dos niveles. El ahorro medido es ~25 s sobre una cadena de 263 s,
-de modo que **no es lo que hay que probar primero**: lo que hay que probar es
-que el Framework alcanza el cluster y que los seis parametros llegan bien.
+**LO QUE LO BLOQUEABA ERA LA FIRMA, NO LA DEPENDENCIA.** El Builder renderiza
+SIEMPRE un `CALL` de seis argumentos posicionales
+(`step_function_definition_builder.py:93`) y los cuatro scoring estan declarados
+`sp_ordenamiento_scoring_dir_edf()`, **sin parametros**
+(`sp_ordenamiento_scoring_dir_edf.sql:4`): puestos en el YAML tal cual dan
+`procedure does not exist`. La salida son **seis wrappers en `bdm_stage`** con la
+firma del Framework, mismo patron que los de GEO -- `sp_ordenamiento_preparar`
+(nivel 2), los cuatro `sp_ordenamiento_scoring_{dir,tel,cel,ema}` (nivel 3) y
+`sp_ordenamiento_cerrar` (nivel 4). `pgm` pasa de **116 a 122** entradas.
 
-Los cuatro archivos de la prueba estan en `dt/docs/framework_batch/`.
+**`sp_ordenamiento_ciclo` NO SE TOCO**, y es deliberado: lo siguen usando
+`deploy.par`, la bateria mock y la via manual. Los wrappers **reparten** sus
+etapas, no las reescriben; el cuerpo es corte literal.
+
+**LO QUE AUTORIZA EL PARALELISMO ES QUE LAS PARTICIONES SON DISJUNTAS**: cada
+canal borra solo la suya antes de insertar --
+`DELETE FROM score_ordenamiento WHERE canal = 'DIR' AND id_buro_persona IN (...)`
+(`sp_ordenamiento_scoring_dir_edf.sql:22-24`, y `:15-17` en los otros tres). Y el
+insumo sobrevive entre ramas porque las `bdm_tempo.stg_*` son tablas
+**PERMANENTES**, no `TEMP` (`sp_ordenamiento_preparar_insumos_edf.sql:43`).
+
+**LA TRAZA DE CONTROL SE CONSERVA ENTERA, Y ES REQUISITO, NO ADORNO.**
+`ord_control` sigue con **una** corrida por lote -- la abre el nivel 2 y la
+cierra el nivel 4 --, `ord_control_etapa` con las **NUEVE** etapas y sus
+literales de siempre, y `ord_alcance_censo` con su fila escrita en `cleanup`
+**antes** del drop del staging, que es de lo que dependen `F1-01..08`. Los
+niveles 3 y 4 recuperan la corrida **por LOTE**
+(`MAX(corrida_id) WHERE estado = 'enproceso' AND lote = ?`), porque `corrida_id`
+es variable local y **cada nivel del Framework es otra sesion del Data API**. Si
+una rama del nivel 3 cae, cierra la corrida como `fallido` ella misma: sin eso
+se quedaria en `enproceso` para siempre y envenenaria el `MAX(corrida_id)` de la
+corrida siguiente.
+
+**EL RIESGO ABIERTO ES DEL MOTOR, NO DE LA LOGICA, Y ES HIPOTESIS:** cuatro
+transacciones concurrentes escribiendo la MISMA tabla `score_ordenamiento`
+pueden dar `1023 Serializable isolation violation`, porque Redshift detecta el
+conflicto a nivel de TABLA aunque las filas no se solapen. Si aparece, el
+repliegue **no toca codigo**: se emparejan los canales en dos niveles de a dos en
+el YAML. **El banco encadena los cinco niveles en verde, pero el banco NO
+paraleliza: ese verde no dice nada sobre el 1023.** Es un punto ciego nuevo, de
+la misma familia que `DELTA` y el `RAISE`.
+
+El ahorro son ~25 s sobre una cadena de 263 s. El valor de la corrida esta en
+probar que el Framework alcanza el cluster y que los seis parametros llegan
+bien, no en el tiempo.
+
+Los archivos de la prueba estan en `dt/docs/framework_batch/`.
 
 ## Lo que viaja a una sesion nueva y lo que no
 

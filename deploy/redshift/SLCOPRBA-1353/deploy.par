@@ -78,6 +78,12 @@ sp_ordenamiento_ejecucion_mock.sql
 17_sp_ord_control_abrir_cerrar.sql
 18_sp_ord_traza.sql
 19_sp_ordenamiento_ciclo.sql
+sp_ordenamiento_preparar_wrapper.sql
+sp_ordenamiento_scoring_dir_wrapper.sql
+sp_ordenamiento_scoring_tel_wrapper.sql
+sp_ordenamiento_scoring_cel_wrapper.sql
+sp_ordenamiento_scoring_ema_wrapper.sql
+sp_ordenamiento_cerrar_wrapper.sql
 sp_unif_gate_convergencia_snapshot.sql
 sp_unif_gate_convergencia_evaluar.sql
 sp_unificacion_mock_gate_arq.sql
