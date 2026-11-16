@@ -1099,6 +1099,84 @@ repetido seis veces. El reparto de la R2 solo puede salir de
 `unif_escenario_censo`; el de tiempos finos, de `stl_query` acotado por la
 ventana de la etapa. Consultas en `dt/docs/DRILLDOWN_VIA_REAL.sql`.
 
+## La capa de observabilidad: que conteo es real y cual no (2026-11-16)
+
+**SON TRES NIVELES Y SE LEEN EN TRES PREGUNTAS, EN ORDEN.** `*_control` (una
+fila por corrida), `*_control_etapa` (una por etapa) y los censos
+(`ord_alcance_censo`, `unif_alcance_censo`, `unif_escenario_censo`).
+
+1. **Reviento?** -> `estado` del nivel 1. `completado` dice que no hubo
+   excepcion. **Nada mas que eso.**
+2. **Se quedo a medias?** -> las etapas del nivel 2 en `completado`.
+3. **Hizo algo?** -> los conteos. **Es la unica pregunta que importa y la
+   unica que el verde no contesta.** GEO falla y la cadena sigue verde; un
+   DELTA en cero no prueba que no haya cambios; y en DEMO el gate imprimio
+   `CERTIFICACION OK` evaluando un `cert_resultado` truncado.
+
+| Conteo | Real? |
+|---|---|
+| `unif_control`, `ord_control`, `nov_control` | **si** |
+| `ord_alcance_censo`, `unif_alcance_censo` | **si** |
+| `nov_control_etapa`: `filas_altas` / `cambios` / `bajas` | **si.** Es el mejor detector de cambio que hay |
+| `unif_control_etapa` y `ord_control_etapa` | **NO: 0 literal.** Marcadores. Valen por estado y tiempos |
+
+**LA VENTANA DEL DELTA YA SE MIDE, Y ANTES SE SUMABA SIN SEPARAR:**
+`bdm_datos.unif_alcance_censo` (`strct/11e`, espejo `_mock` en `11f`). El
+universo del DELTA son DOS ramas
+(`sp_unificacion_r1_preparar_insumo.sql:32-34`): `fecha >= watermark` y
+`fecha IS NULL`. La segunda entra **se haya movido el origen o no**, de modo
+que `unif_control.relaciones_entrada` a secas no contesta "entro algo nuevo?".
+Medido en DEV, DELTA del lote `20261117`:
+
+| | |
+|---|---|
+| `ventana_por_fecha` | **96** |
+| `ventana_en_la_frontera` | **96** -- o sea, cero novedad real |
+| `ventana_por_fecha_nula` | **1.102** |
+| `ventana_personas` | **858** |
+| `universo_relaciones` | **14.984** = lo que `unif_control` reportaba |
+
+**`ventana_en_la_frontera` ES LA COLUMNA QUE NO EXISTIA EN NINGUN SITIO.** El
+predicado es `>=` **inclusivo**, asi que lo fechado EXACTAMENTE en el watermark
+reentra en TODOS los DELTA, para siempre. Si `por_fecha = en_la_frontera`, no
+entro nada nuevo aunque la cifra no sea cero. En FULL las cuatro `ventana_*`
+van en **NULL**, no en 0: no hay ventana que medir, y un 0 mentiria igual que
+un DELTA en cero.
+
+**Y LA AMPLIFICACION DE 1.198 A 14.984 ES POR DISENO, NO UN DEFECTO.** La
+ventana entra **por fila** y el universo se arma **por persona**
+(SLCOPRBA-1355, para que GEO y las reglas vean lo mismo): 1.198 relaciones
+arrastran a sus 858 duenos, que poseen 14.984 relaciones. 17,5 por persona
+contra las ~1,33 ubicaciones de media del universo natural, porque la rama
+nula cae sobre gente con muchas ubicaciones.
+
+**UNA HIPOTESIS MIA CAYO AQUI, Y CONVIENE QUE NADIE LA REPITA:** di por
+defectuoso que `nov_control_etapa.relaciones_entrada` reportara **60.523**
+donde Unificacion reportaba 858 personas, con el mismo predicado sobre la
+misma columna de la misma vista. **No es un defecto: es el contrato.**
+`sp_novedades_ubicacion_edf.sql:75-85` usa la ventana **solo para decidir la
+etiqueta `I` o `A`**; el universo base (paso 7 del legado,
+`:108-145`) arranca de la RPU **entera**, con los tres filtros del legado y
+**ninguno de fecha**. Y eso es lo correcto: `111.BTQ:817-836` hace
+`DELETE ... ALL` de las siete `MAT_*` antes de cargar -- **el AS-IS
+reconstruye la foto completa en cada corrida**, y el contrato decidido el
+2026-10-20 es **foto completa + delta**.
+
+**La consecuencia practica: `relaciones_entrada` de Unificacion y la de
+Novedades NO son comparables y nunca lo fueron.** Una es una ventana, la otra
+un barrido, las dos correctas. Estuve a punto de "arreglar" la de Novedades y
+habria roto una columna que media bien. **Antes de corregir una medida, leer
+que contrato implementa.**
+
+**Y UN RIESGO LATENTE DEL WATERMARK, que hoy no mordio:** se lee como
+`MAX(watermark_nuevo) WHERE estado = 'completado'`, **sin acotar por lote**.
+En `nov_control` de DEV conviven el lote `1356301` de `deploy.par`, el
+`20261117` y el **`7001` de la corrida manual del 2026-10-29**, la que ya
+falseo tres lecturas. Los tres valen `2026-09-30` y no hubo dano, pero una
+corrida a mano con un watermark adelantado dejaria ciegos a los DELTA
+siguientes.
+
+
 **Y EL BATCH NO LEE NINGUNA DE LAS SIETE TABLAS DOMINIO.** Cero coincidencias de
 `mat_info_*` ni `mat_ubicacion_*` en los 36 archivos de
 `dt/docs/legado_teradata/batch/`: el P0033 lee `rec_stage.batch_cubo_*`, que en

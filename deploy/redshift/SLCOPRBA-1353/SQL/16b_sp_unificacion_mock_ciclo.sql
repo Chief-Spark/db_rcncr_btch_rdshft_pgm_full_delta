@@ -80,6 +80,13 @@ DECLARE
     v_pers_distintas BIGINT := 0;
     v_total_unif    BIGINT := 0;
 
+    -- Censo de la VENTANA del DELTA (unif_alcance_censo_mock, 2026-11-16).
+    -- Espejo exacto del real: arrancan en NULL y solo se calculan en DELTA.
+    v_vent_fecha     BIGINT;       -- relaciones con fecha >= watermark
+    v_vent_nula      BIGINT;       -- relaciones con fecha IS NULL
+    v_vent_frontera  BIGINT;       -- de las anteriores, las fechadas EN el watermark
+    v_vent_personas  BIGINT;       -- personas distintas de la ventana
+
     -- Metricas por etapa (reales, no marcadores)
     v_unif_r1       BIGINT := 0;
     v_unif_r2       BIGINT := 0;
@@ -356,6 +363,40 @@ BEGIN
       FROM bdm_datos.unificacion_direccion_mock ud
      WHERE ud.lote = v_lote
         OR ud.lote_actualizacion = v_lote;
+
+    -- (9b) CENSO DE LA VENTANA -- unif_alcance_censo_mock (2026-11-16) --------
+    -- Espejo de 16_sp_unificacion_ciclo.sql. El motivo, las tres cifras que
+    -- separa y por que COUNT(CASE) y no SUM(CASE) estan documentados alli; el
+    -- diff de este bloque contra el real tiene que ser solo el nombre de la
+    -- vista de origen y el sufijo _mock de la tabla destino.
+    IF v_modo_efectivo = 'DELTA' THEN
+        SELECT COUNT(CASE WHEN rpu.fecha_relacion_persona_ubicaci >= v_wm_anterior
+                          THEN 1 END),
+               COUNT(CASE WHEN rpu.fecha_relacion_persona_ubicaci IS NULL
+                          THEN 1 END),
+               COUNT(CASE WHEN rpu.fecha_relacion_persona_ubicaci = v_wm_anterior
+                          THEN 1 END),
+               COUNT(DISTINCT rpu.id_buro_persona)
+          INTO v_vent_fecha, v_vent_nula, v_vent_frontera, v_vent_personas
+          FROM bdm_tempo.v_mock_relacion_persona_ubicacion rpu
+         WHERE COALESCE(rpu.bloqueado, 0) = 0
+           AND ( rpu.fecha_relacion_persona_ubicaci >= v_wm_anterior
+                 OR rpu.fecha_relacion_persona_ubicaci IS NULL );
+    END IF;
+
+    INSERT INTO bdm_datos.unif_alcance_censo_mock (
+        corrida_id, lote, modo, watermark_usado, watermark_origen,
+        ventana_por_fecha, ventana_por_fecha_nula, ventana_en_la_frontera,
+        ventana_personas, universo_relaciones, universo_personas,
+        fecha_hora, usuario_bd
+    )
+    VALUES (
+        v_corrida_id, v_lote, v_modo_efectivo, v_wm_anterior,
+        CASE WHEN v_bootstrap THEN 'BOOTSTRAP' ELSE 'CONTROL' END,
+        v_vent_fecha, v_vent_nula, v_vent_frontera, v_vent_personas,
+        v_rel_entrada, v_pers_distintas,
+        GETDATE(), CURRENT_USER
+    );
 
     -- (10) CIERRE 'completado' -----------------------------------------------
     CALL bdm_datos.unif_control_mock_cerrar(
