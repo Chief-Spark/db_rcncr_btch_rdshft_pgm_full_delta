@@ -176,11 +176,11 @@ vacio.
 | `REDSHIFT:207` | BOM en un `.par` | UTF-8 **sin** BOM |
 | `REDSHIFT:219` | basename de `RevSQL/` distinto a la linea de `rollback.par` | mismo nombre, sin sufijo `_rev` |
 | `REDSHIFT:232` | `UPDATE`/`DELETE` de nivel superior sin `WHERE` | `WHERE` explicito, o `TRUNCATE` |
-| `REDSHIFT:330/340` | tope de **1.200 celdas** del renderizador del snapshot DDL | **no se evita desde el repo**: es un paso del pipeline |
+| `REDSHIFT:330/340` | tope de **1.200 celdas** del renderizador del snapshot DDL: **1 celda = 1 columna declarada por el paquete** | mantener el paquete por debajo de 1.200 columnas. Hoy `strct` va por 1.157 |
 | `JENKINS:104/105` | rama sin ID de subtarea | nombrar la rama con la subtarea |
 
-**EL `[REDSHIFT:330]` TUMBA UN DESPLIEGUE QUE SALIO EN VERDE, Y ES UN TOPE DEL
-PIPELINE (2026-11-16, SLCOPRBA-1449).** Hasta hoy esta tabla decia que el
+**EL `[REDSHIFT:330]` TUMBA UN DESPLIEGUE QUE SALIO EN VERDE, Y EL TOPE ES POR
+PAQUETE (2026-11-16, SLCOPRBA-1449).** Hasta hoy esta tabla decia que el
 `REDSHIFT:112` era "lo unico que tumba el build"; **ya no es cierto**. El
 despliegue de strct ejecuto **los 51 scripts correctamente** -- los dos nuevos
 incluidos, con su `[REDSHIFT:315]` cada uno -- y murio despues, en la
@@ -193,8 +193,11 @@ ERROR: [REDSHIFT:330] Error generando snapshot 'DDL_2' en la seccion 'COLUMN'
 Finished: FAILURE
 ```
 
-**No es Redshift: `Cannot add cell to table content` es de la libreria de tablas
-con la que el pipeline dibuja el snapshot**, y 1.200 es un tope duro suyo.
+**No es Redshift ni un tope del esquema: `Cannot add cell to table content`
+habla de CELDAS de una tabla de informe**, es de la libreria con la que el
+pipeline dibuja el snapshot, y 1.200 es un tope duro suyo. Redshift topa en
+1.600 columnas **por tabla** y no tiene tope por esquema; la prueba de que el
+motor no rechazo nada es que los 51 `CREATE TABLE` pasaron.
 
 **LO QUE DEJA EL AMBIENTE, QUE ES LO QUE IMPORTA ANTES DE RELANZAR NADA.** El
 fallo cae en `DDL_2`, justo detras del primer DPLY:
@@ -203,30 +206,70 @@ fallo cae en `DDL_2`, justo detras del primer DPLY:
 |---|---|
 | el primer DPLY completo los 51 scripts | **los objetos SI estan en DEV** |
 | `RLLBCK_FINAL` no llego a correr | **nada se revirtio** |
-| el segundo DPLY no corrio | este build **no tiene prueba de rollback** |
+| el segundo DPLY no corrio | ese build **no tiene prueba de rollback** |
 | el build figura `FAILURE` | el expediente de QA no refleja que el deploy si funciono |
 
-**Y EL TOPE ESTA MEDIDO, NO ESTIMADO: `DDL_1` PASO Y `DDL_2` FALLO.** Mismo
-renderizador, misma seccion, mismo esquema, y entre los dos solo el DPLY que
-anadio **26 columnas** (dos tablas de 13). De modo que la cuenta estaba en
-**[1.175, 1.200] antes** y en **[1.201, 1.226] ahora**: el esquema ya venia
-pegado al techo y el margen era de menos de 26 columnas.
+**Y ESO ES PEOR QUE EL TOPE:** un `FAILURE` que no distingue "no se desplego"
+de "se desplego y no se pudo documentar" obliga a reconstruir a mano que quedo
+aplicado.
 
-**POR ESO NO SE RECORTAN LAS DOS TABLAS NUEVAS**, que es la reaccion natural y
-la equivocada: devolveria el catalogo **al borde exacto** del tope, y el
-siguiente `CREATE TABLE` de cualquiera lo cruza otra vez. strct declara ya
-**108 tablas y ~1.264 columnas**. Y `bdm_datos` es **compartido**: si la seccion
-cuenta el catalogo y no el paquete, **un equipo ajeno puede tumbar nuestros
-builds creando una tabla suya**, y el log culparia al paquete que pasara
-despues.
+**EL TOPE ES POR PAQUETE, NO DEL ESQUEMA COMPARTIDO, Y LO PRUEBA EL VERDE DE
+`pgm`.** Desplego contra el **mismo catalogo** -- mismo cluster, mismos tres
+esquemas, con las dos tablas nuevas ya dentro -- y su `DDL_2` salio verde. Si la
+seccion contara el esquema, habria muerto igual. (Sus 69 archivos con
+`CREATE TABLE` son staging **dentro de cuerpos de procedimiento**, no objetos de
+su paquete.) Y el modelo implica ademas que **cuenta TABLAS y no vistas**: con
+vistas los numeros de abajo no cuadrarian.
 
-**LA PRUEBA QUE SEPARA LAS DOS LECTURAS LA PAGA EL BUILD SIGUIENTE, Y NO TOCA
-CODIGO:** `pgm` son **solo procedimientos** y aporta **cero** columnas. Si su
-build falla igual con `REDSHIFT:330`, el tope es del esquema entero; si pasa, el
-snapshot mide solo los objetos del paquete. Peticion redactada en
-`dt/docs/PETICION_TOPE_SNAPSHOT_DDL_DEVSECOPS.md`. **Tercer bloqueo del
-proyecto que no esta en el SQL sino en el pipeline**, tras el `[REDSHIFT:419]` y
-el `[REDSHIFT:156]`.
+**`1 CELDA = 1 COLUMNA`, Y YA NO ES HIPOTESIS: predice los dos resultados sin
+ajustar nada.**
+
+| | Columnas del paquete | Snapshot |
+|---|---|---|
+| antes del DPLY (`DDL_1`) | 1.219 - 26 = **1.193** | **verde** |
+| despues del DPLY (`DDL_2`) | **1.219** | **rojo** |
+
+**TRES AFIRMACIONES MIAS DE ESE MISMO DIA ERAN FALSAS**, y conviene que nadie
+las herede:
+
+| Dije | Lo correcto |
+|---|---|
+| *"un equipo ajeno puede tumbar nuestros builds creando una tabla suya"* | **falso**: el verde de `pgm` lo desmiente, el tope solo lo cruza el propio paquete |
+| *"el tope esta MEDIDO: [1.175, 1.200]"* | era **hipotesis**: asumia `1 columna = 1 celda` sin medirlo. Hoy si esta medido y da **1.193** exacto |
+| *"strct declara ~1.264 columnas"* | son **1.219**: mi `awk` no cerraba la ventana del bloque y se desbordaba entre archivos |
+
+**RESUELTO BORRANDO SIETE TABLAS MUERTAS: 1.219 -> 1.157, con 43 de margen.**
+Auditadas las 108 tablas contra los tres repos enteros, siete no tenian **ni un
+escritor ni un lector**: las cuatro `bdm_datos.insumo_{telefono,celular,email,direccion}`
+(45 columnas, residuo de un diseno anterior: el scoring lee
+`bdm_tempo.stg_insumo_*`) y `bdm_stage.mock_ord_{escenario,rpu,score}` (17). Se
+quedan `mock_ord_prioridad`, `mock_ord_ca_result` y `catalogo_sector_financiero`,
+que **si tienen lector** aunque nadie las llene.
+
+**Y EL TOPE DESTAPO UN DEFECTO LATENTE QUE VALE MAS QUE EL TOPE: LOS CUATRO
+`insumo_*` ESTABAN DECLARADOS DOS VECES, COMO TABLA Y COMO VISTA.**
+`01_ddl_ordenamiento.sql` los creaba como TABLA (entrada 18 de `deploy.par`) y
+`04_vistas_insumo_ordenamiento_edf_views.sql` como VISTA (entrada 23), **con el
+mismo nombre**. En DEV no se veia porque el nombre ya existia: el
+`CREATE TABLE IF NOT EXISTS` no hacia nada y el `CREATE OR REPLACE VIEW`
+funcionaba. **En un ambiente limpio el despliegue habria fallado** -- QA, UAT,
+PROD -- porque no se puede reemplazar una tabla por una vista. Es la trampa del
+`CREATE TABLE IF NOT EXISTS` otra vez, la misma del ancho de columna, y la
+tercera vez que esconde algo que solo revienta en limpio.
+
+**LAS CUATRO VISTAS SE QUEDAN Y TAMPOCO LAS LEE NADIE.** Cero columnas para el
+snapshot y cero riesgo, pero son deuda anotada: si nadie las reclama, el sitio
+de borrarlas es el commit que toque ese archivo.
+
+Peticion en `dt/docs/PETICION_TOPE_SNAPSHOT_DDL_DEVSECOPS.md`, **ya no
+bloqueante**: pide sobre todo que un fallo del snapshot no marque `FAILURE` un
+despliegue correcto.
+
+**LA LECCION DE METODO, Y ES LA QUINTA MEDIDA EQUIVOCADA DE ESTA BITACORA:** un
+conteo hecho con una herramienta mal escrita es **una estimacion disfrazada de
+medicion**, y no avisa. Las otras cuatro fallaban por formula o por muestra;
+esta fallaba por el `awk`. Antes de publicar un numero propio, comprobar que la
+herramienta que lo saca cierra bien lo que abre.
 
 **EL TRASLADO A BITBUCKET LLEVA `deploy/redshift/` Y `.jenkins.yml`.** Nada de
 `CLAUDE.md`, `validar.sh`, `docs/` ni `banco/`: Bitbucket es el repo de
