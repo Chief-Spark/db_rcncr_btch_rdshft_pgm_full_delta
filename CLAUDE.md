@@ -2245,6 +2245,51 @@ De ahi el orden definitivo: `git remote -v` y `git fetch github <rama>`
 Esa rama quedo abandonada por decision del usuario y el trabajo se rehizo
 sobre las `_v2`.
 
+**Y SE PAGO UNA SEGUNDA VEZ, POR LO QUE EL TRASLADO NO COPIO (job
+DEV/DATABASE #801, 2026-11-18).** Esos comandos llevan `deploy/redshift` y
+nada mas, y la regla de esta bitacora es que el traslado lleva
+`deploy/redshift/` **y `.jenkins.yml`**. El de la rama de Bitbucket venia asi:
+
+```yaml
+global:
+  application: null
+  type: null
+  tech: database
+  language: redshift
+```
+
+**`application` ES el nombre de la base** -- `dba_rncr_batch`, el mismo de
+`tf_fw_dynbtch_chief/develop/terraform.tfvars:79-89` --, de modo que el driver
+abrio una base llamada literalmente `null`:
+
+```
+3D000:FATAL:  database "null" does not exist
+```
+
+**ESA FIRMA ES DE PARAMETROS DE CONEXION, NO DE SQL, y conviene leerla asi
+antes de abrir un script.** El paquete paso entero -- `[REDSHIFT:419]`
+detectado, `[BITBUCKET:414]`, `[REDSHIFT:236] errores=0` y **`[REDSHIFT:152]`
+onboarding ENCONTRADO** -- y murio en el primer `SQLDriverConnect`: cero
+sentencias y DEV intacto. Los dos `[REDSHIFT:112]` de los RevSQL y el
+`[REDSHIFT:330]` del snapshot `DDL_1` son **el mismo fallo tres veces**. **No
+confundirlo con el `[REDSHIFT:156]`**, que dice exactamente que falta; este no
+dice nada.
+
+**Y EL `jobConfig` DEL LOG NO IMPRIME LAS CLAVES NULAS**, de modo que el
+sintoma visible es una AUSENCIA -- `global` sin `application` ni `type` -- y no
+un `null` a la vista. Es lo unico que se ve sin abrir el archivo.
+
+**UN REPO DE BITBUCKET PUEDE TRAER EL `.jenkins.yml` CON LAS CLAVES EN
+`null`**: existe, el pipeline lo lee, elige correctamente el pipeline de
+DATABASE y falla mucho mas tarde y en otro sitio. Es la hermana de la
+plantilla de Terraform de los `DB_DS_*`.
+
+**EL PUNTO DE PARADA DEL TRASLADO, que va SIEMPRE entre el `checkout` y el
+`commit`:** `git show :.jenkins.yml`. Si no sale `application: dba_rncr_batch`
+con el `type`/`order` del repo (`struct`/1, `program`/2, `data`/3), no se
+commitea. Mismo patron que el `git ls-files` que habria evitado subir el
+borrado.
+
 ## Lo que viaja a una sesion nueva y lo que no
 
 **LOS CUATRO `CLAUDE.md` SON EL MECANISMO: estan commiteados y el harness los
