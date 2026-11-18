@@ -192,12 +192,25 @@ es lo que se pago en D-DEMO-01: un solo arreglo en los tres repos se commiteo
 con `SLCOPRBA-1449` en los tres, y los de pgm y dt se fueron a la subtarea de
 strct. Esta tanda son **1449 strct, 1450 pgm, 1451 dt**.
 
-**Y NO SE ARREGLA CON `--amend`:** reescribir la rama de Bitbucket entre
-despliegues esta prohibido. Se arregla con un commit vacio hacia adelante que
-lleve la clave buena. El arbol no cambia, de modo que Jenkins construye el
-mismo paquete y el `ls-tree` da el mismo numero; el precio es un commit que no
-toca nada en el historial. *(Es la segunda vez que esta familia muerde: la
-primera fue con `SLCOPRBA-1353`, la historia padre, en vez de la subtarea.)*
+**ARREGLARLO DESPUES CUESTA ROMPER UNA REGLA, Y POR ESO LA PREVENCION ES LO
+UNICO QUE VALE.** El enlace no es un campo que Jira guarde: Bitbucket lo
+DERIVA del mensaje y lo recalcula, de modo que no se borra desde la interfaz.
+Lo unico que lo quita es cambiar el mensaje, y eso es `reset --soft` o
+`--amend` mas `push --force-with-lease`, o sea **reescribir la rama de
+Bitbucket entre despliegues**, que es lo que la bitacora prohibe.
+
+*(Propuse primero un commit vacio hacia adelante con la clave buena: eso
+arregla la subtarea que se quedo SIN su commit, pero no quita los commits
+ajenos de la que los recibio DE MAS. El equipo lo rechazo -- "esto me parece
+horrible, necesitamos quitarlos" -- y se reescribieron las dos ramas a
+proposito, con el coste asumido: avisar a quien tuviera esos clones y
+comprobar que no hubiera un build en vuelo. El arbol no cambio y el `ls-tree`
+siguio dando 246 y 75.)*
+
+**LA REGLA QUE QUEDA: la clave se comprueba ANTES de commitear**, repo por
+repo, porque despues no hay salida barata. Es la segunda vez que esta familia
+muerde: la primera fue con `SLCOPRBA-1353`, la historia padre, en vez de la
+subtarea.
 
 **EL `[REDSHIFT:330]` TUMBA UN DESPLIEGUE QUE SALIO EN VERDE, Y EL TOPE ES POR
 PAQUETE (2026-11-16, SLCOPRBA-1449).** Hasta hoy esta tabla decia que el
