@@ -408,6 +408,105 @@ else
   ok "todo objeto desplegado tiene su reverso"
 fi
 
+# ------------------------------------------------------------
+# 12. Guarda por RANGO sobre un cast de TEXTO a entero
+#
+# CUARTO PUNTO CIEGO DEL BANCO, hermano de DELTA (8), del RAISE (9) y de la
+# subconsulta correlacionada (10) -- pero este no se le escapa al banco por el
+# motor, sino por el DATO: la bateria mock siembra numeros de puerta de dos
+# digitos y no puede ejercitar la rama ni en principio.
+#
+# LA FAMILIA HA MORDIDO DOS VECES Y LA SEGUNDA FUE EL ARREGLO DE LA PRIMERA.
+# QA #176 tumbo la Regla 3 con
+#   Overflow (Integer valid range -2147483648 to 2147483647)
+# y se arreglo anadiendo una guarda que castea a BIGINT para comprobar si el
+# valor cabe en INTEGER. En DEMO, lote 20261112, revento ESA guarda:
+#   Overflow (Long valid range -9223372036854775808 to 9223372036854775807)
+# porque el regex de solo-digitos no acota la LONGITUD y numero_puerta es
+# VARCHAR(50). UNA GUARDA POR RANGO CASTEA, Y POR TANTO NECESITA SU PROPIA
+# GUARDA POR LONGITUD -- o, mejor, no castear: LEN no puede desbordar.
+#
+# Y LA GUARDA VA EN OTRA RAMA DEL CASE, nunca en el mismo AND que la expresion
+# que protege: el orden de evaluacion de los operandos de un AND no esta
+# garantizado.
+#
+# FALLA solo ante la forma inequivoca -- un cast de texto a entero comparado
+# contra el tope de INTEGER --, que existia en 12 sitios del paquete y en los
+# 12 estaba mal. AVISA del resto: hay 57 casts de texto sin guarda de longitud
+# y la mayoria son inofensivos (16 son una fecha renderizada a texto, siempre
+# de 8 digitos, y cuatro el LOTE del Framework), de modo que fallar ahi
+# pondria el paquete rojo sin un defecto.
+# ------------------------------------------------------------
+echo "12) guarda por rango sobre un cast de texto a entero  [REDSHIFT:112]"
+RNG=$(python3 -I - "$ROOT" <<'PYEOF'
+import re, sys, glob, os
+raiz = sys.argv[1]
+# la forma proscrita: castear para comparar contra el tope de INTEGER
+MALA = re.compile(r"CAST\s*\(.+?\s+AS\s+(?:BIGINT|INTEGER)\s*\)\s*<=?\s*2147483647", re.I)
+for f in sorted(glob.glob(raiz + "/SQL/*.sql") + glob.glob(raiz + "/RevSQL/*.sql")):
+    for n, l in enumerate(open(f, encoding="utf-8", errors="replace"), 1):
+        if l.lstrip().startswith("--"):
+            continue
+        if MALA.search(re.sub(r"--.*$", "", l)):
+            print("%s:%d  %s" % (os.path.basename(f), n, l.strip()[:100]))
+PYEOF
+)
+if [ -n "$RNG" ]; then
+  bad "guarda por RANGO que castea (usar LEN; ver la nota de arriba):"
+  printf '%s\n' "$RNG" | head -15 | sed 's|^|        |'
+else
+  ok "ninguna guarda de rango sobre un cast de texto"
+fi
+
+LGT=$(python3 -I - "$ROOT" <<'PYEOF'
+import re, sys, glob, os
+raiz = sys.argv[1]
+TEXTO = re.compile(r"VARCHAR|REGEXP_|TRIM|REPLACE|NULLIF|BTRIM|\bcol\d|\.pin\b|digitos|\bvalor\b", re.I)
+SANOS = re.compile(r"REPLACE\s*\(\s*CAST\s*\(.+?AS\s+VARCHAR|fw_resolver_param|SUBSTRING|^\s*NULL\s*$", re.I)
+CIERRA = re.compile(r"\s+AS\s+(BIGINT|INTEGER)\s*$", re.I)
+
+def casts(linea):
+    """Devuelve la expresion interna de cada CAST(...) de la linea, recorriendo
+    los parentesis. Un regex no equilibra y se desborda al CAST de al lado."""
+    for m in re.finditer(r"\bCAST\s*\(", linea, re.I):
+        prof, j = 1, m.end()
+        while j < len(linea) and prof:
+            if linea[j] == "(": prof += 1
+            elif linea[j] == ")": prof -= 1
+            j += 1
+        if prof:                       # el CAST no cierra en esta linea
+            continue
+        yield linea[m.end():j - 1]
+
+n_total = 0
+for f in sorted(glob.glob(raiz + "/SQL/*.sql") + glob.glob(raiz + "/RevSQL/*.sql")):
+    lineas = open(f, encoding="utf-8", errors="replace").read().splitlines()
+    for i, l in enumerate(lineas):
+        if l.lstrip().startswith("--"):
+            continue
+        for cuerpo in casts(re.sub(r"--.*$", "", l)):
+            c = CIERRA.search(cuerpo)
+            if not c:                  # no es un cast a entero
+                continue
+            dentro = cuerpo[:c.start()]
+            if not TEXTO.search(dentro) or SANOS.search(dentro):
+                continue
+            ventana = "\n".join(lineas[max(0, i - 4):i + 1]).upper()
+            if "LEN(" in ventana or "LENGTH(" in ventana:
+                continue
+            n_total += 1
+            print("%s:%d  %s" % (os.path.basename(f), i + 1, dentro[:80]))
+print("__TOTAL__ %d" % n_total)
+PYEOF
+)
+N_LGT=$(printf '%s\n' "$LGT" | sed -n 's/^__TOTAL__ //p')
+if [ "${N_LGT:-0}" -gt 0 ]; then
+  warn "$N_LGT casts de texto a entero sin guarda de longitud (mirar, no todos son defecto):"
+  printf '%s\n' "$LGT" | grep -v '^__TOTAL__' | head -8 | sed 's|^|        |'
+else
+  ok "todo cast de texto a entero lleva guarda de longitud"
+fi
+
 echo
 if [ $FAIL -ne 0 ]; then echo "RESULTADO: FALLA"; exit 1; fi
 [ $WARN -ne 0 ] && echo "RESULTADO: OK (con avisos)" || echo "RESULTADO: OK"

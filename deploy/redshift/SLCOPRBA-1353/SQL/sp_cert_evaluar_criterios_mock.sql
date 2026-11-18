@@ -134,12 +134,12 @@ BEGIN
     df.via_principal,
     df.via_generadora,
     df.numero_puerta,
-    -- QA #176: misma guarda que sp_unificacion_r3_esc1 (ver su cabecera). El
-    -- evaluador tiene que medir lo MISMO que el escenario; sin la guarda aqui,
-    -- el criterio leeria una puerta que el escenario descarta.
-    CASE WHEN NULLIF(REGEXP_SUBSTR(COALESCE(df.numero_puerta, ''), '^[0-9]+$'), '') IS NOT NULL
-          AND CAST(NULLIF(REGEXP_SUBSTR(COALESCE(df.numero_puerta, ''), '^[0-9]+$'), '') AS BIGINT) <= 2147483647
-         THEN CAST(NULLIF(REGEXP_SUBSTR(COALESCE(df.numero_puerta, ''), '^[0-9]+$'), '') AS INTEGER)
+    -- D-DEMO-01: misma guarda por LONGITUD que sp_unificacion_r3_esc1 (ver su
+    -- cabecera, y por que la de QA #176 no bastaba). El evaluador tiene que
+    -- medir lo MISMO que el escenario; con otra guarda aqui, el criterio
+    -- leeria una puerta que el escenario descarta.
+    CASE WHEN LEN(REGEXP_SUBSTR(COALESCE(df.numero_puerta, ''), '^[0-9]+$')) BETWEEN 1 AND 9
+         THEN CAST(REGEXP_SUBSTR(COALESCE(df.numero_puerta, ''), '^[0-9]+$') AS INTEGER)
          ELSE NULL
     END AS puerta_num,
     COALESCE(r.entidades, 0) AS entidades,

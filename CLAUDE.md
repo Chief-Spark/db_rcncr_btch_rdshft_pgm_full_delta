@@ -1373,6 +1373,49 @@ volumen.
   Una tabla o columna que no existe si espera a la primera invocacion; un
   error de sintaxis salta en el propio `CREATE`. La consecuencia buena: un
   deploy verde de `pgm` SI garantiza que los 116 cuerpos parsean en Redshift.
+- **UNA GUARDA POR RANGO CASTEA, Y POR TANTO NECESITA SU PROPIA GUARDA POR
+  LONGITUD. Esta familia ha mordido DOS veces y la segunda fue el arreglo de la
+  primera (D-DEMO-01, 2026-11-18).** QA #176 tumbo la Regla 3 con
+  `Overflow (Integer valid range -2147483648 to 2147483647)` y se arreglo
+  anadiendo `AND CAST(<texto> AS BIGINT) <= 2147483647` para comprobar si el
+  valor cabia en INTEGER. En DEMO, lote `20261112`, **revento esa guarda**:
+  `Overflow (Long valid range -9223372036854775808 to 9223372036854775807)`
+  -- "Long" es BIGINT -- porque el regex `'^[0-9]+$'` no acota la longitud y
+  `numero_puerta` es `VARCHAR(50)` en las DOS ramas de
+  `v_xpm_direccion_fisica`: `standardizednumeropuerta` del datashare y
+  `direccion_fisica_generada`, que escribe la R2.
+  **La forma correcta no castea**, porque `LEN` no puede desbordar y con `<= 9`
+  el maximo es 999.999.999, que cabe siempre en INTEGER:
+  `CASE WHEN LEN(x) BETWEEN 1 AND 9 THEN CAST(x AS INTEGER) END`.
+  Cierra el Long de hoy y el Integer de QA #176 a la vez.
+  **Y LA GUARDA VA EN OTRA RAMA DEL `CASE`, nunca en el mismo `AND`** que la
+  expresion que protege: el orden de evaluacion de los operandos de un `AND` no
+  esta garantizado, de modo que en `:155` el centinela convivia con lo que
+  reventaba. La forma que SI aguantaba es
+  `sp_unificacion_r2_construir_diccionario_complementos.sql:87`.
+  **Eran DOCE sitios con la forma proscrita y la correcta se habia usado en UNO
+  de doce** (`citycode`, `02_vistas_insumo_edf_views.sql:155`), con el
+  comentario de al lado diciendolo ya. Corregidos los doce: tres de
+  `numero_puerta` en pgm (escenario, espejo y evaluador), cuatro y tres en las
+  vistas de strct (`contacttype`, `standardizeddanecode`,
+  `counterpartyidnumber`) y dos en el diagnostico de dt. **El ancho va a 9 en
+  todas y no uno por dominio**: estrechar a 5 el DANE cambiaria el
+  comportamiento de valores que hoy funcionan, y el trabajo de este commit es
+  parar un overflow, no apretar dominios.
+  **EL BANCO NO PODIA VERLO, Y NO POR EL MOTOR SINO POR EL DATO**: la bateria
+  siembra puertas de dos digitos (`seed_mock_matriz_r3.sql:259-275`), de modo
+  que la rama no se ejercita ni en principio. Lo cierra el **chequeo 12 de
+  `validar.sh`**, que FALLA ante la forma proscrita y AVISA de los otros 18
+  casts de texto a entero sin guarda de longitud.
+  **Dos latentes de los doce merecian la correccion aunque no hubieran saltado:**
+  `standardizeddanecode` sale del MISMO lote de columnas de estandarizacion que
+  acaba de llegar, y `counterpartyidnumber` alimenta `id_buro_suscriptor`, que
+  es lo que cuenta `numero_entidades_reportan` y lo que decide
+  `sector_financiero` -- si desborda no cae una regla, caen las tres.
+  **Y la secuencia del fallo tiene una leccion propia:** R1 y R2 pasaron porque
+  **no castean** la puerta, la arrastran como texto; R3 es la primera que la
+  convierte. Un dato nuevo revela el defecto en la primera etapa que lo toca,
+  no en la que lo trae.
 - **Un literal mas largo que su columna es un `[REDSHIFT:112]`**, y
   `CREATE TABLE IF NOT EXISTS` lo esconde: si la tabla ya existe con la columna
   ancha de una version anterior, el `INSERT` pasa en DEV y falla en el primer
@@ -1414,8 +1457,18 @@ volumen.
 Chequea ASCII, BOM, `$$` y parentesis balanceados, simetria de los `.par`, que
 toda entrada tenga su archivo, `WHERE` en `UPDATE`/`DELETE`, `LISTAGG` con el
 mismo `WITHIN GROUP` por `SELECT`, las reservadas de Redshift como
-identificador (8), los `RAISE` con expresiones (9) y **las subconsultas en la
-lista de un `SELECT` (10)**. Sale distinto de cero si algo falla.
+identificador (8), los `RAISE` con expresiones (9), **las subconsultas en la
+lista de un `SELECT` (10)**, la simetria de objetos `SQL/` <-> `RevSQL/` (11) y
+**las guardas por RANGO sobre un cast de texto a entero (12)**. Sale distinto
+de cero si algo falla.
+
+**El 12 es el CUARTO punto ciego del banco y el primero que no es del motor,
+sino del DATO** (D-DEMO-01): la bateria siembra puertas de dos digitos, asi que
+la rama que revento en DEMO no se ejercita ni en principio. FALLA ante
+`CAST(<texto> AS BIGINT) <= 2147483647` -- la forma que existia en doce sitios y
+en los doce estaba mal -- y AVISA de los otros 18 casts de texto a entero sin
+guarda de longitud, que no son todos defecto: la mayoria de los 57 que hay en el
+paquete estan acotados por construccion (16 son una fecha renderizada a texto).
 
 El 10 cierra la terna de los puntos ciegos del banco: `DELTA` -> 8, `RAISE` ->
 9, subconsulta correlacionada en la proyeccion -> 10. **Es AVISO y no falla**:

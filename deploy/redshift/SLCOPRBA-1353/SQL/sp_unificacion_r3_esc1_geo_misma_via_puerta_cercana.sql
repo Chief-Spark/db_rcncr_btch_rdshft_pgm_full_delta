@@ -142,18 +142,29 @@ BEGIN
       '[[:space:]]+(NORTE|OESTE|ESTE|SUR|SOE|NE|NO|SE|SO|OE|N|S|E|O)$', '') AS via_principal_cmp,
     REGEXP_REPLACE(UPPER(COALESCE(df.via_generadora, '')),
       '[[:space:]]+(NORTE|OESTE|ESTE|SUR|SOE|NE|NO|SE|SO|OE|N|S|E|O)$', '') AS via_generadora_cmp,
-    -- QA #176: ESTE CAST NO LLEVABA GUARDA Y REVENTO LA REGLA 3 ENTERA con
-    -- "Overflow (Integer valid range -2147483648 to 2147483647)". El regex
-    -- acepta digitos SIN tope de longitud, y en QA llego un numero de puerta
-    -- que no cabe en INTEGER. La guarda por BIGINT ya estaba en el repo, en
-    -- las otras cuatro conversiones de texto a INTEGER sobre el datashare
-    -- (02_vistas_insumo_edf_views.sql:141 y :522, 03_vistas_contacto_canal:111,
-    -- y la de citycode acota por LEN); faltaba justo en esta.
+    -- QA #176 arreglo a medias ESTE CAST y D-DEMO-01 (2026-11-18) lo cerro:
+    -- LA GUARDA NO SE GUARDABA A SI MISMA. Aquel arreglo casteaba a BIGINT
+    -- para comprobar si la puerta cabe en INTEGER, y ESE cast es el que
+    -- revento la Regla 3 entera en DEMO, lote 20261112:
+    --   Overflow (Long valid range -9223372036854775808 to 9223372036854775807)
+    -- Salto en cuanto llegaron las columnas de estandarizacion, porque el
+    -- regex acepta digitos SIN tope y numero_puerta es VARCHAR(50) en las DOS
+    -- ramas de v_xpm_direccion_fisica: standardizednumeropuerta del datashare
+    -- y direccion_fisica_generada, que escribe la R2.
+    -- LA LECCION: una guarda por RANGO castea, y por tanto necesita su propia
+    -- guarda por LONGITUD. Con LEN <= 9 el maximo es 999.999.999 y cabe
+    -- siempre en INTEGER, de modo que el cast a BIGINT desaparece y con el los
+    -- dos overflows a la vez -- el Long de hoy y el Integer de QA #176.
+    -- Y LA GUARDA VA EN OTRA RAMA DEL CASE, nunca en el mismo AND: ahi
+    -- convivia con la expresion que reventaba y el orden de evaluacion de los
+    -- operandos de un AND no esta garantizado. Es la forma que ya aguantaba en
+    -- sp_unificacion_r2_construir_diccionario_complementos.sql:87.
+    -- El NULLIF(..., '') se cae solo: LEN('') da 0 y LEN(NULL) da NULL, y
+    -- ninguno cumple el BETWEEN.
     -- NULL y no 0: un numero de puerta que no cabe en INTEGER no es una puerta,
     -- y el escenario ya trata el NULL como "sin numero comparable".
-    CASE WHEN NULLIF(REGEXP_SUBSTR(COALESCE(df.numero_puerta, ''), '^[0-9]+$'), '') IS NOT NULL
-          AND CAST(NULLIF(REGEXP_SUBSTR(COALESCE(df.numero_puerta, ''), '^[0-9]+$'), '') AS BIGINT) <= 2147483647
-         THEN CAST(NULLIF(REGEXP_SUBSTR(COALESCE(df.numero_puerta, ''), '^[0-9]+$'), '') AS INTEGER)
+    CASE WHEN LEN(REGEXP_SUBSTR(COALESCE(df.numero_puerta, ''), '^[0-9]+$')) BETWEEN 1 AND 9
+         THEN CAST(REGEXP_SUBSTR(COALESCE(df.numero_puerta, ''), '^[0-9]+$') AS INTEGER)
          ELSE NULL
     END AS numero_puerta_num,
     -- (C1) LEFT JOIN, no INNER: ver la cabecera.
