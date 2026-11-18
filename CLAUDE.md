@@ -1401,9 +1401,18 @@ volumen.
   valor cabia en INTEGER. En DEMO, lote `20261112`, **revento esa guarda**:
   `Overflow (Long valid range -9223372036854775808 to 9223372036854775807)`
   -- "Long" es BIGINT -- porque el regex `'^[0-9]+$'` no acota la longitud y
-  `numero_puerta` es `VARCHAR(50)` en las DOS ramas de
-  `v_xpm_direccion_fisica`: `standardizednumeropuerta` del datashare y
-  `direccion_fisica_generada`, que escribe la R2.
+  **`numero_puerta` tampoco tiene tope**: el `UNION` de
+  `v_xpm_direccion_fisica` deja los VARCHAR sin castear a proposito -- *"al
+  unir dos VARCHAR Redshift ensancha solo"* --, de modo que la rama del
+  datashare (`standardizednumeropuerta`) llega con el ancho que traiga; solo la
+  otra, `direccion_fisica_generada` que escribe la R2, esta acotada a
+  `VARCHAR(50)`. *(Esta linea decia `VARCHAR(50)` en las dos ramas y era
+  falsa.)*
+  **MEDIDO EN DEMO el 2026-11-18** sobre `v_xpm_direccion_fisica`, 1.535.723
+  filas: `max_digitos` **53**, fuera de INTEGER **137**, fuera de BIGINT
+  **119**. Las 119 son literalmente el `Long` del error, no una inferencia, y
+  los 53 digitos pasan de `VARCHAR(50)`, asi que ese valor viene del datashare
+  y no de la R2. La guarda descarta 137 puertas de 1,5 M: **0,009%**.
   **La forma correcta no castea**, porque `LEN` no puede desbordar y con `<= 9`
   el maximo es 999.999.999, que cabe siempre en INTEGER:
   `CASE WHEN LEN(x) BETWEEN 1 AND 9 THEN CAST(x AS INTEGER) END`.

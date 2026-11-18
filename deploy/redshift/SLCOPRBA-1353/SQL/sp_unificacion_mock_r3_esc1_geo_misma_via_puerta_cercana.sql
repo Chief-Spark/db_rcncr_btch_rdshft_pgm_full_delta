@@ -148,9 +148,17 @@ BEGIN
     -- revento la Regla 3 entera en DEMO, lote 20261112:
     --   Overflow (Long valid range -9223372036854775808 to 9223372036854775807)
     -- Salto en cuanto llegaron las columnas de estandarizacion, porque el
-    -- regex acepta digitos SIN tope y numero_puerta es VARCHAR(50) en las DOS
-    -- ramas de v_xpm_direccion_fisica: standardizednumeropuerta del datashare
-    -- y direccion_fisica_generada, que escribe la R2.
+    -- regex acepta digitos SIN tope y numero_puerta TAMPOCO lo tiene: el UNION
+    -- de v_xpm_direccion_fisica deja los VARCHAR sin castear a proposito ("al
+    -- unir dos VARCHAR Redshift ensancha solo"), de modo que la rama del
+    -- datashare (standardizednumeropuerta) llega con el ancho que traiga. Solo
+    -- la otra rama, direccion_fisica_generada que escribe la R2, esta acotada
+    -- a VARCHAR(50).
+    -- MEDIDO EN DEMO (2026-11-18, Neil/DBA) sobre 1.535.723 filas:
+    --   max_digitos = 53  |  fuera_de_INTEGER = 137  |  fuera_de_BIGINT = 119
+    -- Los 53 digitos pasan de VARCHAR(50), asi que vienen del datashare y no
+    -- de la R2. Y las 119 que no caben en BIGINT son, literalmente, el "Long"
+    -- del error: no es inferencia.
     -- LA LECCION: una guarda por RANGO castea, y por tanto necesita su propia
     -- guarda por LONGITUD. Con LEN <= 9 el maximo es 999.999.999 y cabe
     -- siempre en INTEGER, de modo que el cast a BIGINT desaparece y con el los
