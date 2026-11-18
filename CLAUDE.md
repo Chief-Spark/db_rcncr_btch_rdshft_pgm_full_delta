@@ -2163,6 +2163,88 @@ bien, no en el tiempo.
 
 Los archivos de la prueba estan en `dt/docs/framework_batch/`.
 
+## El UNLOAD a S3: cuarto proceso, en OTROS TRES REPOS (SLCOPRBA-1820)
+
+**NO ESTA EN ESTOS REPOS Y ESA ES LA PRIMERA TRAMPA.** Despues de Novedades,
+un cuarto proceso hace `UNLOAD` de las siete `mat_*` a S3 en **CSV HEADER
+GZIP** y escribe un CTL `7_tablas_finish.json`. Los CSV disparan la carga a
+**DynamoDB** y al Redshift productor. Vive en:
+
+| Repo GitHub (`Chief-Spark/`) | Clon Bitbucket | Subtarea | Rama de Bitbucket | Archivos |
+|---|---|---|---|---|
+| `a_rcncr_ln_rdshft_strct_chief` | `a_rcncr_ln_rdshft_strct` | **SLCOPRBA-1900** | `feature/SLCOPRBA-1900-strct_v2` | **6** |
+| `a_rcncr_ln_rdshft_pgm_chief` | `a_rcncr_ln_rdshft_pgm` | **SLCOPRBA-1901** | `feature/SLCOPRBA-1901-pgm_v2` | **8** |
+| `a_rcncr_ln_rdshft_dt_chief` | `a_rcncr_ln_rdshft_dt` | **SLCOPRBA-1902** | `feature/SLCOPRBA-1902-dt_v2` | **4** |
+
+**El paquete es `deploy/redshift/SLCOPRBA-1820/`, no `SLCOPRBA-1353`**, y el
+nombre de GitHub lleva sufijo `_chief` mientras el clon de Bitbucket no. En
+GitHub la rama de desarrollo es `claude/happy-einstein-k6okvc` en strct y pgm,
+pero **dt vive en `main`**: no tiene rama de desarrollo, de modo que su
+traslado sale de `github/main`.
+
+**EL EXPORTADOR YA LLEVA LA FIRMA DEL FRAMEWORK Y NO NECESITA WRAPPER.**
+`bdm_datos.sp_novedades_exportar_7_tablas` declara los seis VARCHAR, al
+contrario que los cuatro scoring del Ordenamiento. Es el **nivel 6** de
+`PE1353.yml`, detras de Novedades porque lee las siete `mat_*` que Novedades
+acaba de dejar. **Y es la unica dependencia externa de ese YAML**: si el
+paquete 1820 no esta desplegado, el nivel 6 muere con
+`procedure ... does not exist` y el resto de la cadena ya habra corrido.
+
+**EL DELTA ERA FALSO Y SE ARREGLO (2026-11-17).** `v_modo` aparecia en seis
+sitios -- validacion, firma, `run_id`, control y CTL -- y **en ninguno era un
+predicado**: un DELTA bajaba las ~363.000 filas enteras igual que un FULL y lo
+unico que cambiaba era el nombre de la carpeta. Hoy:
+
+- **frontera propia** en `nov_export_control` (`watermark_anterior` /
+  `watermark_nuevo`), leida `WHERE estado = 'completado' AND ambiente = ?`.
+  **Acotada por ambiente**, que es justo lo que a `nov_control` le falta;
+- filtro `fecha_actualizacion > frontera`, con **`>` estricto y no `>=`**: el
+  inclusivo de Unificacion hace que lo fechado en la frontera reentre en todos
+  los DELTA para siempre (`ventana_en_la_frontera`), y no se hereda;
+- **bootstrap** copiado de `16_sp_unificacion_ciclo.sql:180-185`: sin frontera
+  previa fuerza FULL aunque se pida DELTA, y lo marca. Sin eso el primer DELTA
+  tras un despliegue limpio exportaria **cero** y el CTL diria que todo esta
+  al dia;
+- **`mat_info_movilidad` sin filtro a proposito**: es de eventos y su SP la
+  trunca en cada corrida, de modo que su contenido YA es el delta;
+- `contactabilidad` y `punto_interes` filtran por la tabla **hija**, nunca por
+  `mat_info_ubicacion`: una ubicacion vieja con contacto nuevo se perderia.
+
+**LO QUE AUTORIZA EL DELTA ES EL CONTRATO DEL CONSUMIDOR, NO EL LEGADO.** En el
+legado **no hay UNLOAD**: las unicas coincidencias de `unload` / `s3://` caen
+en `Redshift_PROTOTIPO_no_es_evidencia/`. **La regla 4 no aplica aqui**, es
+diseno nuevo, y lo decide que DynamoDB haga **UPSERT por `pk`/`sk`**
+(confirmado por el usuario, 2026-11-17).
+
+**RIESGO ABIERTO, Y NO ES CODIGO: CON DELTA + UPSERT UN BORRADO ES INVISIBLE.**
+Si una fila desaparece de una `mat_*`, el delta no la menciona y Dynamo la
+conserva para siempre. El AS-IS lo resolvia reconstruyendo
+(`111.BTQ:817-836`, `DELETE ... ALL` antes de cargar). Salidas: un **FULL
+periodico** que reconcilie, o un **tombstone** en el CTL. Decision del equipo
+del consumidor, planteada y no cerrada.
+
+**Y UN DEFECTO PREEXISTENTE ANOTADO Y NO CORREGIDO:** `run_id`
+(`<YYYYMMDDTHH24MISSZ>_<MODO>`) **colisiona dentro del mismo segundo** -- la
+tabla no tiene PK y el `UPDATE ... WHERE run_id = ?` del cierre tocaria las dos
+filas.
+
+**ESTOS TRES REPOS NO TIENEN `validar.sh` NI BANCO.** El DELTA esta probado
+**contra PostgreSQL con el SP real** (sin frontera -> FULL con bootstrap y 15
+filas; con una fila nueva -> 1 fila y la frontera avanza; FULL explicito -> las
+16), pero **no hay verde de Redshift real**: eso no es una certificacion. El
+barrido de la clase D-DEMO-01 si esta hecho y sale **limpio** en los tres.
+
+**EL TRASLADO SE PAGO UNA VEZ, Y ES EL MODO DE FALLO QUE LA BITACORA YA
+DESCRIBIA.** El remoto `github` no existia en el clon de Bitbucket, el
+`git checkout github/<rama> -- deploy/redshift` fallo, y como PowerShell no
+encadena con `&&` el `commit` y el `push` siguientes **subieron el borrado**:
+la rama `feature/SLCOPRBA-1823-str-unload` quedo con **cero** archivos bajo
+`deploy/redshift`. **El `git ls-files` del medio dio 0 y ahi habia que parar.**
+De ahi el orden definitivo: `git remote -v` y `git fetch github <rama>`
+**primero**, y el `git rm -r --cached` **solo** cuando el fetch ha funcionado.
+Esa rama quedo abandonada por decision del usuario y el trabajo se rehizo
+sobre las `_v2`.
+
 ## Lo que viaja a una sesion nueva y lo que no
 
 **LOS CUATRO `CLAUDE.md` SON EL MECANISMO: estan commiteados y el harness los
