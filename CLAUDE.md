@@ -179,6 +179,26 @@ vacio.
 | `REDSHIFT:330/340` | tope de **1.200 celdas** del renderizador del snapshot DDL: **1 celda = 1 columna declarada por el paquete** | mantener el paquete por debajo de 1.200 columnas. Hoy `strct` va por 1.157 |
 | `JENKINS:104/105` | rama sin ID de subtarea | nombrar la rama con la subtarea |
 
+**Y OJO, QUE SON DOS ENGANCHES DISTINTOS Y SOLO UNO SALE DE LA RAMA
+(2026-11-18).** Jira engancha la **rama** por la clave de su NOMBRE y el
+**commit** por la clave de su MENSAJE. Son independientes: un commit con la
+clave equivocada sube a la rama correcta, la rama figura actualizada en su
+subtarea -- y el commit no aparece ahi, sino en la subtarea que nombre el
+mensaje. El sintoma es que las dos lineas del panel Development no cuadran:
+`1 branch -- Updated 2 minutes ago` junto a `10 commits -- Latest 2 days ago`.
+
+**EL MENSAJE LLEVA LA SUBTAREA DEL REPO QUE SE TOCA, NO LA DEL CAMBIO**, que
+es lo que se pago en D-DEMO-01: un solo arreglo en los tres repos se commiteo
+con `SLCOPRBA-1449` en los tres, y los de pgm y dt se fueron a la subtarea de
+strct. Esta tanda son **1449 strct, 1450 pgm, 1451 dt**.
+
+**Y NO SE ARREGLA CON `--amend`:** reescribir la rama de Bitbucket entre
+despliegues esta prohibido. Se arregla con un commit vacio hacia adelante que
+lleve la clave buena. El arbol no cambia, de modo que Jenkins construye el
+mismo paquete y el `ls-tree` da el mismo numero; el precio es un commit que no
+toca nada en el historial. *(Es la segunda vez que esta familia muerde: la
+primera fue con `SLCOPRBA-1353`, la historia padre, en vez de la subtarea.)*
+
 **EL `[REDSHIFT:330]` TUMBA UN DESPLIEGUE QUE SALIO EN VERDE, Y EL TOPE ES POR
 PAQUETE (2026-11-16, SLCOPRBA-1449).** Hasta hoy esta tabla decia que el
 `REDSHIFT:112` era "lo unico que tumba el build"; **ya no es cierto**. El
