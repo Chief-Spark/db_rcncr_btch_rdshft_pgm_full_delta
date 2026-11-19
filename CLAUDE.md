@@ -2314,7 +2314,28 @@ en que se descubre.** Un archivo en el scratchpad no es un entregable.
 |---|---|---|
 | **QA usa el token `test`**, no `qa` | el log del job QA/DATABASE #196 imprime `ambiente TEST` y `rcncr-batch-geo-test-667397050561` | **medido.** Cierra la hipotesis que dejaba abierta la seccion de GEO para TEST |
 | **DEMO no tiene fila en `geo_config`** | `03_ddl_geo.sql` siembra cuatro ambientes y DEMO no esta | **medido.** `sp_geo_exportar_insumo` resuelve el ambiente de la cuenta y levanta excepcion; **no bloquea** porque GEO corre en su propio bloque. Hay que anadir la fila antes de Demo |
-| La cuenta de PROD podria no ser la del `03_ddl_geo.sql` | el ticket de PDN dice `324037294240`; `03_ddl_geo.sql` construye bucket y rol con `696708350333` | **HIPOTESIS, no dato.** Hay que confirmarlo contra la consola antes de desplegar a PROD |
+| ~~La cuenta de PROD podria no ser la del `03_ddl_geo.sql`~~ **RESUELTO 2026-11-19** | **eran DOS cuentas y se cruzaban**: `324037294240` es la del **Framework Batch** en PROD (`procesosbatch`) y `696708350333` la de **Reconocer** (`reconocerbatch`). Las dos salen del MISMO archivo, `tf_fw_dynbtch_chief/production/terraform.tfvars` | **medido.** El `03_ddl_geo.sql` estaba bien. Quedan abiertos el `cluster_id` -- que ese mismo archivo declara **inferido**, y lo dice en su comentario -- y el token, que es `prod` en el bucket de GEO y `pro` en el rol cross-account |
+
+**Y DE AHI SALIO LA SOLICITUD DE PRODUCCION (2026-11-19):**
+`dt/docs/PETICION_DATASHARE_PROD_SERVICENOW.md`, para ServiceNow. Pide el
+datashare `ds_dba_rncr_batch` con sus **nueve** relaciones, la asociacion
+cross-account a la cuenta `696708350333` y los permisos del usuario de
+despliegue y de `user_sp`.
+
+**LO QUE ESA SOLICITUD DESTAPO Y NO ESTABA ESCRITO EN NINGUN SITIO: `EXECUTE`
+NO BASTA PARA `user_sp`.** Ningun procedimiento del paquete se declara
+`SECURITY DEFINER` -- cero coincidencias en los 116 --, de modo que corren con
+los privilegios de QUIEN LOS INVOCA. Y **27 SP de la via real hacen
+`TRUNCATE`**, que en Redshift exige ser DUENO del objeto y no se concede con
+un `GRANT` como en PostgreSQL *(esto ultimo es hipotesis y hay que
+confirmarlo)*. La salida que funciona en los dos casos es un **ROL dueno** de
+los tres esquemas, concedido al usuario de despliegue y a `user_sp`: asi los
+dos crean, truncan y ejecutan **sin superusuario**.
+
+**La prueba que cierra esa solicitud no es un `SELECT` al datashare**, que es
+lo que todo el mundo verifica, sino un `CREATE TABLE` + `TRUNCATE` + `DROP`
+**como `user_sp`** en `bdm_tempo`. Es la unica que distingue "los permisos
+estan puestos" de "los permisos sirven".
 
 **LAS SIETE TABLAS DE NOVEDADES, MEDIDAS EN LOS TRES AMBIENTES (2026-10-30).**
 Mock / DEV / QA, en filas: actividad economica 73.000 / 124.267 / 121.220;
