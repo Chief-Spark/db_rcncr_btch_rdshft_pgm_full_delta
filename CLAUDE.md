@@ -2309,6 +2309,83 @@ con el `type`/`order` del repo (`struct`/1, `program`/2, `data`/3), no se
 commitea. Mismo patron que el `git ls-files` que habria evitado subir el
 borrado.
 
+## La politica de Gestion del Cambio de SP LATAM, y el BPP que cierra el ano
+
+**FUENTE: "Capacitacion Proceso Gestion del Cambio - SP LATAM", Equipo IT Change
+& Configuration, fechado 30/09/2026.** Lo de aqui sale de ese documento, no de
+la costumbre del equipo. Aplica a Colombia, Peru, Chile y Panama, y sus
+ambientes en alcance son Demo, QA/DEV, PROD y DR.
+
+**EL PERIODO DE PROTECCION EMPRESARIAL (BPP) VA DEL 23 DE NOVIEMBRE DE 2026 AL
+11 DE ENERO DE 2027, Y SOLO APLICA A PRODUCCION.** Es lo que decide si un
+despliegue cabe o no:
+
+| Tramo | Que se permite |
+|---|---|
+| **Fase 1: 23 nov - 10 dic** | Estandar, **Normales de impacto/riesgo BAJO o MEDIO con CAB**, y Emergencia P1. **NO se autorizan Normales de impacto o riesgo ALTO** ni los que afecten la disponibilidad. Aprobacion **solo CAB**: AID y ScoreCard quedan **inhabilitados** |
+| **Fase 2: 11 dic - 11 ene** | **solo** Estandar, Seguridad (vulnerabilidad critica o dia cero) y Emergencia P1. **Ningun Normal**, y **no hay sesiones de CAB** |
+| **Black Weekend 26-30 nov** y **Navidad 14-25 dic** | **congelamiento total, sin excepcion** |
+
+**La Gestion de Excepciones NO es una autorizacion**, y el propio documento lo
+dice: Change Management evalua, la Gerencia de ITSO analiza criticidad y
+urgencia, y **si el riesgo o impacto es alto se escala al CIO SPLatam**.
+
+**RESTRICCIONES DE DIAS, QUE VALEN TODO EL ANO Y NO SOLO EN BPP:**
+
+- **No se autoriza** desplegar los **dos ultimos dias habiles del mes**.
+- **No se recomienda** programar cambios **viernes ni fin de semana**.
+- **No se deben programar Normales de ALTO impacto en la ULTIMA SEMANA del
+  mes**; las unicas excepciones son facturacion y emergencia.
+
+**LOS HORARIOS SON POR TIPO DE SERVICIO, Y REDSHIFT NO ESTA EN LA LISTA:**
+
+```
+Servicios de negocio ...... 23:00 - 03:00
+Servicios corporativos .... 22:00 - 03:00   (SalesForce, Bizagi, SAP, Kronos)
+Control-M (jobs) .......... 16:30 - 17:30
+Teradata .................. 10:00-11:00  y  16:30-17:30
+```
+
+**Que Teradata tenga ventana propia y Redshift no aparezca es un hueco real, no
+una omision nuestra.** Antes de fijar la hora de un despliegue hay que
+preguntarle a Change Management en que categoria cae; si es "servicios de
+negocio", el paso a produccion va de **23:00 a 03:00** y no por la tarde.
+
+**EL CORTE DE RECEPCION DECIDE EN QUE CICLO ENTRA EL CAMBIO**, y es donde se
+pierde una semana sin darse cuenta: *"las solicitudes fuera del horario de
+corte pasan al siguiente ciclo de gestion"*.
+
+| Tipo | Dias | Hora limite |
+|---|---|---|
+| Comite de Cambios | **lunes y jueves** | Colombia y Peru 10:00, Chile y Panama 08:00 |
+| Analisis de Impacto (AID) | todos los dias | 10:00 |
+| ScoreCard y Cambios Estandar | todos los dias | 16:00 |
+| Demo medio dia / Demo 18:00 | lunes a viernes | 11:00 (con aval de Delivery) / 16:00 |
+
+*(La pagina de "Cambios Normales" da otra hora para el CAB -- Chile 09:00,
+Panama 10:00, Regional 11:00 --: **el documento trae dos tablas y no cuadran**.
+La de recepcion es la que decide si llegas al ciclo.)*
+
+**SEIS REQUISITOS QUE EL CHG DEBE TRAER O NO AVANZA:** aprobacion de **PEER,
+Manager y Product Owner**; **plan de rollback** documentado (su falta se
+considera riesgo inherente); **certificacion en el ambiente inmediatamente
+anterior** con evidencia adjunta; la **placa de inicio** por correo -- *"si no
+se envia, el cambio no sera ejecutado y se considerara cancelado"* -- y la de
+cierre con evidencia de pruebas post implementacion; y **PIR obligatorio** si
+el cambio falla o genera efectos no esperados.
+
+**Y DOS PLAZOS QUE SE PLANIFICAN HACIA ATRAS:** una ventana de mantenimiento
+pide **4 dias habiles** para notificar la indisponibilidad al cliente, de modo
+que el cambio se presenta al comite **con una semana de antelacion**; y un
+proyecto debe durar **un dia minimo en Demo**.
+
+**LA CONSECUENCIA PARA ESTA ENTREGA, Y ES LA QUE IMPORTA:** el CHG del calculo
+Reconocer esta clasificado `Risk: High` / `Impact: 1-High` como Cambio Normal.
+**Desde el 23 de noviembre eso no se autoriza**, de modo que o sale antes, o
+baja de clasificacion, o va por excepcion con escalamiento al CIO. Un cambio
+aditivo -- crear un bucket y un rol, que no tocan disponibilidad y se revierten
+borrando -- **si cabe en Fase 1** como Normal bajo o medio con CAB.
+
 ## Lo que viaja a una sesion nueva y lo que no
 
 **LOS CUATRO `CLAUDE.md` SON EL MECANISMO: estan commiteados y el harness los
