@@ -951,6 +951,25 @@ dia, no cuando vuelva a saltar.
 ejemplos en la misma corrida. Lo que se traga una excepcion -- GEO por decision
 de negocio -- necesita que alguien mire el conteo, porque el verde no lo dice.
 
+**EL `deploy.par` DE dt YA NO CORRE LA BATERIA MOCK: SE QUEDO EN UNA SOLA
+ENTRADA (2026-11-20, decision del usuario).** Pasa de **17 a 1**:
+`run_reconocer_e2e_real_full.sql`, la cadena real en FULL. Salen las tres
+migraciones y las trece del mock -- `reset_mock`, las cuatro semillas, la
+bateria, la convergencia, el ciclo GEO mock, las cuatro validaciones y
+`run_cert_asercion_final`.
+
+**Y ESO APAGA EL GATE EN TODOS LOS AMBIENTES, QUE ES EL PRECIO ASUMIDO.** Un
+FAILED de un criterio ya **no tumba el build** en DEV ni en QA, porque el
+evaluador y la asercion final ya no se invocan desde el despliegue. El
+expediente de certificacion deja de generarse solo: hay que correr esos
+archivos **a mano** desde `SQL/`, que siguen todos ahi.
+
+**Lo que esto invalida de las frases de mas abajo**, y conviene leerlo antes de
+creerlas: `reset_mock.sql` ya **no** es el archivo 2 de `deploy.par`, la via
+real ya **no** esta en el puesto 4 -- es la unica --, y
+`run_cert_asercion_final.sql` ya **no** se llama dos veces por despliegue. El
+motivo de que la via real fuera delante del mock desaparece con el mock.
+
 **Y LA VIA REAL CORRE AHORA LA PRIMERA (2026-10-23, decision del usuario).**
 `run_reconocer_e2e_real_full.sql` pasa del puesto **17 al 4** de `deploy.par`,
 justo detras de las tres migraciones y delante de `reset_mock.sql`. Antes un
