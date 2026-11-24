@@ -2345,6 +2345,31 @@ con el `type`/`order` del repo (`struct`/1, `program`/2, `data`/3), no se
 commitea. Mismo patron que el `git ls-files` que habria evitado subir el
 borrado.
 
+**Y LAS TRES RAMAS `_v2` YA ESTAN VERIFICADAS CONTRA BITBUCKET (2026-11-25).**
+Medido por **hash de arbol**, que es el unico valor que zanja "Bitbucket es
+identico a GitHub": un conteo de archivos coincide por casualidad, un hash no.
+
+| Rama de Bitbucket | Sale de | `rev-parse <rama>:deploy/redshift/SLCOPRBA-1820` |
+|---|---|---|
+| `feature/SLCOPRBA-1900-strct_v2` | `claude/happy-einstein-k6okvc` | `7aa1a4fa0fc5c29c6ced5b1da61ff176cc3ff460` |
+| `feature/SLCOPRBA-1901-pgm_v2` | `claude/happy-einstein-k6okvc` | `dc9dc94d25bdf3cd4d0af0d2caecbff73018f18d` |
+| `feature/SLCOPRBA-1902-dt_v2` | **`main`** | `f72c2e0cdc119532b9ed4ab4e796e5fb28821491` |
+
+**Y OJO A LA RAMA DE ORIGEN, PORQUE `main` NO ES LO BUENO EN strct NI EN pgm.**
+Cada uno tiene **un** commit en `claude/happy-einstein-k6okvc` que `main` no
+tiene, y es justo **el arreglo del DELTA del 2026-11-17**: `+92 / -13` lineas
+en `sp_novedades_exportar_7_tablas.sql`, con `v_bootstrap`, `v_wm_anterior`,
+`v_wm_nuevo` y el filtro `fecha_actualizacion > frontera`. Los hashes de
+`main` son **`e4f6b994`** (strct) y **`637fe32e`** (pgm): si una comprobacion
+da uno de esos dos, el traslado salio de `main` y subio el exportador con el
+DELTA falso. **Y no se notaria, porque un DELTA que baja todo no falla:
+exporta de mas.** Solo **dt** sale de `main`, que es la unica rama que tiene.
+
+**LO QUE EL HASH NO PRUEBA: el `.jenkins.yml`.** Vive en la RAIZ del repo,
+fuera del arbol que se mide, de modo que los tres verdes de arriba no dicen
+nada de el. Ese chequeo sigue pendiente en los tres, y es el que separa un
+build que despliega de un `3D000: database "null" does not exist`.
+
 ## La politica de Gestion del Cambio de SP LATAM, y el BPP que cierra el ano
 
 **FUENTE: "Capacitacion Proceso Gestion del Cambio - SP LATAM", Equipo IT Change
