@@ -350,6 +350,42 @@ DevSecOps, repo por repo. Peticion redactada en
 `[REDSHIFT:419]`**: aquel caia en silencio a la ruta legacy sin decir por que;
 este dice exactamente que falta.
 
+**Y EL ALTA ES POR REPO *Y POR AMBIENTE*: `[REDSHIFT:158]` ES OTRO CODIGO
+(job DEMO/DATABASE #202, 2026-11-24).** El mismo `redshiftValidateRuntime()`
+tiene dos fallos distintos y conviene no confundirlos:
+
+| Codigo | Que dice | Que falta |
+|---|---|---|
+| `[REDSHIFT:156]` | *"El repositorio ... no tiene onboarding Redshift en DevSecOps"* | el repo entero no esta dado de alta |
+| `[REDSHIFT:158]` | *"AWS Reconocer Redshift Reconocer no tiene configuracion para el ambiente demo"* | el repo **si** esta de alta y le falta **el ambiente** |
+
+Lo pago el primer despliegue a DEMO de `COAWSPPR/DB_RCNCR_BTCH_RDSHFT_DT`
+-- **sin el `DS_`: es otra familia de repos que la del 156** --, que lleva
+meses desplegando en DEV y QA y en DEMO murio sin tocar nada.
+
+**EL PAQUETE PASO ENTERO Y EL AMBIENTE QUEDO INTACTO**, que es lo que hay que
+saber antes de relanzar: `[REDSHIFT:419]` detecto el paquete, `[BITBUCKET:414]`
+lo genero, `[REDSHIFT:210]` conto 1 script de deploy, `[REDSHIFT:215]` 1 de
+rollback y `[REDSHIFT:211] Rollback disponible: 'true'`. El `error` cae en
+`Before deploy`: **cero sentencias corrieron**. De paso confirma que la
+reduccion del `deploy.par` de dt llego a Bitbucket -- `Scripts deploy: 1`.
+
+**LA CONSECUENCIA NO ES DEL BUILD, ES DEL CHG.** DEMO es el *ambiente
+inmediatamente anterior* cuya evidencia exige la politica de Gestion del
+Cambio. Sin verde en DEMO **no hay evidencia que adjuntar al CHG de
+produccion**: esto no retrasa un build, retrasa la radicacion.
+
+**Y SE ENCENDIO UN AVISO QUE ANTES NO ESTABA, POR LA REDUCCION A UNA ENTRADA.**
+Con el `deploy.par` en 17 entradas el detector imprimia `data + struct +
+program`; con una sola imprime `[REDSHIFT:209] Tipos detectados: 'program'`, y
+por archivo marca `SQL/run_reconocer_e2e_real_full.sql` como `program` y su
+`RevSQL/` como `struct`. El `.jenkins.yml` de dt declara `type: data`, **de
+modo que el tipo detectado ya no casa con el declarado**. Hoy no lleva codigo
+de error y el build sigue -- murio por el 158, no por esto --, pero es
+exactamente la hipotesis que esta bitacora dejo anotada en el `[REDSHIFT:209]`:
+si algun gate futuro lo exige, **dt es el que no casa**, y la causa es haber
+dejado el paquete en un solo `CALL`.
+
 **Y OJO AL `[REDSHIFT:209]`, que es informativo HOY:** el detector imprime
 `Tipos detectados: 'data + struct + program'` para el paquete de `strct`, y
 por archivo marca `00_prerequisitos_schemas.sql` como `struct + program` (crea
