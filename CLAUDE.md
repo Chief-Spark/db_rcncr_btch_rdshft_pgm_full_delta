@@ -2519,6 +2519,46 @@ en que se descubre.** Un archivo en el scratchpad no es un entregable.
 | **DEMO no tiene fila en `geo_config`** | `03_ddl_geo.sql` siembra cuatro ambientes y DEMO no esta | **medido.** `sp_geo_exportar_insumo` resuelve el ambiente de la cuenta y levanta excepcion; **no bloquea** porque GEO corre en su propio bloque. Hay que anadir la fila antes de Demo |
 | ~~La cuenta de PROD podria no ser la del `03_ddl_geo.sql`~~ **RESUELTO 2026-11-19** | **eran DOS cuentas y se cruzaban**: `324037294240` es la del **Framework Batch** en PROD (`procesosbatch`) y `696708350333` la de **Reconocer** (`reconocerbatch`). Las dos salen del MISMO archivo, `tf_fw_dynbtch_chief/production/terraform.tfvars` | **medido.** El `03_ddl_geo.sql` estaba bien. Quedan abiertos el `cluster_id` -- que ese mismo archivo declara **inferido**, y lo dice en su comentario -- y el token, que es `prod` en el bucket de GEO y `pro` en el rol cross-account |
 
+- **EL TOKEN DEL AMBIENTE NO SE DEDUCE DEL NOMBRE DEL AMBIENTE: HAY QUE
+  MEDIRLO POR CUENTA, Y LA MISMA CUENTA LLEVA CUATRO ETIQUETAS DISTINTAS
+  (2026-11-24, job DEMO/TERRAFORM de `TF_RCNCR_WS5_INFRA`, rama `demo`, PR #4).**
+  La cuenta `453645298399` aparece como:
+
+  | Donde | Etiqueta |
+  |---|---|
+  | carpeta de Jenkins que la despliega | **DEMO** |
+  | alias de la cuenta AWS (`aws_iam_account_alias`) | `eec-aws-us-eits-reconocermaster-**uat**` |
+  | tag `Environment` y nombres que crea el Terraform | **`stg`** |
+  | `nov_config` del paquete 1820 (`40_ddl_nov_config.sql:83-85`) | **DEMO**, rol `BURoleFor-**demo**-...` |
+  | `geo_config` del paquete 1353 (`03_ddl_geo.sql:160-169`) | **UAT** |
+
+  **Lo que MANDA es lo que el Terraform crea, y eso salio medido en la salida
+  del apply**, no inferido:
+  ```
+  geo_bucket_name       = "stg-453645298399-rcncr-ws5-geo"
+  geo_redshift_role_arn = "arn:aws:iam::453645298399:role/BURoleFor-stg-453645298399-rcncr-ws5-redshift-geo"
+  ```
+  Corregidos los cuatro literales de `03_ddl_geo.sql` (el `INSERT` y los dos
+  `UPDATE` de reconciliacion). **La etiqueta `UAT` se queda**: es la llave con
+  la que `sp_geo_exportar_insumo.sql:124-128` agrupa los once parametros de ese
+  ambiente -- resuelve por `arcgis_account_id = CURRENT_AWS_ACCOUNT`, no por un
+  literal `DEMO` --, y cambiarla obligaria a mover las once filas sin ganar
+  nada.
+  **UNA HIPOTESIS MIA CAYO AQUI EL MISMO DIA:** del error del UNLOAD
+  (`BURoleFor-demo-...-redshift-unload`) deduje que el token real de la cuenta
+  era `demo` y lo recomende. Es **falso**: el que la IaC usa es `stg`. Deducir
+  un nombre de infraestructura del nombre de OTRO recurso es la misma clase de
+  error que tomar un numero del dominio vecino.
+  **Y QUEDA UNA PREGUNTA ABIERTA QUE NO HAY QUE DAR POR CERRADA:** si el rol
+  del UNLOAD sigue la misma convencion, se llamaria `BURoleFor-**stg**-...-redshift-unload`
+  y el que `nov_config` pide (`demo`) no existiria. Ese apply **no lo creo**
+  (`fw_emr_xacct_role_arn = ""`, y el plan fue `10 to add`, todos de GEO).
+  Hay que mirarlo en IAM antes de tocar `nov_config`.
+  **DE PASO CIERRA EL OTRO BLOQUEO:** el plan salio `10 to add, 0 to change`,
+  o sea que **el bucket GEO de esa cuenta NO existia** hasta ese apply. Es la
+  leccion de DEV otra vez -- un fallo con nombre propio tapando otro --: asociar
+  un rol no habria bastado, porque no habia donde escribir.
+
 **Y DE AHI SALIO LA SOLICITUD DE PRODUCCION (2026-11-19):**
 `dt/docs/PETICION_DATASHARE_PROD_SERVICENOW.md`, para ServiceNow. Pide el
 datashare `ds_dba_rncr_batch` con sus **nueve** relaciones, la asociacion
