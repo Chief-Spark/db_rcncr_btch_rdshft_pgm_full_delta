@@ -1571,6 +1571,28 @@ volumen.
   espejo. Lo unico que lo detecta es ejecutarlo contra el ambiente.
   Barrido hecho sobre el archivo entero: **es la UNICA sentencia que nombra
   columnas** de una tabla nuestra; las demas son `COUNT(*)`.
+- **UN INVENTARIO ESCRITO A MANO NO MIDE EL PAQUETE: HAY QUE DERIVARLO DE LOS
+  `CREATE`/`DROP`, Y SIMULANDO EL ORDEN DE `deploy.par` (2026-11-24).**
+  `99_validacion_inventario.sql` decia **273** objetos y el paquete deja
+  **279** (109 tablas + 34 vistas + 136 rutinas). Dos defectos, en las dos
+  direcciones:
+  - **sobraba uno**: `bdm_datos.relacion_persona_ubicacion` la crea
+    `01_ddl_ordenamiento.sql:30` y la BORRA `04_vistas_insumo_ordenamiento_edf_views.sql:71`,
+    sin re-crearla. Habria salido FALTANTE para siempre -- un rojo falso, que
+    es peor que no medir;
+  - **faltaban siete** tablas reales: `catalogo_divipola_cabecera`, los dos
+    `diccionario_*` de `bdm_datos`, `mock_cuenta`, `mock_comportamiento_cta`,
+    `mock_numeros` y `bdm_stage.relacion_persona_ubicacion`.
+  **Por eso el estado final solo se sabe simulando el despliegue**: un objeto
+  puede nacer en la entrada 18 y morir en la 23, y un `grep` de `CREATE` no lo
+  ve. Hoy la lista se genera recorriendo los cuatro paquetes en orden y
+  quedandose con el ultimo `CREATE`/`DROP` de cada nombre.
+- **Y EL BANCO ES MAS ESTRICTO QUE REDSHIFT EN LOS NOMBRES LARGOS: CUARTA FORMA
+  (las otras tres estan en `banco/README.md`).** PostgreSQL trunca los
+  identificadores a **63 bytes** y Redshift admite **127**, de modo que
+  `sp_unificacion_mock_r2_esc1_complemento_vacio_esc2_substring_complemento`
+  (72) y su hermano sin `mock` (67) salen **FALTANTE en el banco y existen en
+  Redshift**. No es un defecto del paquete: es el motor local recortando.
 - **Un literal mas largo que su columna es un `[REDSHIFT:112]`**, y
   `CREATE TABLE IF NOT EXISTS` lo esconde: si la tabla ya existe con la columna
   ancha de una version anterior, el `INSERT` pasa en DEV y falla en el primer
