@@ -1513,6 +1513,35 @@ volumen.
   **no castean** la puerta, la arrastran como texto; R3 es la primera que la
   convierte. Un dato nuevo revela el defecto en la primera etapa que lo toca,
   no en la que lo trae.
+- **`IF EXISTS` NO PROTEGE DEL TIPO EQUIVOCADO, Y ES SIMETRICO EN LAS DOS
+  DIRECCIONES (2026-11-24, despliegue manual a DEMO).** `DROP TABLE IF EXISTS`
+  sobre una VISTA da `42809: "x" is not a table / HINT: Use DROP VIEW`, y
+  `DROP VIEW IF EXISTS` sobre una TABLA da el espejo exacto. **`IF EXISTS` solo
+  calla el "no existe", nunca el "no es de ese tipo".** Medido en el banco, las
+  dos direcciones.
+  `04_vistas_insumo_ordenamiento_edf_views.sql:69-79` llevaba los dos juegos
+  --- cuatro `DROP TABLE` y cuatro `DROP VIEW` del MISMO nombre --- con un
+  comentario que solo contemplaba la mitad: *"DROP TABLE primero. Si el objeto
+  es TABLE, DROP VIEW falla"*. Cierto, y al reves tambien.
+  **La consecuencia es que ese archivo NO ERA IDEMPOTENTE**, que es lo que lo
+  hace grave: en un ambiente limpio la primera corrida no existe nada y los
+  nueve `DROP` son no-op; **la SEGUNDA los encuentra ya como VISTA y revienta
+  en el primer `DROP TABLE`**. Es justo el modo de fallo del doble DPLY de
+  Jenkins, y en DEV no se veia porque ahi siguen siendo TABLAS de una version
+  anterior.
+  **Arreglado quitando los cuatro `DROP TABLE`, no reordenando**: la auditoria
+  de las siete tablas muertas (1.219 -> 1.157) ya saco a `bdm_datos.insumo_*`
+  del paquete como TABLA, de modo que **hoy no hay un solo `CREATE TABLE` de
+  esos cuatro nombres en los cuatro paquetes** y su `DROP TABLE` solo podia
+  acertar en DEV y QA. Verificado con un barrido: la clase son exactamente esos
+  cuatro objetos y ningun otro.
+  **Y deja un latente en DEV/QA**: ahi siguen siendo TABLAS, asi que
+  `RevSQL/04_rollback_vistas_insumo_ordenamiento.sql:6-9`, que solo hace
+  `DROP VIEW`, fallaria con el espejo del error. No bloquea DEMO ni PROD.
+  **La regla que queda: un `DROP` idempotente de verdad en Redshift no existe
+  en DDL puro.** Si un nombre puede ser tabla o vista segun el ambiente, o se
+  decide el tipo de una vez y se borra el otro `DROP`, o hace falta leer
+  `pg_class.relkind` desde un procedimiento. Nunca los dos `DROP` seguidos.
 - **Un literal mas largo que su columna es un `[REDSHIFT:112]`**, y
   `CREATE TABLE IF NOT EXISTS` lo esconde: si la tabla ya existe con la columna
   ancha de una version anterior, el `INSERT` pasa en DEV y falla en el primer
