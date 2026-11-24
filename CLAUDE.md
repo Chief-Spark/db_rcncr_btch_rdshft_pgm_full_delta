@@ -2583,11 +2583,44 @@ en que se descubre.** Un archivo en el scratchpad no es un entregable.
   era `demo` y lo recomende. Es **falso**: el que la IaC usa es `stg`. Deducir
   un nombre de infraestructura del nombre de OTRO recurso es la misma clase de
   error que tomar un numero del dominio vecino.
-  **Y QUEDA UNA PREGUNTA ABIERTA QUE NO HAY QUE DAR POR CERRADA:** si el rol
-  del UNLOAD sigue la misma convencion, se llamaria `BURoleFor-**stg**-...-redshift-unload`
-  y el que `nov_config` pide (`demo`) no existiria. Ese apply **no lo creo**
-  (`fw_emr_xacct_role_arn = ""`, y el plan fue `10 to add`, todos de GEO).
-  Hay que mirarlo en IAM antes de tocar `nov_config`.
+  **~~Y QUEDA UNA PREGUNTA ABIERTA~~ CERRADA EL MISMO DIA, Y LA CONVENCION SE
+  CUMPLE: el rol del UNLOAD EXISTE y se llama con `stg`.** Lo que faltaba no
+  estaba en IAM a mano: estaba en **OTRO repo de IaC**, y ahi esta la trampa --
+  **son DOS Terraform distintos desplegando en la MISMA cuenta**, y mirar uno
+  solo hace concluir que el recurso no existe:
+
+  | Repo de Jenkins | Job | AppID | Que crea |
+  |---|---|---|---|
+  | `TF_RCNCR_WS5_INFRA` | DEMO/TERRAFORM **#7273** | 29197 | el bucket y el rol de **GEO** (`10 to add`) |
+  | `tf_rcncr_linea_ws5_infra` | DEMO/TERRAFORM **#7274** | 8519 | el **UNLOAD**/COPY, los buckets de triggers, staging y lotes, lambdas, Glue y Step Functions (**`135 added, 0 changed`**) |
+
+  Medido en la salida del **#7274**, no inferido:
+  ```
+  "redshift_unload"     = ".../BURoleFor-stg-453645298399-rcncr-ws5-redshift-unload"
+  "redshift_copy_xacct" = ".../BURoleFor-stg-453645298399-rcncr-ws5-redshift-copy-xacct"
+  s3_triggers_bucket    = "stg-453645298399-rcncr-ws5-triggers-reconocer-s3"
+  ```
+  **Y ERAN LOS DOS LITERALES DEMO DE `nov_config`, no uno:** pedia el rol
+  `BURoleFor-demo-...` **y** el bucket `demo-...-triggers-reconocer-s3`, y
+  **ninguno de los dos objetos existe**. Corregidos los dos en
+  `40_ddl_nov_config.sql` del paquete 1820 (strct, SLCOPRBA-1900). **Ahi basta
+  cambiar el literal**: su seed es idempotente por REEMPLAZO (`DELETE` +
+  `INSERT`), al contrario que `geo_config`, cuyo `INSERT` lleva
+  `WHERE NOT EXISTS` y necesita los `UPDATE` de reconciliacion.
+  **Barrido de la clase hecho en los seis repos:** no queda otro literal con el
+  token `demo`. El unico resto son los nombres inventados de
+  `03b_ddl_geo_mock.sql:136-137` (`rcncr-batch-geo-uat-...`), que **no muerden**
+  porque el mock lleva `s3_enabled = '0'` y nunca toca S3: deuda cosmetica.
+
+  **Y UNA DIVERGENCIA QUE DESTAPA EL BARRIDO Y HOY NADIE HA MEDIDO:** para la
+  **misma cuenta** `667397050561`, `geo_config` usa el token `test`
+  (`03_ddl_geo.sql:180-181`) y `nov_config` usa `qa`
+  (`40_ddl_nov_config.sql`). Uno de los dos esta mal y no se sabe cual: lo que
+  el job QA/DATABASE #196 midio es que **nuestro** resolver etiqueta QA como
+  `TEST`, no el token que usa la IaC -- el nombre de bucket que ese log imprime
+  era de nuestra propia siembra. **Se cierra como se cerro DEMO: con la salida
+  de un apply de la cuenta de QA**, no deduciendo. Mientras no se mida, el
+  UNLOAD en QA es el candidato a fallar igual que fallo en DEMO.
   **DE PASO CIERRA EL OTRO BLOQUEO:** el plan salio `10 to add, 0 to change`,
   o sea que **el bucket GEO de esa cuenta NO existia** hasta ese apply. Es la
   leccion de DEV otra vez -- un fallo con nombre propio tapando otro --: asociar
