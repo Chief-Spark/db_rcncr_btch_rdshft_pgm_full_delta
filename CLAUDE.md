@@ -1542,6 +1542,23 @@ volumen.
   en DDL puro.** Si un nombre puede ser tabla o vista segun el ambiente, o se
   decide el tipo de una vez y se borra el otro `DROP`, o hace falta leer
   `pg_class.relkind` desde un procedimiento. Nunca los dos `DROP` seguidos.
+- **`VALUES` COMO CONSTRUCTOR DE TABLA NO EXISTE EN REDSHIFT, Y ES EL QUINTO
+  PUNTO CIEGO DEL BANCO (2026-11-24, despliegue manual a DEMO).**
+  `WITH x (a,b) AS (VALUES ('p','q'), ...)` es sintaxis de PostgreSQL: el banco
+  lo ejecuta sin una queja y Redshift lo rechaza con
+  `42601: syntax error at or near "VALUES"`, senalando `LINE 2: VALUES`.
+  **Esa firma se lee mal:** el cliente reporta la linea donde EMPIEZA la
+  sentencia (la 314 en el caso real) y Redshift cuenta desde el principio de
+  esa sentencia, de modo que los dos numeros no cuadran y se busca en el sitio
+  equivocado. El `VALUES` real estaba en la linea **9**.
+  Lo pago `99_validacion_inventario.sql`, el inventario de los 273 objetos.
+  **La salida es `SELECT ... UNION ALL SELECT ...`**, con el `CAST` explicito
+  en la PRIMERA rama, que es la que fija el tipo del nodo -- trampa ya
+  documentada mas arriba. Es ademas la forma que el paquete ya usa y que esta
+  desplegada: la siembra de `nov_config` en `40_ddl_nov_config.sql:83-87`.
+  **Los otros cuatro puntos ciegos eran del MOTOR o del DATO; este es de
+  DIALECTO puro**, hermano de `DELTA` y del `RAISE`: SQL valido en PostgreSQL
+  que Redshift no tiene. `validar.sh` no lo caza hoy.
 - **Un literal mas largo que su columna es un `[REDSHIFT:112]`**, y
   `CREATE TABLE IF NOT EXISTS` lo esconde: si la tabla ya existe con la columna
   ancha de una version anterior, el `INSERT` pasa en DEV y falla en el primer
