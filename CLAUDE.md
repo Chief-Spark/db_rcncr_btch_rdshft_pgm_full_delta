@@ -1559,6 +1559,18 @@ volumen.
   **Los otros cuatro puntos ciegos eran del MOTOR o del DATO; este es de
   DIALECTO puro**, hermano de `DELTA` y del `RAISE`: SQL valido en PostgreSQL
   que Redshift no tiene. `validar.sh` no lo caza hoy.
+- **UN NOMBRE DE COLUMNA SE DERIVA DE SU DDL, IGUAL QUE UN NUMERO SE DERIVA DEL
+  LEGADO (2026-11-24).** `99_validacion_inventario.sql` leia
+  `nov_export_control.filas_totales` y la columna se llama **`registros_total`**
+  (`41_ddl_nov_export_control.sql`). Me lo invente en vez de abrir el DDL, que
+  es la misma clase de error que copiar el conteo del dominio vecino.
+  **Y lo que lo hace util anotarlo: ese archivo no lo ve NADIE de lo que
+  tenemos montado.** No esta en `deploy.par`, asi que el banco no lo compila, y
+  `validar.sh` no lo caza porque es un error semantico, no de sintaxis -- la
+  misma ceguera que ya se pago al anadir una columna al insumo real y no al
+  espejo. Lo unico que lo detecta es ejecutarlo contra el ambiente.
+  Barrido hecho sobre el archivo entero: **es la UNICA sentencia que nombra
+  columnas** de una tabla nuestra; las demas son `COUNT(*)`.
 - **Un literal mas largo que su columna es un `[REDSHIFT:112]`**, y
   `CREATE TABLE IF NOT EXISTS` lo esconde: si la tabla ya existe con la columna
   ancha de una version anterior, el `INSERT` pasa en DEV y falla en el primer
