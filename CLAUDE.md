@@ -2612,6 +2612,42 @@ en que se descubre.** Un archivo en el scratchpad no es un entregable.
   `03b_ddl_geo_mock.sql:136-137` (`rcncr-batch-geo-uat-...`), que **no muerden**
   porque el mock lleva `s3_enabled = '0'` y nunca toca S3: deuda cosmetica.
 
+  **Y EL TOKEN DE PRODUCCION ES `pro`, MEDIDO EN LOS DOS APPLY DEL 2026-11-25.**
+  Tercera cuenta seguida con CUATRO etiquetas, y la que manda vuelve a ser la de
+  los recursos: Jenkins la llama **PROD**, el alias de AWS es
+  `eec-aws-us-eits-reconocermaster-**prod**`, el tag `Environment` es **`prd`** y
+  lo que la IaC crea lleva **`pro`**.
+
+  | Apply en PROD | Resultado | Lo que dejo medido |
+  |---|---|---|
+  | `TF_RCNCR_WS5_INFRA` | `10 added` | `pro-696708350333-rcncr-ws5-geo` y `BURoleFor-pro-...-redshift-geo` |
+  | `tf_rcncr_linea_ws5_infra` | **`135 added`** | `BURoleFor-pro-...-redshift-unload`, `...-redshift-copy-xacct` y `pro-696708350333-rcncr-ws5-triggers-reconocer-s3` |
+
+  Corregidos los cuatro literales de PROD (`03_ddl_geo.sql` y
+  `40_ddl_nov_config.sql`). **Los dos del UNLOAD se habian puesto por inferencia
+  -- en DEMO los dos repos usaron el mismo token -- y el segundo apply los
+  confirmo exactos**, de modo que la inferencia era buena y ahora es medicion.
+
+  **Y EL SEGUNDO APPLY DEJA DOS COSAS QUE NO ESTABAN EN DEMO Y HAY QUE SABER:**
+
+  1. **El bucket de triggers va cifrado con KMS (`aws:kms`), no con AES256 como
+     el de GEO**, y creo su propia llave. Un `UNLOAD` contra un bucket con KMS
+     necesita `kms:GenerateDataKey` en la politica del rol: si falla, el sintoma
+     sera `AccessDenied` y el sitio a mirar es ese, no el nombre. La evidencia
+     de que el camino funciona es el export de DEMO en estado `completado`, que
+     salio sobre el mismo modulo.
+  2. **El bucket de triggers quedo con notificacion cableada**
+     (`aws_s3_bucket_notification.triggers`), de modo que **la cadena del
+     consumidor esta ARMADA en produccion**: lo que el `UNLOAD` escriba dispara
+     lambdas, Step Functions, Glue y la carga a DynamoDB. Deja de ser un
+     `UNLOAD` a un bucket inerte. Conviene que el CHG lo diga.
+
+  **Tres avisos de Wiz quedaron abiertos y el apply siguio igual**, pero son de
+  PRODUCCION y conviene no heredarlos en silencio: los tres buckets llevan
+  `disable_source_ip_check = true` (sin restriccion por IP de origen) y el rol
+  `redshift-copy-xacct` es cross-account **sin external ID ni MFA** (regla
+  IAM-057).
+
   **Y UNA DIVERGENCIA QUE DESTAPA EL BARRIDO Y HOY NADIE HA MEDIDO:** para la
   **misma cuenta** `667397050561`, `geo_config` usa el token `test`
   (`03_ddl_geo.sql:180-181`) y `nov_config` usa `qa`
