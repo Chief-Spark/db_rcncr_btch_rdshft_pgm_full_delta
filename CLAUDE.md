@@ -406,6 +406,25 @@ relacion por relacion.
 | job #458, error `42703` y no `XX000` | `xpm_bestidentifications` | el error es de columna, no de mascara |
 | `COUNT(*)` en DBeaver contra DEV | `xpm_bestaccounts`, `xpm_bestaccounts_val_frequentbehaviour` | **1.231.183** y **1.726.424** filas |
 
+**Y LAS 94 COLUMNAS QUE LEEMOS ESTAN VERIFICADAS CONTRA EL CATALOGO DE DEV
+(2026-11-27): 94 de 94 existen, cero faltan**, y las nueve se dejan ejecutar,
+de 699.626 a 1.730.942 filas. La consulta que lo comprueba, para repetirlo en
+QA, DEMO y PDN, es `dt/docs/datashare/verificar_campos_edf.sql`, y **se lanza en
+el CONSUMIDOR** -- nuestro cluster, donde el datashare se monta como
+`ds_dba_rncr_batch` --, nunca en el productor de EDF.
+
+**DOS COSAS QUE ESA MEDICION DEJO Y NO ESTABAN EN NINGUN SITIO:**
+
+1. **Leemos el 27% de lo que EDF publica: 94 columnas de 351.**
+   `xpm_bestaccounts` declara 94 y usamos 13. Es margen, no deuda: si hace
+   falta otra caracteristica, el dato probablemente ya esta y no hay que
+   pedirlo.
+2. **TODA columna de texto llega como `character varying(16383)`**, sin el
+   ancho de su dominio. **Eso convierte el defecto de `info_basica` en una
+   REGLA**: cualquier texto del datashare puede desbordar un destino mas
+   estrecho, los once `CAST` de `v_xpm_persona_basica` no son opcionales, y
+   toda columna nueva necesita el mismo trato.
+
 **El sintoma era real**: Redshift rechaza con
 `XX000: cross-cluster query of the masked relation "<rel>" is not supported`,
 y eso tumbo el job #453. Lo que fue falso tres veces fue el ALCANCE.
