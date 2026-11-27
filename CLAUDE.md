@@ -2063,12 +2063,24 @@ estaba portado.
 | El port | `pgm/sp_ordenamiento_cuentas_{edf,mock}.sql`, etapa `cuentas` de los dos ciclos |
 | Arquetipo | ARQ 99, banda `9990000`, cuatro segmentos |
 
-**EL CONTRATO REAL VA EN STUB DE CERO FILAS, Y ES DELIBERADO.**
-`v_xpm_cuenta` y `v_xpm_comportamiento_cta` se declaran contra
-`bdm_stage.mock_numeros WHERE 1 = 0`. Honra la decision ya escrita en
-`MAPEO_DESBLOQUEO_DATASHARE_ORDENAMIENTO.md:184-188` de no escribir contra
-`xpm_bestaccounts` hasta verificar su llave. Asi el espejo real existe, compila
-y declara las columnas, sin inventarse un mapeo que luego habria que deshacer.
+**~~EL CONTRATO REAL VA EN STUB DE CERO FILAS~~ FALSO DESDE EL 2026-10-21: LAS
+DOS VISTAS YA LEEN EL DATASHARE.** Esta nota decia que `v_xpm_cuenta` y
+`v_xpm_comportamiento_cta` se declaraban contra
+`bdm_stage.mock_numeros WHERE 1 = 0`, honrando la decision de
+`MAPEO_DESBLOQUEO_DATASHARE_ORDENAMIENTO.md:184-188` de no escribir sobre
+`xpm_bestaccounts` hasta verificar su llave. **La llave se verifico y las dos
+vistas se reescribieron**: hoy arrancan de
+`ds_dba_rncr_batch.edf_views.xpm_bestaccounts` y de
+`xpm_bestaccounts_val_frequentbehaviour`
+(`04_vistas_insumo_ordenamiento_edf_views.sql:262`, `:339`), y el propio
+encabezado del archivo lo dice -- *"ESTA VISTA DEVOLVIA CERO FILAS A PROPOSITO
+Y YA NO"*. No queda un solo `mock_numeros` en ese archivo.
+**La consecuencia que importa: la Fase 2 ya no es solo mock.** De los 94
+campos que el calculo lee del datashare, **19 son de cuentas** y entran por
+estas dos vistas. El catalogo completo, campo por campo y con la etapa que lo
+consume, esta en `dt/docs/datashare/CAMPOS_EDF_QUE_CONSUME_RECONOCER.md`.
+**Cuarta nota envejecida de esta bitacora**, y la misma moraleja: una seccion
+que afirma que algo esta bloqueado envejece peor que el codigo.
 
 **LA VENTANA DE 12 MESES ES POR CUENTA, NO GLOBAL.** El ancla es la
 `fecha_nov` de **cada** cuenta (`PRO_ORD_CTA_TOTALES_PERSONAS.sql:93`), de modo
